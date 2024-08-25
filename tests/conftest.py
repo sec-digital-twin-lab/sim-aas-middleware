@@ -122,7 +122,7 @@ def exec_only_node(extra_keystores, node):
 
 
 def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
-    org = 'cooling-singapore'
+    org = 'sec-digital-twin-lab'
     repo_name = 'saas-middleware'
     repo_url = f'https://github.com/{org}/{repo_name}'
     proc_name = 'example-processor'

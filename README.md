@@ -9,7 +9,7 @@ of a loosely-coupled federation of models.
 
 Clone this repository and install it using pip:
 ```shell
-git clone https://github.com/cooling-singapore/saas-middleware
+git clone https://github.com/sec-digital-twin-lab/saas-middleware
 pip install ./saas-middleware
 
 # install in dev mode
@@ -287,7 +287,7 @@ by the descriptor of the processor.
 Processors (i.e., their code) are expected to be made available by means of a Git repository
 (e.g., hosted on Github). Such a repository needs to provide two things: (1) a `processor.py` 
 file which contains the processor implementation and (2) a `descriptor.json` file which contains
-the descriptor of the processor. For an example of a repository, refer to the test processor [here](https://github.com/cooling-singapore/saas-processor-template).
+the descriptor of the processor. For an example of a repository, refer to the test processor [here](https://github.com/sec-digital-twin-lab/saas-processor-template).
 
 A processor descriptor specifies the name, input/output interfaces and the configurations that it can run in. It is structured as follows:
 ```json
@@ -374,11 +374,11 @@ functionality can be used for this purpose.
 
 Example:
 ```shell
-saas-cli dor --address 127.0.0.1:5001 add-gpp --url 'https://github.com/cooling-singapore/saas-processor-template' --commit-id '778bd12' --path 'processor_test'
+saas-cli dor --address 127.0.0.1:5001 add-gpp --url 'https://github.com/sec-digital-twin-lab/saas-processor-template' --commit-id '778bd12' --path 'processor_test'
 
 ? Select the keystore:  foo bar/foo.bar@email.com/bfckflp9zeezvqocolcu7f1g9grg20zw8mv5x8p7j9l7b0e4mahfqk9krwnc4wzv
 ? Enter password:  ****
-? Analyse repository at https://github.com/cooling-singapore/saas-processor-template to help with missing arguments?  Yes
+? Analyse repository at https://github.com/sec-digital-twin-lab/saas-processor-template to help with missing arguments?  Yes
 Cloning repository 'saas-processor-template' to '/home/foo.bar/.temp/saas-processor-template'...Done
 Checkout commit id 7a87928...Done
 Load processor descriptor at 'processor_test'...Done
@@ -411,7 +411,7 @@ GPP Data object added: {
             ]
         },
         "proc_path": "processor_test",
-        "source": "https://github.com/cooling-singapore/saas-processor-template"
+        "source": "https://github.com/sec-digital-twin-lab/saas-processor-template"
     },
     "obj_id": "4a96a57539ed211711686262ca443e29ebdd9a24f55a37f1a1795d3088a24184",
     "owner_iid": "bfckflp9zeezvqocolcu7f1g9grg20zw8mv5x8p7j9l7b0e4mahfqk9krwnc4wzv",

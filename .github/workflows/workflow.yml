@@ -29,7 +29,7 @@ jobs:
         run: >
           echo
           '{"github-credentials":[
-          {"repository":"https://github.com/cooling-singapore/duct-fom",
+          {"repository":"https://github.com/sec-digital-twin-lab/duct-fom",
           "login":"oauth",
           "personal_access_token":"${{ secrets.TEST_PROCESSOR_KEY }}"}
           ]}' > ~/.saas-credentials.json

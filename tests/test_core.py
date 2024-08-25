@@ -227,7 +227,7 @@ def test_add_get_object_key(temp_directory):
 
 
 def test_add_credentials(temp_directory):
-    url = 'https://github.com/cooling-singapore/saas-middleware'
+    url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
     login = 'johndoe'
     personal_access_token = 'token'
     host = '192.168.0.1'

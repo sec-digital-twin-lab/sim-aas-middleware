@@ -840,7 +840,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
@@ -1005,7 +1005,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
@@ -1808,7 +1808,7 @@ def test_find_open_port():
 
 
 def test_cli_builder_clone_repo(temp_dir, github_credentials):
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
     credentials = github_credentials.get(repo_url)
     repo_path = os.path.join(temp_dir, 'repository')
 
@@ -1838,7 +1838,7 @@ def test_cli_builder_build_image(docker_available, temp_dir, github_credentials)
         pytest.skip("Docker is not available")
 
     # clone the repository
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
     credentials = github_credentials.get(repo_url)
     repo_path = os.path.join(temp_dir, 'repository')
     clone_repository(repo_url, repo_path, commit_id=commit_id, credentials=credentials)
@@ -1877,7 +1877,7 @@ def test_cli_builder_export_image(docker_available, temp_dir, github_credentials
         assert True
 
     # clone the repository
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
     credentials = github_credentials.get(repo_url)
     repo_path = os.path.join(temp_dir, 'repository')
     clone_repository(repo_url, repo_path, commit_id=commit_id, credentials=credentials)
@@ -1899,7 +1899,7 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
@@ -1941,7 +1941,7 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/cooling-singapore/saas-middleware'
+    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {

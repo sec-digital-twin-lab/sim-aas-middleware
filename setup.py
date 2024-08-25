@@ -30,10 +30,10 @@ setup(
     },
     packages=find_packages(),
     include_package_data=True,
-    url='https://github.com/cooling-singapore/saas-middleware',
+    url='https://github.com/sec-digital-twin-lab/saas-middleware',
     project_urls={
-        'Source': 'https://github.com/cooling-singapore/saas-middleware',
-        'Tracker': 'https://github.com/cooling-singapore/saas-middleware/issues',
+        'Source': 'https://github.com/sec-digital-twin-lab/saas-middleware',
+        'Tracker': 'https://github.com/sec-digital-twin-lab/saas-middleware/issues',
     },
     license='MIT',
     description=_locals["__description__"],
