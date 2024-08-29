@@ -619,7 +619,9 @@ class JobRunner(CLICommand, ProgressListener):
                 self._job_status.state = JobStatus.State.SUCCESSFUL
                 self._store_job_status()
 
-                self._logger.info(f"end processing job at {self._wd_path} -> DONE")
+                msg = f"end processing job at {self._wd_path} -> DONE"
+                print(msg)
+                self._logger.info(msg)
                 self._write_exitcode(ExitCode.DONE)
 
         except SaaSRuntimeException as e:
@@ -628,7 +630,9 @@ class JobRunner(CLICommand, ProgressListener):
                 self._job_status.state = JobStatus.State.FAILED
                 self._store_job_status()
 
-            self._logger.error(f"end processing job at {self._wd_path} -> FAILED: {e.reason}")
+            msg = f"end processing job at {self._wd_path} -> FAILED: {e.reason}"
+            print(msg)
+            self._logger.error(msg)
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
@@ -637,5 +641,7 @@ class JobRunner(CLICommand, ProgressListener):
                 self._job_status.state = JobStatus.State.FAILED
                 self._store_job_status()
 
-            self._logger.error(f"end processing job at {self._wd_path} -> FAILED: {e}")
+            msg = f"end processing job at {self._wd_path} -> FAILED: {e}"
+            print(msg)
+            self._logger.error(msg)
             self._write_exitcode(ExitCode.ERROR, e)

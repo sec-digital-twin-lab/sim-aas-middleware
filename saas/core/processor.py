@@ -2,6 +2,7 @@ import abc
 import inspect
 import logging
 import os
+import sys
 import threading
 from importlib.util import spec_from_file_location, module_from_spec
 
@@ -184,8 +185,9 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
     :param search_path: the path to search for processors.
     :return: a dictionary that maps name of the processor to its implementation class.
     """
-    result = {}
+    sys.path.append(search_path)
 
+    result = {}
     for root, dirs, files in os.walk(search_path):
         for file in files:
             if file == "processor.py":
