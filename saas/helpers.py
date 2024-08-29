@@ -60,7 +60,13 @@ def find_available_port(host: str = 'localhost', port_range: (int, int) = (6000,
 
 def docker_find_image(image_name: str) -> List[Image]:
     client = docker.from_env()
-    return [image for image in client.images.list() if image_name in image.tags]
+    available: List[Image] = client.images.list()
+    result: List[Image] = []
+    for image in available:
+        for tag in image.tags:
+            if image_name in tag:
+                result.append(image)
+    return result
 
 
 def docker_delete_image(image_name: str) -> None:
