@@ -11,7 +11,8 @@ from saas.core.helpers import get_timestamp_now, read_json_from_file, validate_j
 from saas.core.keystore import Keystore
 from saas.core.logging import Logging
 from saas.core.schemas import SSHCredentials, GithubCredentials
-from saas.node import Node
+from saas.node.base import Node
+from saas.node.default import DefaultNode
 
 logger = Logging.get('tests.base_testcase')
 
@@ -244,12 +245,11 @@ class TestContext:
         os.makedirs(storage_path, exist_ok=True)
 
         # create node and startup services
-        node = Node(keystore, storage_path)
-        node.startup(p2p_address, enable_dor=use_dor, enable_rti=use_rti,
-                     rest_address=rest_address if enable_rest else None,
-                     retain_job_history=retain_job_history if use_rti else None,
-                     strict_deployment=strict_deployment if use_rti else None,
-                     job_concurrency=job_concurrency if use_rti else None)
+        node = DefaultNode(keystore, storage_path, enable_db=True, enable_dor=use_dor, enable_rti=use_rti,
+                           retain_job_history=retain_job_history if use_rti else None,
+                           strict_deployment=strict_deployment if use_rti else None,
+                           job_concurrency=job_concurrency if use_rti else None)
+        node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
 
         self.nodes[name] = node
 
@@ -276,11 +276,11 @@ class TestContext:
                     break
 
             # create node and startup services
-            node = Node(keystore, storage_path)
-            node.startup(p2p_address, enable_dor=use_dor, enable_rti=use_rti,
-                         rest_address=rest_address if enable_rest else None,
-                         retain_job_history=retain_job_history if use_rti else None,
-                         strict_deployment=strict_deployment if use_rti else None)
+            node = DefaultNode(keystore, storage_path, enable_db=True, enable_dor=use_dor, enable_rti=use_rti,
+                               retain_job_history=retain_job_history if use_rti else None,
+                               strict_deployment=strict_deployment if use_rti else None,
+                               job_concurrency=False)
+            node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
 
             self.nodes[name] = node
             return node

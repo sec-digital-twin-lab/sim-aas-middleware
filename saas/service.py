@@ -11,7 +11,7 @@ from saas.cli.helpers import CLIParser, Argument, CLICommand, default_if_missing
 from saas.core.exceptions import SaaSRuntimeException
 from saas.core.keystore import Keystore
 from saas.helpers import determine_default_rest_address, determine_default_p2p_address
-from saas.node import Node
+from saas.node.default import DefaultNode
 
 
 class RunNode(CLICommand):
@@ -89,16 +89,17 @@ class RunNode(CLICommand):
 
         # create a node instance
         try:
-            node = Node.create(keystore, args['datastore'],
-                               p2p_address=p2p_service_address,
-                               rest_address=rest_service_address,
-                               boot_node_address=boot_node_address,
-                               enable_dor=args['type'] == 'full' or args['type'] == 'storage',
-                               enable_rti=args['type'] == 'full' or args['type'] == 'execution',
-                               retain_job_history=args['retain-job-history'],
-                               strict_deployment=args['strict-deployment'],
-                               bind_all_address=args['bind-all-address'],
-                               job_concurrency=args['job-concurrency'])
+            node = DefaultNode.create(keystore, args['datastore'],
+                                      p2p_address=p2p_service_address,
+                                      rest_address=rest_service_address,
+                                      boot_node_address=boot_node_address,
+                                      bind_all_address=args['bind-all-address'],
+                                      enable_db=True,
+                                      enable_dor=args['type'] == 'full' or args['type'] == 'storage',
+                                      enable_rti=args['type'] == 'full' or args['type'] == 'execution',
+                                      retain_job_history=args['retain-job-history'],
+                                      strict_deployment=args['strict-deployment'],
+                                      job_concurrency=args['job-concurrency'])
 
         except SaaSRuntimeException as e:
             raise CLIRuntimeError(f"Could not start node because '{e.reason}'. Aborting.")

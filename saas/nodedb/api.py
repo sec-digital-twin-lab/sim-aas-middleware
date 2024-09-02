@@ -51,6 +51,13 @@ class NodeDBService(abc.ABC):
         """
 
     @abc.abstractmethod
+    def update_network(self, node: NodeInfo) -> None:
+        """
+        Adds information about a node to the db. If there is already information about this node in the database, the
+        db is updated accordingly.
+        """
+
+    @abc.abstractmethod
     def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
         """
         Retrieves the identity given its id (if the node db knows about it).

@@ -38,7 +38,7 @@ class DataObjectRepositoryP2PProtocol(P2PProtocol):
     id = "data_object_repository"
 
     def __init__(self, args: Union[Any, Union[Identity, str]]) -> None:
-        from saas.node import Node
+        from saas.node.base import Node
         if isinstance(args, Node):
             self._node: Node = args
             super().__init__(self._node.identity, self._node.datastore, DataObjectRepositoryP2PProtocol.id, [

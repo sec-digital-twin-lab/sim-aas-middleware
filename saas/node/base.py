@@ -1,37 +1,27 @@
-from __future__ import annotations
-
-import os
+import abc
+import threading
 import time
-from threading import Lock
 from typing import Optional
 
 from saas.dor.api import DORService
-from saas.dor.service import DefaultDORService
-from saas.meta import __version__
-
 from saas.core.helpers import get_timestamp_now
 from saas.core.identity import Identity
 from saas.core.keystore import Keystore
 from saas.core.logging import Logging
 from saas.nodedb.api import NodeDBService
 from saas.nodedb.schemas import NodeInfo
-from saas.nodedb.service import DefaultNodeDBService
 from saas.p2p.exceptions import P2PException, BootNodeUnavailableError
 from saas.p2p.service import P2PService
 from saas.rest.service import RESTService
 from saas.rti.api import RTIService
-from saas.rti.service import DefaultRTIService
+from saas.meta import __version__
 
-logger = Logging.get('node')
+logger = Logging.get('node.base')
 
 
-class Node:
-    def __init__(self, keystore: Keystore, datastore_path: str) -> None:
-        # create datastore (if it doesn't already exist)
-        os.makedirs(datastore_path, exist_ok=True)
-
-        self._mutex = Lock()
-        self._datastore_path = datastore_path
+class Node(abc.ABC):
+    def __init__(self, keystore: Keystore) -> None:
+        self._mutex = threading.Lock()
         self._keystore = keystore
         self.p2p: Optional[P2PService] = None
         self.rest: Optional[RESTService] = None
@@ -48,10 +38,6 @@ class Node:
         return self._keystore.identity
 
     @property
-    def datastore(self) -> str:
-        return self._datastore_path
-
-    @property
     def info(self) -> NodeInfo:
         return NodeInfo(
             identity=self.identity,
@@ -65,39 +51,28 @@ class Node:
             job_concurrency=self.rti.job_concurrency if self.rti else None
         )
 
-    def startup(self, server_address: (str, int), enable_dor: bool, enable_rti: bool, enable_db: bool = True,
-                rest_address: (str, int) = None, boot_node_address: (str, int) = None,
-                retain_job_history: bool = False, strict_deployment: bool = True,
-                bind_all_address: bool = False, job_concurrency: bool = False) -> None:
+    def startup(self, p2p_address: (str, int), rest_address: (str, int) = None,
+                boot_node_address: (str, int) = None, bind_all_address: bool = False) -> None:
 
-        logger.info(f"saas-middleware {__version__}")
+        logger.info(f"sim-aas-middleware {__version__}")
 
         logger.info("starting P2P service.")
-        self.p2p = P2PService(self, server_address, bind_all_address)
+        self.p2p = P2PService(self, p2p_address, bind_all_address)
         self.p2p.start_service()
 
         endpoints = []
-        if enable_db:
-            db_path = f"sqlite:///{os.path.join(self._datastore_path, 'node.db')}"
-            logger.info(f"enabling NodeDB service using {db_path}.")
-            self.db = DefaultNodeDBService(self, db_path)
+        if self.db:
+            logger.info(f"enabling NodeDB service.")
             self.p2p.add(self.db.protocol)
             endpoints += self.db.endpoints()
 
-        if enable_dor:
-            db_path = f"sqlite:///{os.path.join(self._datastore_path, 'dor.db')}"
-            logger.info(f"enabling DOR service using {db_path}.")
-            self.dor = DefaultDORService(self, db_path)
+        if self.dor:
+            logger.info(f"enabling DOR service.")
             self.p2p.add(self.dor.protocol)
             endpoints += self.dor.endpoints()
 
-        if enable_rti:
-            db_path = f"sqlite:///{os.path.join(self._datastore_path, 'rti.db')}"
-            self.rti = DefaultRTIService(self, db_path,
-                                         retain_job_history=retain_job_history,
-                                         strict_deployment=strict_deployment,
-                                         job_concurrency=job_concurrency)
-            logger.info(f"enabling RTI service using {db_path}.")
+        if self.rti:
+            logger.info(f"enabling RTI service.")
             endpoints += self.rti.endpoints()
 
         if rest_address is not None:
@@ -115,9 +90,9 @@ class Node:
             rti_service=self.rti is not None,
             p2p_address=self.p2p.address(),
             rest_address=self.rest.address() if self.rest else None,
-            retain_job_history=retain_job_history if enable_rti else None,
-            strict_deployment=strict_deployment if enable_rti else None,
-            job_concurrency=job_concurrency
+            retain_job_history=self.rti.retain_job_history if self.rti else None,
+            strict_deployment=self.rti.strict_deployment if self.rti else None,
+            job_concurrency=self.rti.job_concurrency if self.rti else None
         ))
 
         # join an existing network of nodes?
@@ -176,19 +151,3 @@ class Node:
                 self.db.protocol.broadcast_identity_update(identity)
 
             return identity
-
-    @classmethod
-    def create(cls, keystore: Keystore, storage_path: str, p2p_address: (str, int),
-               boot_node_address: (str, int) = None, rest_address: (str, int) = None,
-               enable_dor: bool = False, enable_rti: bool = False, retain_job_history: bool = False,
-               strict_deployment: bool = True, bind_all_address: bool = False, job_concurrency: bool = False) -> Node:
-
-        node = Node(keystore, storage_path)
-        node.startup(p2p_address, enable_dor=enable_dor, enable_rti=enable_rti,
-                     rest_address=rest_address, boot_node_address=boot_node_address,
-                     retain_job_history=retain_job_history,
-                     strict_deployment=strict_deployment,
-                     bind_all_address=bind_all_address,
-                     job_concurrency=job_concurrency)
-
-        return node

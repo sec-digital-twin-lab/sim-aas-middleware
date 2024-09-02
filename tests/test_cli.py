@@ -30,7 +30,7 @@ from saas.core.logging import Logging
 from saas.dor.api import DORProxy
 from saas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
 from saas.helpers import find_available_port, docker_export_image
-from saas.node import Node
+from saas.node.base import Node
 from saas.rti.api import JobRESTProxy
 from saas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from saas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
