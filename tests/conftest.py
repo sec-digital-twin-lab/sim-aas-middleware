@@ -9,12 +9,12 @@ import pytest
 
 from saas.cli.cmd_proc_builder import clone_repository
 from saas.core.keystore import Keystore
-from saas.dor.proxy import DORProxy
+from saas.dor.api import DORProxy
 from saas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject
 from saas.helpers import determine_local_ip
 from saas.node import Node, logger
-from saas.nodedb.proxy import NodeDBProxy
-from saas.rti.proxy import RTIProxy
+from saas.nodedb.api import NodeDBProxy
+from saas.rti.api import RTIProxy
 from saas.rti.schemas import Processor
 from tests.base_testcase import TestContext, update_keystore_from_credentials, PortMaster
 

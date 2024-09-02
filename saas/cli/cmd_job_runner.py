@@ -16,15 +16,15 @@ from saas.core.exceptions import SaaSRuntimeException
 from saas.core.helpers import validate_json, hash_json_object
 from saas.core.identity import Identity
 from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.dor.protocol import DataObjectRepositoryP2PProtocol
-from saas.dor.proxy import DORProxy
 from saas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 from saas.rest.exceptions import UnsuccessfulRequestError
+from saas.rti.api import RTIProxy, JOB_ENDPOINT_PREFIX
 from saas.rti.exceptions import UnresolvedInputDataObjectsError, AccessNotPermittedError, MissingUserSignatureError, \
     InputDataObjectMissing, MismatchingDataTypeOrFormatError, InvalidJSONDataObjectError, \
     DataObjectOwnerNotFoundError, DataObjectContentNotFoundError
-from saas.rti.proxy import JOB_ENDPOINT_PREFIX, RTIProxy
 from saas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Task, Job
 from saas.core.processor import find_processors, ProcessorBase, ProgressListener
 

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import os
 import socket
@@ -22,13 +20,10 @@ from saas.core.identity import Identity
 from saas.core.logging import Logging
 from saas.dor.protocol import DataObjectRepositoryP2PProtocol
 from saas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container
-from saas.rest.auth import VerifyAuthorisation, VerifyProcessorDeployed, VerifyUserIsNodeOwner, \
-    VerifyUserIsJobOwnerOrNodeOwner, VerifyProcessorNotBusy
+from saas.rti.api import RTIService, JobRESTProxy
 from saas.rti.exceptions import RTIException, ProcessorNotDeployedError
-from saas.rti.proxy import RTI_ENDPOINT_PREFIX, JobRESTProxy
 from saas.rti.schemas import Processor, Job, Task, JobStatus
 from saas.dor.schemas import GitProcessorPointer
-from saas.rest.schemas import EndpointDefinition
 
 logger = Logging.get('rti.service')
 
@@ -68,15 +63,15 @@ def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str
         logger.error(e)
 
 
-class RTIService:
+class DefaultRTIService(RTIService):
     def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True,
                  job_concurrency: bool = True):
+        super().__init__(retain_job_history=retain_job_history, strict_deployment=strict_deployment,
+                         job_concurrency=job_concurrency)
+
         # initialise properties
         self._mutex = Lock()
         self._node = node
-        self._retain_job_history = retain_job_history
-        self._strict_deployment = strict_deployment
-        self._job_concurrency = job_concurrency
         self._port_range = (6000, 9000)
         self._most_recent_port = None
 
@@ -94,63 +89,11 @@ class RTIService:
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
 
-    @property
-    def retain_job_history(self) -> bool:
-        return self._retain_job_history
-
-    @property
-    def strict_deployment(self) -> bool:
-        return self._strict_deployment
-
-    @property
-    def job_concurrency(self) -> bool:
-        return self._job_concurrency
-
     def job_descriptor_path(self, job_id: str) -> str:
         return os.path.join(self._jobs_path, job_id, 'job_descriptor.json')
 
     def job_status_path(self, job_id: str) -> str:
         return os.path.join(self._jobs_path, job_id, 'job_status.json')
-
-    def endpoints(self) -> List[EndpointDefinition]:
-        return [
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc',
-                               self.get_all_procs, List[Processor], None),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.get_proc, Processor, [VerifyProcessorDeployed]),
-
-            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.deploy, Processor,
-                               [VerifyUserIsNodeOwner] if self._strict_deployment else []),
-
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.undeploy, Processor,
-                               [VerifyProcessorDeployed, VerifyProcessorNotBusy, VerifyUserIsNodeOwner] if
-                               self._strict_deployment else [VerifyProcessorDeployed, VerifyProcessorNotBusy]),
-
-            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs',
-                               self.submit, Job, [VerifyProcessorDeployed, VerifyProcessorNotBusy,
-                                                  VerifyAuthorisation]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs',
-                               self.jobs_by_proc, List[Job], [VerifyProcessorDeployed]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job',
-                               self.jobs_by_user, List[Job], [VerifyAuthorisation]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status',
-                               self.get_job_status, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-
-            EndpointDefinition('PUT', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status',
-                               self.update_job_status, None, None),
-
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel',
-                               self.job_cancel, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge',
-                               self.job_purge, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-        ]
 
     def _perform_deployment(self, proc: Processor) -> None:
         try:

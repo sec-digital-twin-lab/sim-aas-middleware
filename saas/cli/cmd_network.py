@@ -6,7 +6,7 @@ from tabulate import tabulate
 from saas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, extract_address
 from saas.core.logging import Logging
 from saas.helpers import determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
 

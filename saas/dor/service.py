@@ -16,17 +16,15 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy_json import NestedMutableJson
 
 from saas.core.helpers import hash_string_object, hash_json_object
+from saas.dor.api import DORService, DORProxy
 from saas.dor.exceptions import DataObjectContentNotFoundError, DataObjectNotFoundError, DORException
-from saas.dor.proxy import DORProxy, DOR_ENDPOINT_PREFIX
 from saas.core.helpers import get_timestamp_now, generate_random_string
 from saas.core.logging import Logging
 from saas.nodedb.exceptions import IdentityNotFoundError
 from saas.dor.protocol import DataObjectRepositoryP2PProtocol
 from saas.nodedb.schemas import NodeInfo
-from saas.rest.auth import VerifyIsOwner, VerifyUserHasAccess
 from saas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
     SearchParameters, AddDataObjectParameters
-from saas.rest.schemas import EndpointDefinition
 
 logger = Logging.get('dor.service')
 
@@ -129,7 +127,7 @@ class DataObjectProvenanceRecord(Base):
     provenance = Column(NestedMutableJson, nullable=False)
 
 
-class DORService:
+class DefaultDORService(DORService):
     def __init__(self, node, db_path: str):
         # initialise properties
         self._db_mutex = Lock()
@@ -257,45 +255,6 @@ class DORService:
         )
 
         return provenance
-
-    def endpoints(self) -> List[EndpointDefinition]:
-        return [
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '',
-                               self.search, List[DataObject], None),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, 'statistics',
-                               self.statistics, DORStatistics, None),
-
-            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, 'add',
-                               self.add, DataObject, None),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}',
-                               self.remove, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/meta',
-                               self.get_meta, Optional[DataObject], None),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/content',
-                               self.get_content, None, [VerifyUserHasAccess]),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{c_hash}/provenance',
-                               self.get_provenance, Optional[DataObjectProvenance], None),
-
-            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}',
-                               self.grant_access, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}',
-                               self.revoke_access, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/owner/{new_owner_iid}',
-                               self.transfer_ownership, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/tags',
-                               self.update_tags, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/tags',
-                               self.remove_tags, DataObject, [VerifyIsOwner])
-        ]
 
     def search(self, p: SearchParameters) -> List[DataObject]:
         """

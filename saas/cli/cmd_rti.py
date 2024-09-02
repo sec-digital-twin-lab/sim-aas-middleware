@@ -13,12 +13,12 @@ from saas.cli.exceptions import CLIRuntimeError
 from saas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, prompt_for_selection, \
     get_nodes_by_service, prompt_for_confirmation, load_keystore, extract_address, label_data_object, shorten_id, \
     label_identity
-from saas.dor.proxy import DORProxy
 from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.helpers import determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 from saas.rest.exceptions import UnsuccessfulRequestError
-from saas.rti.proxy import RTIProxy
+from saas.rti.api import RTIProxy
 from saas.rti.schemas import Processor, Task, JobStatus, Job
 from saas.dor.schemas import ProcessorDescriptor, DataObject
 

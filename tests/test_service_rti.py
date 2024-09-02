@@ -12,13 +12,13 @@ import pytest
 
 from saas.core.helpers import generate_random_string
 from saas.core.keystore import Keystore
-from saas.dor.proxy import DORProxy
 from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.dor.schemas import DataObject
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 from saas.nodedb.schemas import NodeInfo
 from saas.rest.exceptions import UnsuccessfulRequestError
-from saas.rti.proxy import RTIProxy
+from saas.rti.api import RTIProxy
 from saas.rti.schemas import Task, JobStatus, Processor
 from tests.base_testcase import update_keystore_from_credentials
 from tests.conftest import add_test_processor

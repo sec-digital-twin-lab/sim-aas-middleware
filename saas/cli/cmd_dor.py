@@ -11,12 +11,12 @@ from saas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for
     get_nodes_by_service, extract_address, prompt_for_identity_selection, prompt_for_data_objects, \
     deserialise_tag_value, label_data_object, shorten_id, label_identity
 from saas.core.helpers import encrypt_file
-from saas.dor.proxy import DORProxy
 from saas.core.identity import Identity
 from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.helpers import determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
 from saas.dor.schemas import DataObject
+from saas.nodedb.api import NodeDBProxy
 from saas.rest.exceptions import UnsuccessfulRequestError
 
 logger = Logging.get('cli')
