@@ -12,10 +12,10 @@ from saas.cli.exceptions import CLIRuntimeError
 from saas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
     default_if_missing
 from saas.core.logging import Logging
-from saas.dor.proxy import DORProxy
+from saas.dor.api import DORProxy
 from saas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from saas.helpers import docker_export_image, determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
 

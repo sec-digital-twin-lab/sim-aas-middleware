@@ -15,7 +15,7 @@ from saas.core.schemas import GithubCredentials, SSHCredentials, KeystoreContent
 from saas.core.keystore import Keystore
 from saas.core.logging import Logging
 from saas.helpers import determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
+from saas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
 

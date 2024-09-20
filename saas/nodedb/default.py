@@ -7,11 +7,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from saas.core.helpers import get_timestamp_now
 from saas.core.identity import Identity
 from saas.core.logging import Logging
+from saas.nodedb.api import NodeDBService
 from saas.nodedb.exceptions import InvalidIdentityError, IdentityNotFoundError
 from saas.nodedb.protocol import NodeDBP2PProtocol, NodeDBSnapshot
-from saas.nodedb.proxy import DB_ENDPOINT_PREFIX
 from saas.nodedb.schemas import NodeInfo
-from saas.rest.schemas import EndpointDefinition
 
 logger = Logging.get('nodedb.service')
 
@@ -43,38 +42,17 @@ class IdentityRecord(Base):
     last_seen = Column(BigInteger, nullable=False)
 
 
-class NodeDBService:
+class DefaultNodeDBService(NodeDBService):
     def __init__(self, node, db_path: str):
+        super().__init__(NodeDBP2PProtocol(node))
+
         # initialise properties
         self._node = node
-        self._protocol = NodeDBP2PProtocol(node)
 
         # initialise database things
         self._engine = create_engine(db_path)
         Base.metadata.create_all(self._engine)
         self._Session = sessionmaker(bind=self._engine)
-
-    @property
-    def protocol(self) -> NodeDBP2PProtocol:
-        return self._protocol
-
-    def endpoints(self) -> List[EndpointDefinition]:
-        return [
-            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'node',
-                               self.get_node, NodeInfo, None),
-
-            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'network',
-                               self.get_network, List[NodeInfo], None),
-
-            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'identity/{iid}',
-                               self.get_identity, Optional[Identity], None),
-
-            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'identity',
-                               self.get_identities, List[Identity], None),
-
-            EndpointDefinition('POST', DB_ENDPOINT_PREFIX, 'identity',
-                               self.update_identity, Identity, None),
-        ]
 
     def get_node(self) -> NodeInfo:
         """

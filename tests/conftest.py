@@ -9,12 +9,13 @@ import pytest
 
 from saas.cli.cmd_proc_builder import clone_repository
 from saas.core.keystore import Keystore
-from saas.dor.proxy import DORProxy
+from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject
 from saas.helpers import determine_local_ip
-from saas.node import Node, logger
-from saas.nodedb.proxy import NodeDBProxy
-from saas.rti.proxy import RTIProxy
+from saas.node.default import DefaultNode
+from saas.nodedb.api import NodeDBProxy
+from saas.rti.api import RTIProxy
 from saas.rti.schemas import Processor
 from tests.base_testcase import TestContext, update_keystore_from_credentials, PortMaster
 
@@ -23,6 +24,7 @@ ssh_key_path = os.path.join(os.environ['HOME'], 'Desktop', 'OneDrive', 'operatio
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
+logger = Logging.get('tests.conftest')
 
 
 @pytest.fixture(scope='session')
@@ -91,10 +93,12 @@ def node(keystore):
         rest_address = PortMaster.generate_rest_address(host=local_ip)
         p2p_address = PortMaster.generate_p2p_address(host=local_ip)
 
-        _node = Node.create(keystore=keystore, storage_path=tempdir,
-                            p2p_address=p2p_address, boot_node_address=p2p_address, rest_address=rest_address,
-                            enable_dor=True, enable_rti=True, strict_deployment=False, job_concurrency=True,
-                            retain_job_history=True)
+        _node = DefaultNode.create(
+            keystore=keystore, storage_path=tempdir,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            enable_db=True, enable_dor=True, enable_rti=True,
+            retain_job_history=True, strict_deployment=False, job_concurrency=True
+        )
 
         yield _node
 
@@ -108,10 +112,12 @@ def exec_only_node(extra_keystores, node):
         rest_address = PortMaster.generate_rest_address(host=local_ip)
         p2p_address = PortMaster.generate_p2p_address(host=local_ip)
 
-        _node = Node.create(keystore=extra_keystores[1], storage_path=tempdir,
-                            p2p_address=p2p_address, boot_node_address=p2p_address, rest_address=rest_address,
-                            enable_dor=False, enable_rti=True, strict_deployment=False, job_concurrency=True,
-                            retain_job_history=True)
+        _node = DefaultNode.create(
+            keystore=extra_keystores[1], storage_path=tempdir,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            enable_db=True, enable_dor=False, enable_rti=True,
+            retain_job_history=True, strict_deployment=False, job_concurrency=True
+        )
 
         #  make exec-only node known to node
         _node.join_network(node.p2p.address())

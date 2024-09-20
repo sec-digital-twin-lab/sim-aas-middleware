@@ -11,7 +11,7 @@ from saas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_for
 from saas.core.exceptions import SaaSRuntimeException
 from saas.core.logging import Logging
 from saas.helpers import determine_default_rest_address, determine_default_p2p_address
-from saas.node import Node
+from saas.node.base import Node
 
 logger = Logging.get('cli')
 

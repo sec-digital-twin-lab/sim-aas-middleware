@@ -16,13 +16,13 @@ from pydantic import ValidationError
 
 from saas.cli.exceptions import CLIRuntimeError
 from saas.core.exceptions import SaaSRuntimeException
-from saas.dor.proxy import DORProxy
 from saas.core.identity import Identity
 from saas.core.keystore import Keystore
 from saas.core.logging import Logging
+from saas.dor.api import DORProxy
 from saas.helpers import determine_default_rest_address
-from saas.nodedb.proxy import NodeDBProxy
 from saas.dor.schemas import DataObject
+from saas.nodedb.api import NodeDBProxy
 from saas.nodedb.schemas import NodeInfo
 from saas.core.schemas import KeystoreContent
 from saas.rest.exceptions import UnsuccessfulRequestError

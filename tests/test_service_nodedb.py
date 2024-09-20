@@ -8,8 +8,8 @@ import pytest
 from saas.core.identity import Identity
 from saas.core.keystore import Keystore
 from saas.core.logging import Logging
-from saas.node import Node
-from saas.nodedb.proxy import NodeDBProxy
+from saas.node.default import DefaultNode
+from saas.nodedb.api import NodeDBProxy
 from tests.base_testcase import PortMaster
 
 Logging.initialise(level=logging.DEBUG)
@@ -140,8 +140,9 @@ def test_different_address(test_context, node, node_db_proxy):
         n_nodes = len(network)
 
         # manually create a node on a certain address and make it known to the node
-        node0 = Node(keystores[0], os.path.join(test_context.testing_dir, 'node0'))
-        node0.startup(p2p_address, enable_dor=False, enable_rti=False, rest_address=None)
+        node0 = DefaultNode(keystores[0], os.path.join(test_context.testing_dir, 'node0'),
+                            enable_db=True, enable_dor=False, enable_rti=False)
+        node0.startup(p2p_address, rest_address=None)
 
         # at this point node0 should only know about itself
         network = node0.db.get_network()
@@ -171,8 +172,9 @@ def test_different_address(test_context, node, node_db_proxy):
         assert (node0.identity.id in network)
 
         # manually create another node, using the same address but a different keystore
-        node1 = Node(keystores[1], os.path.join(test_context.testing_dir, 'node1'))
-        node1.startup(p2p_address, enable_dor=False, enable_rti=False, rest_address=None)
+        node1 = DefaultNode(keystores[1], os.path.join(test_context.testing_dir, 'node1'),
+                            enable_db=True, enable_dor=False, enable_rti=False)
+        node1.startup(p2p_address, rest_address=None)
 
         # at this point node1 should only know about itself
         network = node1.db.get_network()
