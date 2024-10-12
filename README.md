@@ -570,12 +570,12 @@ Before interacting with SaaS nodes, it is __required__ for the user to create a 
 
 The keystore contains the Identity of a user which consists of an ID, name, email and a set of key pairs (public/private pair used for cryptographic operations). Besides an identity, the keystore can also store information in the form of assets. The contents in the keystore would then be encrypted with the help of a password provided by the user.
 
-This package provides a module `saas.core.keystore` with a `Keystore` class to create such a keystore. Examples of assets that the keystore supports can be found in `saas.core.assets`. The way SaaS handles key pairs and cryptographic operations (encryption and hashing) can be found in `KeyPair` classes `saas.core.eckeypair.ECKeyPair` and `saas.core.rsakeypair.RSAKeyPair`.
+This package provides a module `simaas.core.keystore` with a `Keystore` class to create such a keystore. Examples of assets that the keystore supports can be found in `simaas.core.assets`. The way SaaS handles key pairs and cryptographic operations (encryption and hashing) can be found in `KeyPair` classes `simaas.core.eckeypair.ECKeyPair` and `simaas.core.rsakeypair.RSAKeyPair`.
 
 Example of creating a Keystore:
 ```python
-from saas.core.keystore import Keystore
-from saas.core.schemas import GithubCredentials,
+from simaas.core.keystore import Keystore
+from simaas.core.schemas import GithubCredentials,
 
 # Create the keystore in provided path (defaults to $HOME/.keystore)
 keystore = Keystore.create(keystore_path, name, email, password)
@@ -594,7 +594,7 @@ keystore.github_credentials.update(
 ### API 
 SaaS node uses REST as its main form of communication via a HTTP API interface.
 
-Sending HTTP requests to SaaS nodes are abstracted into functions. These functions are grouped into classes based on the three main services SaaS node provides i.e. __NodeDB__ (Node Database), __DOR__ (Data Object Repository), __RTI__ (Runtime Infrastructure) and they can be found in `saas.nodedb.proxy`, `saas.dor.proxy`, `saas.rti.proxy` respectively.
+Sending HTTP requests to SaaS nodes are abstracted into functions. These functions are grouped into classes based on the three main services SaaS node provides i.e. __NodeDB__ (Node Database), __DOR__ (Data Object Repository), __RTI__ (Runtime Infrastructure) and they can be found in `simaas.nodedb.proxy`, `simaas.dor.proxy`, `simaas.rti.proxy` respectively.
 
 In general, these services can be briefly described as follows:
 
@@ -606,9 +606,9 @@ The Runtime Infrastructure (__RTI__) deploy/undeploy adapters and help execute j
 
 Example of sending requests to a node:
 ```python
-from saas.dor.proxy import DORProxy
-from saas.nodedb.proxy import NodeDBProxy
-from saas.rti.proxy import RTIProxy
+from simaas.dor.proxy import DORProxy
+from simaas.nodedb.proxy import NodeDBProxy
+from simaas.rti.proxy import RTIProxy
 
 # Create the proxy object with the IP address of the SaaS node you want to interact with.
 db_proxy = NodeDBProxy(node_address)
@@ -798,4 +798,4 @@ Example of `output` trigger:
 trigger:output:c
 ```
 
-These triggers can be found as helper functions in the module `saas.sdk.adapter` and can be used in the `processor.py`.
+These triggers can be found as helper functions in the module `simaas.sdk.adapter` and can be used in the `processor.py`.

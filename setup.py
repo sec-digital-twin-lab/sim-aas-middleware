@@ -3,7 +3,7 @@ import os
 
 from setuptools import setup, find_packages
 
-package_name = 'saas'
+package_name = 'simaas'
 
 # read meta information without importing
 _locals = {}
@@ -41,8 +41,8 @@ setup(
     long_description_content_type='text/markdown',
     entry_points={
         'console_scripts': [
-            'saas-cli = saas.cli.saas_cli:main',
-            'saas-node = saas.service:main'
+            'saas-cli = simaas.cli.saas_cli:main',
+            'saas-node = simaas.service:main'
         ]
     },
     classifiers=[
