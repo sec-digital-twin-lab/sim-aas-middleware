@@ -9,7 +9,7 @@ RUN apt install -y python3.12 python3.12-distutils python3-pip git
 
 RUN git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware /sim-aas-middleware
 WORKDIR /sim-aas-middleware
-RUN git checkout 101fd640f3924e4786bea6c1adfaeb3fdd7c2961
+RUN git checkout 4a077599015dba770de01d497af740fe66b3cda0
 
 WORKDIR /processor
 COPY . .
