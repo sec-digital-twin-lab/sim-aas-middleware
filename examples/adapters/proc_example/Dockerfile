@@ -13,8 +13,8 @@ RUN git checkout 4a077599015dba770de01d497af740fe66b3cda0
 
 WORKDIR /processor
 COPY . .
-RUN python3.10 -m pip install -r ./requirements.txt
-RUN python3.10 -m pip install /sim-aas-middleware
+RUN python3.12 -m pip install -r ./requirements.txt
+RUN python3.12 -m pip install /sim-aas-middleware
 
 EXPOSE 5000
 
