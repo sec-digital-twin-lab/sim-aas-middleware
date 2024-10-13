@@ -14,7 +14,6 @@ from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
     default_if_missing
 from simaas.core.logging import Logging
-from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.helpers import docker_export_image, determine_default_rest_address
@@ -24,7 +23,9 @@ logger = Logging.get('cli')
 
 
 def clone_repository(repository_url: str, repository_path: str, commit_id: str = None,
-                     credentials: Optional[Tuple[str, str]] = None, max_attempts: int = 3) -> int:
+                     credentials: Optional[Tuple[str, str]] = None) -> int:
+    original_url = repository_url
+
     # do we have credentials? inject it into the repo URL
     if credentials:
         idx = repository_url.index('github.com')
@@ -35,43 +36,26 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
     # does the destination already exist?
     shutil.rmtree(repository_path, ignore_errors=True)
 
-    attempt = 0
-    while True:
-        attempt += 1
-        try:
-            # clone the repo
-            Repo.clone_from(repository_url, repository_path)
-            repo = Repo(repository_path)
+    try:
+        # clone the repo
+        Repo.clone_from(repository_url, repository_path)
+        repo = Repo(repository_path)
 
-            # checkout a specific commit
-            repo.git.checkout(commit_id)
+    except Exception as e:
+        raise CLIRuntimeError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
 
-            # determine the commit timestamp
-            commit = repo.commit(commit_id)
-            commit_timestamp = commit.authored_datetime.timestamp()
+    try:
+        # checkout a specific commit
+        repo.git.checkout(commit_id)
 
-            return int(commit_timestamp)
+        # determine the commit timestamp
+        commit = repo.commit(commit_id)
+        commit_timestamp = commit.authored_datetime.timestamp()
 
-        except NoSuchPathError as e:
-            if attempt <= max_attempts:
-                logger.error(f"Cloning repository '{repository_url}' failed: {e} -> Trying again in 30 seconds...")
-                time.sleep(30)
-            else:
-                raise CLIRuntimeError(reason=str(e))
+        return int(commit_timestamp)
 
-        except GitCommandError as e:
-            if attempt <= max_attempts:
-                logger.error(f"Cloning repository '{repository_url}' failed: {e} -> Trying again in 30 seconds...")
-                time.sleep(30)
-            else:
-                raise CLIRuntimeError(reason=str(e))
-
-        except Exception as e:
-            if attempt <= max_attempts:
-                logger.error(f"Cloning repository '{repository_url}' failed: {e} -> Trying again in 30 seconds...")
-                time.sleep(30)
-            else:
-                raise CLIRuntimeError(reason=f"Unexpected: {e}")
+    except Exception as e:
+        raise CLIRuntimeError(reason=f"Failed to checkout '{commit_id}'", details={'exception': str(e)})
 
 
 def build_processor_image(repository_path: str, processor_path: str, credentials: Tuple[str, str] = None,
@@ -132,13 +116,12 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
 
     # build the processor docker image
     if force_build or not image_existed:
-        try:
-            if credentials:
-                with tempfile.TemporaryDirectory() as tempdir:
-                    credentials_path = os.path.join(tempdir, "credentials")
+        with tempfile.TemporaryDirectory() as tempdir:
+            credentials_path = os.path.join(tempdir, "credentials")
+            try:
+                if credentials:
                     with open(credentials_path, 'w') as f:
-                        if credentials:
-                            f.write(f"{credentials[0]}:{credentials[1]}")
+                        f.write(f"{credentials[0]}:{credentials[1]}")
 
                     command = [
                         'docker', 'build', '--no-cache', '--secret', f'id=git_credentials,src={credentials_path}',
@@ -147,15 +130,24 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
 
                     subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True)
 
+                else:
+                    client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
+
+            except subprocess.CalledProcessError as e:
+                raise CLIRuntimeError(f"Creating docker image failed.", details={
+                    'stdout': e.stdout.decode('utf-8'),
+                    'stderr': e.stderr.decode('utf-8'),
+                    'exception': str(e)
+                })
+
+            except Exception as e:
+                raise CLIRuntimeError("Creating docker image failed.", details={
+                    'exception': str(e)
+                })
+
+            finally:
+                if os.path.isfile(credentials_path):
                     os.remove(credentials_path)
-
-            else:
-                client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
-
-        except Exception as e:
-            raise CLIRuntimeError("Creating docker image failed.", details={
-                'exception': e
-            })
 
     return image_name, descriptor, image_existed
 
