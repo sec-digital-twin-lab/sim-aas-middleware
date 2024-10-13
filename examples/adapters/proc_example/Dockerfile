@@ -1,21 +1,30 @@
-FROM ubuntu:22.04
-RUN apt update -y
-RUN apt upgrade -y
-RUN apt install -y tzdata
-RUN apt install software-properties-common -y
-RUN add-apt-repository ppa:deadsnakes/ppa
-RUN apt update -y
-RUN apt install -y python3.12 python3.12-distutils python3-pip git
+FROM ubuntu:24.04
 
-RUN git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware /sim-aas-middleware
+RUN apt update -y && \
+    apt install -y tzdata && \
+    apt install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt update -y && \
+    apt install -y python3.12 python3-pip python3.12-venv git
+
+RUN --mount=type=secret,id=git_credentials \
+    if [ -f /run/secrets/git_credentials ]; then \
+        GIT_CREDENTIALS=$(cat /run/secrets/git_credentials); \
+        git clone https://$GIT_CREDENTIALS@github.com/sec-digital-twin-lab/sim-aas-middleware; \
+    else \
+        git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware; \
+    fi
+
 WORKDIR /sim-aas-middleware
 RUN git checkout 3fd7638702b7f44ba2def0cf26e418db7b2c6c1b
 
 WORKDIR /processor
 COPY . .
-RUN python3.12 -m pip install -r ./requirements.txt
-RUN python3.12 -m pip install /sim-aas-middleware
+RUN python3.12 -m venv venv
+RUN ./venv/bin/pip install --upgrade pip setuptools
+RUN ./venv/bin/pip install -r ./requirements.txt
+RUN ./venv/bin/pip install /sim-aas-middleware
 
 EXPOSE 5000
 
-ENTRYPOINT ["saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
+ENTRYPOINT ["venv/bin/saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]

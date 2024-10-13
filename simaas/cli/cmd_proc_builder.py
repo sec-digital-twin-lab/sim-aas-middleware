@@ -1,17 +1,20 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from typing import Optional, Tuple
 
 import docker
+from dotenv import load_dotenv
 from git import Repo, NoSuchPathError, GitCommandError
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
     default_if_missing
 from simaas.core.logging import Logging
+from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.helpers import docker_export_image, determine_default_rest_address
@@ -71,7 +74,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
                 raise CLIRuntimeError(reason=f"Unexpected: {e}")
 
 
-def build_processor_image(repository_path: str, processor_path: str,
+def build_processor_image(repository_path: str, processor_path: str, credentials: Tuple[str, str] = None,
                           force_build: bool = False, use_cache: bool = True) -> Tuple[str, ProcessorDescriptor, bool]:
     # does the path exist?
     processor_path = os.path.join(repository_path, processor_path)
@@ -130,7 +133,24 @@ def build_processor_image(repository_path: str, processor_path: str,
     # build the processor docker image
     if force_build or not image_existed:
         try:
-            image, _ = client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
+            if credentials:
+                with tempfile.TemporaryDirectory() as tempdir:
+                    credentials_path = os.path.join(tempdir, "credentials")
+                    with open(credentials_path, 'w') as f:
+                        if credentials:
+                            f.write(f"{credentials[0]}:{credentials[1]}")
+
+                    command = [
+                        'docker', 'build', '--no-cache', '--secret', f'id=git_credentials,src={credentials_path}',
+                        '-t', image_name, '.'
+                    ]
+
+                    subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True)
+
+                    os.remove(credentials_path)
+
+            else:
+                client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
 
         except Exception as e:
             raise CLIRuntimeError("Creating docker image failed.", details={
@@ -168,6 +188,8 @@ class ProcBuilder(CLICommand):
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
+        load_dotenv()
+
         prompt_if_missing(args, 'address', prompt_for_string,
                           message="Enter the target node's REST address",
                           default=determine_default_rest_address())
@@ -196,7 +218,10 @@ class ProcBuilder(CLICommand):
         # determine credentials (if any)
         if args.get('git_username') and args.get('git_token'):
             credentials = (args.get('git_username'), args.get('git_token'))
-            print(f"Using GitHub credentials for user '{credentials[0]}'.")
+            print(f"Using GitHub credentials from args for user '{credentials[0]}'.")
+        elif {'GITHUB_USERNAME', 'GITHUB_TOKEN'}.issubset(os.environ):
+            credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+            print(f"Using GitHub credentials from env for user '{credentials[0]}'.")
         else:
             credentials = None
             print("Not using any GitHub credentials.")
@@ -210,8 +235,8 @@ class ProcBuilder(CLICommand):
 
             # build the image
             image_name, descriptor, image_existed = \
-                build_processor_image(repo_path, args['proc_path'], force_build=args['force_build'],
-                                      use_cache=args['use_cache'])
+                build_processor_image(repo_path, args['proc_path'], credentials=credentials,
+                                      force_build=args['force_build'], use_cache=args['use_cache'])
             if args['force_build'] or not image_existed:
                 print(f"Done building image '{image_name}'.")
             else:
