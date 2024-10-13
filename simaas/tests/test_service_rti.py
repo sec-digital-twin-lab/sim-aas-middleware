@@ -13,6 +13,7 @@ import pytest
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
 from simaas.nodedb.api import NodeDBProxy
@@ -20,8 +21,7 @@ from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Task, JobStatus, Processor
-from simaas.tests.base_testcase import update_keystore_from_credentials
-from simaas.tests.conftest import add_test_processor
+from simaas.tests.conftest import add_test_processor, REPOSITORY_URL
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -31,7 +31,10 @@ logger = Logging.get(__name__)
 def non_strict_node(test_context):
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("non_strict_node", "no-email-provided", path=tempdir, password="password")
-        update_keystore_from_credentials(keystore)
+        keystore.github_credentials.update(
+            REPOSITORY_URL,
+            GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+        )
         node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=False)
         yield node
 
@@ -40,7 +43,10 @@ def non_strict_node(test_context):
 def strict_node(test_context, extra_keystores):
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("strict_node", "no-email-provided", path=tempdir, password="password")
-        update_keystore_from_credentials(keystore)
+        keystore.github_credentials.update(
+            REPOSITORY_URL,
+            GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+        )
         node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=True)
         yield node
 

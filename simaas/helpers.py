@@ -1,4 +1,6 @@
 import socket
+from threading import Lock
+
 import netifaces
 import ipaddress
 from typing import List, Optional, Tuple
@@ -37,6 +39,43 @@ def determine_default_rest_address() -> str:
 
 def determine_default_ws_address() -> str:
     return f"{LOCAL_IP}:6001" if LOCAL_IP else "127.0.0.1:6001"
+
+
+class PortMaster:
+    _mutex = Lock()
+    _next_p2p = {}
+    _next_rest = {}
+    _next_ws = {}
+
+    @classmethod
+    def generate_p2p_address(cls, host: str = '127.0.0.1') -> (str, int):
+        with cls._mutex:
+            if host not in cls._next_p2p:
+                cls._next_p2p[host] = 4100
+
+            address = (host, cls._next_p2p[host])
+            cls._next_p2p[host] += 1
+            return address
+
+    @classmethod
+    def generate_rest_address(cls, host: str = '127.0.0.1') -> (str, int):
+        with cls._mutex:
+            if host not in cls._next_rest:
+                cls._next_rest[host] = 5100
+
+            address = (host, cls._next_rest[host])
+            cls._next_rest[host] += 1
+            return address
+
+    @classmethod
+    def generate_ws_address(cls, host: str = '127.0.0.1') -> (str, int):
+        with cls._mutex:
+            if host not in cls._next_ws:
+                cls._next_ws[host] = 6100
+
+            address = (host, cls._next_rest[host])
+            cls._next_ws[host] += 1
+            return address
 
 
 def find_available_port(host: str = 'localhost', port_range: (int, int) = (6000, 7000)) -> Optional[int]:

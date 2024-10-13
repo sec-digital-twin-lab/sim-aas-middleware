@@ -8,9 +8,9 @@ import pytest
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.helpers import PortMaster
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
-from simaas.tests.base_testcase import PortMaster
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)

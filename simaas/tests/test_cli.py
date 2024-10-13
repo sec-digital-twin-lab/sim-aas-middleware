@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import Dict, Tuple, List, Union, Any, Optional
+from typing import Tuple, List, Union, Any, Optional
 
 import pytest
 from docker.errors import ImageNotFound
@@ -16,8 +16,7 @@ from examples.adapters.proc_example.processor import write_value
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
 from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
-    IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove, \
-    CredentialsAddSSHCredentials, CredentialsTestSSHCredentials
+    IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilder
@@ -29,16 +28,15 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
-from simaas.helpers import find_available_port, docker_export_image
+from simaas.helpers import find_available_port, docker_export_image, PortMaster
 from simaas.node.base import Node
 from simaas.rti.api import JobRESTProxy
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
-from simaas.tests.base_testcase import PortMaster
-from simaas.tests.conftest import commit_id, ssh_key_path
+from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
 
 logger = Logging.get(__name__)
-repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 examples_path = os.path.join(repo_root_path, 'examples')
 
 
@@ -46,23 +44,6 @@ examples_path = os.path.join(repo_root_path, 'examples')
 def temp_dir():
     with tempfile.TemporaryDirectory() as tempdir:
         yield tempdir
-
-
-@pytest.fixture(scope="module")
-def github_credentials() -> Dict[str, Tuple[str, str]]:
-    credentials_path = os.path.join(os.environ['HOME'], '.saas-credentials.json')
-    result = {}
-    if os.path.isfile(credentials_path):
-        with open(credentials_path) as f:
-            content = json.load(f)
-            if 'github-credentials' in content:
-                for item in content['github-credentials']:
-                    repository = item['repository']
-                    login = item['login']
-                    token = item['personal_access_token']
-                    result[repository] = (login, token)
-
-    yield result
 
 
 def test_cli_identity_list_create_show_remove(temp_dir):
@@ -395,72 +376,6 @@ def test_cli_identity_credentials_list_add_remove(temp_dir):
         assert result is not None
         assert 'credentials' in result
         assert len(result['credentials']) == 0
-
-    except CLIRuntimeError:
-        assert False
-
-
-def test_cli_identity_credentials_ssh_test(temp_dir):
-    if not os.path.isfile(ssh_key_path):
-        pytest.skip("SSH key not found")
-
-    # create an identity
-    try:
-        args = {
-            'keystore': temp_dir,
-            'name': 'name',
-            'email': 'email',
-            'password': 'password'
-        }
-
-        cmd = IdentityCreate()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'keystore' in result
-
-        keystore: Keystore = result['keystore']
-        keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
-        assert os.path.isfile(keystore_path)
-
-    except CLIRuntimeError:
-        assert False
-
-    # add credentials
-    try:
-        args = {
-            'keystore': temp_dir,
-            'keystore-id': keystore.identity.id,
-            'password': 'password',
-            'name': 'onprem',
-            'host': '10.8.0.10',
-            'login': 'heikoaydt',
-            'key': ssh_key_path,
-            'passphrase': ''
-        }
-
-        cmd = CredentialsAddSSHCredentials()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'credentials' in result
-        assert result['credentials'] is not None
-
-    except CLIRuntimeError:
-        assert False
-
-    # test SSH credentials
-    try:
-        args = {
-            'keystore': temp_dir,
-            'keystore-id': keystore.identity.id,
-            'password': 'password',
-            'name': 'onprem'
-        }
-
-        cmd = CredentialsTestSSHCredentials()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'returncode' in result
-        assert result['returncode'] == -1
 
     except CLIRuntimeError:
         assert False
@@ -840,12 +755,11 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
-        'repository': repo_url,
-        'commit_id':  commit_id,
+        'repository': REPOSITORY_URL,
+        'commit_id':  REPOSITORY_COMMIT_ID,
         'proc_path': 'examples/adapters/proc_example',
         'address': f"{address[0]}:{address[1]}",
         'store_image': True
@@ -1005,12 +919,11 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
-        'repository': repo_url,
-        'commit_id':  commit_id,
+        'repository': REPOSITORY_URL,
+        'commit_id':  REPOSITORY_COMMIT_ID,
         'proc_path': 'examples/adapters/proc_example',
         'address': f"{address[0]}:{address[1]}",
         'store_image': True
@@ -1807,41 +1720,39 @@ def test_find_open_port():
     assert(port == 5996)
 
 
-def test_cli_builder_clone_repo(temp_dir, github_credentials):
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
-    credentials = github_credentials.get(repo_url)
+def test_cli_builder_clone_repo(temp_dir):
+    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     repo_path = os.path.join(temp_dir, 'repository')
 
     try:
-        clone_repository(repo_url+"_doesnt_exist", temp_dir, credentials=credentials)
+        clone_repository(REPOSITORY_URL+"_doesnt_exist", temp_dir, credentials=credentials)
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
-        clone_repository(repo_url, repo_path, commit_id="doesntexist", credentials=credentials)
+        clone_repository(REPOSITORY_URL, repo_path, commit_id="doesntexist", credentials=credentials)
         assert False
     except CLIRuntimeError:
         assert os.path.isdir(repo_path)
         assert True
 
     try:
-        clone_repository(repo_url, repo_path, commit_id=commit_id, credentials=credentials)
+        clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
         assert os.path.isdir(repo_path)
         assert True
     except CLIRuntimeError:
         assert False
 
 
-def test_cli_builder_build_image(docker_available, temp_dir, github_credentials):
+def test_cli_builder_build_image(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # clone the repository
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
-    credentials = github_credentials.get(repo_url)
+    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     repo_path = os.path.join(temp_dir, 'repository')
-    clone_repository(repo_url, repo_path, commit_id=commit_id, credentials=credentials)
+    clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
 
     proc_path = "examples/adapters/proc_example"
 
@@ -1864,7 +1775,7 @@ def test_cli_builder_build_image(docker_available, temp_dir, github_credentials)
         assert False
 
 
-def test_cli_builder_export_image(docker_available, temp_dir, github_credentials):
+def test_cli_builder_export_image(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1877,10 +1788,9 @@ def test_cli_builder_export_image(docker_available, temp_dir, github_credentials
         assert True
 
     # clone the repository
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
-    credentials = github_credentials.get(repo_url)
+    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     repo_path = os.path.join(temp_dir, 'repository')
-    clone_repository(repo_url, repo_path, commit_id=commit_id, credentials=credentials)
+    clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
 
     # build image
     proc_path = "examples/adapters/proc_example"
@@ -1899,12 +1809,11 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
-        'repository': repo_url,
-        'commit_id': commit_id,
+        'repository': REPOSITORY_URL,
+        'commit_id': REPOSITORY_COMMIT_ID,
         'proc_path': 'examples/adapters/proc_example',
         'address': f"{address[0]}:{address[1]}"
     }
@@ -1941,12 +1850,11 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
         pytest.skip("Docker is not available")
 
     address = node.rest.address()
-    repo_url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
 
     # define arguments
     args = {
-        'repository': repo_url,
-        'commit_id':  commit_id,
+        'repository': REPOSITORY_URL,
+        'commit_id':  REPOSITORY_COMMIT_ID,
         'proc_path': 'examples/adapters/proc_example',
         'address': f"{address[0]}:{address[1]}",
         'store_image': True

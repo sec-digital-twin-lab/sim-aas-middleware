@@ -11,11 +11,11 @@ from pydantic import BaseModel
 from simaas.core.helpers import hash_file_content
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
+from simaas.helpers import PortMaster
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.exceptions import PeerUnavailableError
 from simaas.p2p.messenger import SecureMessenger, P2PMessage
 from simaas.p2p.protocol import P2PProtocol, BroadcastResponse
-from simaas.tests.base_testcase import PortMaster
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
