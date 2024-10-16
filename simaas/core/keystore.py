@@ -65,7 +65,7 @@ class Keystore:
         self._update_identity()
 
     @classmethod
-    def new(cls, name: str, email: str, path: str = None, password: str = None) -> Keystore:
+    def new(cls, name: str, email: str = None, path: str = None, password: str = None) -> Keystore:
         # create random keystore id
         iid = generate_random_string(64, characters=string.ascii_lowercase+string.digits)
 
@@ -82,7 +82,7 @@ class Keystore:
             'iid': iid,
             'profile': {
                 'name': name,
-                'email': email
+                'email': email if email else 'none'
             },
             'nonce': 0,
             'assets': {
