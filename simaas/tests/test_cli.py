@@ -12,6 +12,7 @@ from typing import Tuple, List, Union, Any, Optional
 import pytest
 from docker.errors import ImageNotFound
 
+import examples.adapters.proc_example.processor
 from examples.adapters.proc_example.processor import write_value
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
@@ -23,6 +24,7 @@ from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image,
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel
 from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.helpers import hash_json_object
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -30,6 +32,8 @@ from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
 from simaas.helpers import find_available_port, docker_export_image, PortMaster
 from simaas.node.base import Node
+from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.p2p.messenger import SecureMessenger, P2PMessage
 from simaas.rti.api import JobRESTProxy
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
@@ -1199,7 +1203,8 @@ def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, pro
     task = Task(proc_id=proc.obj_id, user_iid=user.id, input=[a, b], output=[c], name='test', description='')
 
     # create job
-    job = Job(id=job_id, task=task, retain=False, custodian=node.info, proc_name=proc_descriptor.name, t_submitted=0)
+    job = Job(id=job_id, task=task, retain=False, custodian=node.info, owner=user, proc_name=proc_descriptor.name,
+              t_submitted=0)
 
     # create gpp
     gpp = GitProcessorPointer(repository=proc.tags['repository'], commit_id=proc.tags['commit_id'],
@@ -1222,13 +1227,14 @@ def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, pro
     return job_path
 
 
-def run_job_cmd(job_path: str, host: str, port: int) -> None:
+def run_job_cmd(job_path: str, host: str, rest_port: int, p2p_port: int) -> None:
     cmd = JobRunner()
     args = {
         'job_path': job_path,
         'proc_path': examples_path,
         'proc_name': 'example-processor',
-        'rest_address': f"{host}:{port}"
+        'rest_address': f"{host}:{rest_port}",
+        'p2p_address': f"{host}:{p2p_port}"
     }
     cmd.execute(args)
 
@@ -1341,6 +1347,11 @@ def wait_for_job_runner(job_path: str, rest_address: (str, int)) -> Tuple[Option
             else:
                 pass
 
+        elif status.state == JobStatus.State.SUCCESSFUL:
+            job_result = JobResult.parse_file(job_exitcode_path)
+            status = JobStatus.parse_file(job_status_path)
+            return job_result, status
+
         else:
             pass
 
@@ -1427,6 +1438,84 @@ def test_job_worker_error(temp_dir):
     assert "ValueError: invalid literal for int() with base 10: 'sdf'" in result.trace
 
 
+def test_cli_runner(temp_dir, node):
+    # prepare the job folder
+    job_id = '398h36g3_00'
+    job_path = os.path.join(temp_dir, job_id)
+    os.makedirs(job_path, exist_ok=True)
+
+    user = node.identity
+
+    proc_path = os.path.join('examples', 'adapters', 'proc_example')
+    abs_proc_path = os.path.join(os.getcwd(), '..', '..', proc_path)
+    proc = examples.adapters.proc_example.processor.ExampleProcessor(abs_proc_path)
+    proc_descriptor = proc.descriptor
+
+    a = Task.InputValue(name='a', type='value', value={'v': 1})
+    b = Task.InputValue(name='b', type='value', value={'v': 1})
+    c = Task.Output(name='c', owner_iid=user.id, restricted_access=False, content_encrypted=False,
+                    target_node_iid=node.identity.id)
+
+    task = Task(proc_id='123abc', user_iid=user.id, input=[a, b], output=[c], name='test', description='')
+
+    # create job
+    job = Job(id=job_id, task=task, retain=False, custodian=node.info, owner=user, proc_name=proc_descriptor.name,
+              t_submitted=0)
+
+    # create gpp
+    gpp = GitProcessorPointer(repository=REPOSITORY_URL, commit_id=REPOSITORY_COMMIT_ID,
+                              proc_path=proc_path, proc_descriptor=proc_descriptor)
+
+    # write job descriptor
+    job_descriptor_path = os.path.join(job_path, 'job.descriptor')
+    with open(job_descriptor_path, 'w') as f:
+        job_hash = hash_json_object(job.dict())
+        json.dump(job.dict(), f, indent=2)
+
+    # write gpp descriptor
+    gpp_descriptor_path = os.path.join(job_path, 'gpp.descriptor')
+    with open(gpp_descriptor_path, 'w') as f:
+        gpp_hash = hash_json_object(gpp.dict())
+        json.dump(gpp.dict(), f, indent=2)
+
+    # determine REST address
+    rest_address = PortMaster.generate_rest_address()
+    p2p_address = PortMaster.generate_p2p_address()
+
+    # start the runner
+    thread0 = threading.Thread(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1], p2p_address[1]))
+    thread0.start()
+
+    while True:
+        try:
+            peer, messenger = SecureMessenger.connect(p2p_address, user, temp_dir)
+            break
+
+        except PeerUnavailableError:
+            time.sleep(1)
+        except Exception as e:
+            assert False
+
+    peer: Identity = peer
+    messenger: SecureMessenger = messenger
+
+    # step 1: verify job/proc signatures
+    response = messenger.send_message(P2PMessage(protocol='check_integrity', type='verify_job',
+                                                 content={'signature': node.keystore.sign(job_hash)},
+                                                 attachment=None, sequence_id=None))
+    assert response.protocol == 'check_integrity'
+    assert response.type == 'verify_proc'
+    signature = response.content.get('signature', '') if response.content else None
+    assert signature
+    assert peer.verify(gpp_hash, signature)
+    messenger.close()
+
+    # wait for the job to be finished
+    job_result, status = wait_for_job_runner(job_path, rest_address)
+    assert status.progress == 100
+    assert job_result.exitcode == ExitCode.DONE
+
+
 def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -1437,9 +1526,11 @@ def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
+    p2p_address = PortMaster.generate_p2p_address()
 
     # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
+    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1],
+                                                                    p2p_address[1]))
     job_process.start()
 
     # wait for the job to be finished

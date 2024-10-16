@@ -1,10 +1,11 @@
 import json
 import logging
 import os
+import socket
 import threading
 import time
 import traceback
-from typing import Dict, Tuple, Set, Union
+from typing import Dict, Tuple, Set, Union, Optional, List
 
 import uvicorn
 from fastapi import FastAPI
@@ -15,11 +16,13 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_i
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.helpers import validate_json, hash_json_object
 from simaas.core.identity import Identity
+from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.nodedb.api import NodeDBProxy
+from simaas.p2p.messenger import SecureMessenger, P2PMessage
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy, JOB_ENDPOINT_PREFIX
 from simaas.rti.exceptions import UnresolvedInputDataObjectsError, AccessNotPermittedError, MissingUserSignatureError, \
@@ -81,25 +84,32 @@ class JobRunner(CLICommand, ProgressListener):
             Argument('--proc-name', dest='proc_name', action='store', help="name of the processor"),
             Argument('--log-level', dest='log_level', action='store', help="log level: debug, info, warning, error"),
             Argument('--rest-address', dest='rest_address', action='store',
-                     help="address used by the REST job interface")
+                     help="address used by the REST job interface"),
+            Argument('--p2p-address', dest='p2p_address', action='store',
+                     help="address used by the P2P job interface")
         ])
 
         self._mutex = threading.Lock()
         self._logger = None
         self._interrupted = False
         self._wd_path = None
+
+        self._proc: Optional[ProcessorBase] = None
+
+        self._job: Optional[Job] = None
+        self._gpp: Optional[GitProcessorPointer] = None
+        self._user: Optional[Identity] = None
+        self._custodian: Optional[Identity] = None
+        self._keystore: Optional[Keystore] = None
+        self._p2p_socket = None
+
         self._address_mapping: Dict[str, int] = {}
-        self._proc = None
-        self._job = None
-        self._gpp = None
-        self._keystore = None
-        self._user = None
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._pending_output: Set[str] = set()
         self._failed_output: Set[str] = set()
-        self._rti_proxy = None
-        self._job_status = None
+        self._rti_proxy: Optional[RTIProxy] = None
+        self._job_status: Optional[JobStatus] = None
 
     async def job_status(self) -> JobStatus:
         with self._mutex:
@@ -180,7 +190,7 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Using logger with: level={log_level} path={log_path}")
         self._logger = Logging.get('cli.job_runner', level=log_level_mapping[log_level], custom_log_path=log_path)
 
-    def _initialise_job(self, proc_path: str, proc_name: str = None) -> None:
+    def _initialise_processor(self, proc_path: str, proc_name: str = None) -> bytes:
         # does the processor path exist?
         if not os.path.isdir(proc_path):
             raise CLIRuntimeError(f"Processor path '{proc_path}' does not exist.")
@@ -209,19 +219,79 @@ class JobRunner(CLICommand, ProgressListener):
             raise CLIRuntimeError(f"No processor '{proc_name}' found at '{proc_path}'.")
         print(f"Found processor '{proc_name}' at '{proc_path}'")
 
-        # read the job descriptor
-        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
-        with open(job_descriptor_path, 'r') as f:
-            content = json.load(f)
-            self._job = Job.parse_obj(content)
-        print(f"Created job descriptor at {job_descriptor_path}")
-
         # read the gpp descriptor
         gpp_descriptor_path = os.path.join(self._wd_path, 'gpp.descriptor')
         with open(gpp_descriptor_path, 'r') as f:
             content = json.load(f)
+            gpp_hash = hash_json_object(content)
             self._gpp = GitProcessorPointer.parse_obj(content)
-        print(f"Created GPP descriptor at {gpp_descriptor_path}")
+        print(f"Read GPP descriptor at {gpp_descriptor_path}")
+
+        return gpp_hash
+
+    def _verify_integrity(self, p2p_address: Tuple[str, int], gpp_hash: bytes) -> None:
+        # verify we agree on what the processor descriptor is
+        proc_descriptor_hash0 = hash_json_object(self._gpp.proc_descriptor.dict())
+        proc_descriptor_hash1 = hash_json_object(self._proc.descriptor.dict())
+        if proc_descriptor_hash0 != proc_descriptor_hash1:
+            raise CLIRuntimeError(f"Mismatching processor descriptors.")
+        print(f"Found matching processor descriptors in GPP and processor.")
+
+        # read the job descriptor (it contains information about the custodian)
+        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
+        with open(job_descriptor_path, 'r') as f:
+            content = json.load(f)
+            job_hash = hash_json_object(content)
+            self._job = Job.parse_obj(content)
+        print(f"Read job descriptor at {job_descriptor_path}")
+
+        # create shortcuts to user (job owner) and custodian identities
+        self._user = self._job.owner
+        self._custodian = self._job.custodian.identity
+        print(f"Using user (job owner) identity {self._user.id}")
+
+        # create the ephemeral keystore, i.e., the job identity
+        self._keystore = Keystore.new(name=f"job:{self._job.id}")
+        print(f"Using ephemeral job identity {self._keystore.identity.id}")
+
+        # create server socket and wait for incoming connection
+        self._p2p_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._p2p_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._p2p_socket.settimeout(5.0)
+        self._p2p_socket.bind(p2p_address)
+        self._p2p_socket.listen(5)
+
+        # accept incoming connection
+        peer_socket, _ = self._p2p_socket.accept()
+
+        # create messenger and wait for custodian to connect
+        peer, messenger = SecureMessenger.accept(peer_socket, self._keystore.identity, self._wd_path)
+        peer: Identity = peer
+        messenger: SecureMessenger = messenger
+
+        # verify the peer to be the custodian
+        if not peer.verify_integrity() or peer.id != self._custodian.id:
+            raise CLIRuntimeError(f"Custodian authentication failed.")
+
+        # verify we agree with the custodian about what the job is
+        message: P2PMessage = messenger.receive_message()
+        signature = message.content.get('signature', '') if message.content else ''
+        if (message.protocol != 'check_integrity' or message.type != 'verify_job' or
+                not self._custodian.verify(job_hash, signature)):
+            raise CLIRuntimeError(f"Job verification failed.")
+
+        # send a response about what we know about the processor so the custodian can verify us
+        signature = self._keystore.sign(gpp_hash)
+        messenger.send_response(P2PMessage(protocol='check_integrity', type='verify_proc', content={
+            'signature': signature
+        }, attachment=None, sequence_id=None))
+
+        messenger.close()
+
+    def _initialise_job(self) -> None:
+        # create the custodian RTI proxy
+        self._rti_proxy = RTIProxy(self._job.custodian.rest_address)
+        print(f"Using {self._job.custodian.rest_address} to update custodian about job status changes.")
 
         # prepare input/output interfaces
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
@@ -229,32 +299,10 @@ class JobRunner(CLICommand, ProgressListener):
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
             {item.name: item for item in self._gpp.proc_descriptor.output}
 
-        # fetch the user identity
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        self._user: Identity = db_proxy.get_identity(self._job.task.user_iid)
-        if self._user is None:
-            raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
-        print(f"Using user identity with id={self._user.id}")
-
-        # setup the custodian RTI proxy
-        self._rti_proxy = RTIProxy(self._job.custodian.rest_address)
-        print(f"Using {self._job.custodian.rest_address} to update custodian about job status changes.")
-
         # update the job status
         self._job_status = JobStatus(state=JobStatus.State.INITIALISED, progress=0, output={}, notes={},
                                      errors=[], message=None)
         self._store_job_status()
-
-    # def _create_ephemeral_keystore(self) -> Identity:
-    #     # create the ephemeral job keystore
-    #     self._keystore = Keystore.create(self._wd_path, f"job:{self._job.id}")
-    #     print(f"Created ephemeral job keystore with id={self._keystore.identity.id}")
-    #
-    #     # publish the identity
-    #     db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-    #     identity = db_proxy.update_identity(self._keystore.identity)
-    #
-    #     return identity
 
     def _setup_rest_server(self, rest_address: str) -> None:
         app = FastAPI(openapi_url='/openapi.json', docs_url='/docs')
@@ -560,6 +608,7 @@ class JobRunner(CLICommand, ProgressListener):
         prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job:")
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor:")
         prompt_if_missing(args, 'rest_address', prompt_for_string, message="Enter address for REST service:")
+        prompt_if_missing(args, 'p2p_address', prompt_for_string, message="Enter address for P2P service:")
 
         # does the job path exist?
         if not os.path.isdir(args['job_path']):
@@ -573,11 +622,16 @@ class JobRunner(CLICommand, ProgressListener):
         try:
             self._logger.info(f"begin processing job at {self._wd_path}")
 
-            # initialise job
-            self._initialise_job(args['proc_path'], args.get('proc_name'))
+            # initialise processor
+            gpp_hash = self._initialise_processor(args['proc_path'], args.get('proc_name'))
 
-            # create ephemeral keystore
-            # self._create_ephemeral_keystore()
+            # verify integrity
+            p2p_address: List[str] = args['p2p_address'].split(':')
+            p2p_address: Tuple[str, int] = (p2p_address[0], int(p2p_address[1]))
+            self._verify_integrity(p2p_address, gpp_hash)
+
+            # initialise job
+            self._initialise_job()
 
             # setup REST server
             self._setup_rest_server(args['rest_address'])

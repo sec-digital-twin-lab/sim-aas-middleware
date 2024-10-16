@@ -45,6 +45,7 @@ class DBJobInfo(Base):
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
     rest_address = Column(String(64), nullable=False)
+    p2p_address = Column(String(64), nullable=False)
     status = Column(NestedMutableJson, nullable=False)
     job = Column(NestedMutableJson, nullable=False)
 
@@ -197,7 +198,7 @@ class DefaultRTIService(RTIService):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc_id)}] db record not found for removal.")
 
-    def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
+    def _find_available_address(self, max_attempts: int = 100) -> Tuple[str, int]:
         host = self._node.info.rest_address[0]
         for i in range(max_attempts):
             # update the most recent port
@@ -382,21 +383,23 @@ class DefaultRTIService(RTIService):
         with open(status_path, 'w') as f:
             json.dump(status.dict(), f, indent=2)
 
-        # determine REST address
-        job_address = self._find_available_job_address()
+        # determine two addresses to be used for REST and P2P communication
+        rest_address = self._find_available_address()
+        p2p_address = self._find_available_address()
 
         # write the initial job info database record
         with self._mutex:
             with self._session_maker() as session:
                 record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                                   rest_address=f"{job_address[0]}:{job_address[1]}",
+                                   rest_address=f"{rest_address[0]}:{rest_address[1]}",
+                                   p2p_address=f"{p2p_address[0]}:{p2p_address[1]}",
                                    status=status.dict(), job=job.dict())
                 session.add(record)
                 session.commit()
 
         # start the job container
         logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
-        docker_run_job_container(proc.image_name, job_path, job_address)
+        docker_run_job_container(proc.image_name, job_path, rest_address, p2p_address)
 
         return job
 

@@ -26,5 +26,6 @@ RUN ./venv/bin/pip install -r ./requirements.txt
 RUN ./venv/bin/pip install /sim-aas-middleware
 
 EXPOSE 5000
+EXPOSE 6000
 
-ENTRYPOINT ["venv/bin/saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
+ENTRYPOINT ["venv/bin/saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000", "--p2p-address", "0.0.0.0:6000"]
