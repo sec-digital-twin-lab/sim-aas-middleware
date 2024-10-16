@@ -365,7 +365,7 @@ class DefaultRTIService(RTIService):
 
         # create the initial job descriptor and write to file
         job = Job(id=job_id, task=task, retain=self._retain_job_history, custodian=self._node.info,
-                  proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
+                  owner=user, proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
         descriptor_path = os.path.join(job_path, 'job.descriptor')
         with open(descriptor_path, 'w') as f:
             json.dump(job.dict(), f, indent=2)
