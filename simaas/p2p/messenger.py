@@ -39,7 +39,7 @@ class SecureStreamPreamble(BaseModel):
 
 
 class SecureMessenger:
-    default_chunk_size = 2048
+    default_chunk_size = 1024*1024
 
     """
     SecureMessenger is a wrapper for a TCP socket connection. It uses encryption to secure the communication between
