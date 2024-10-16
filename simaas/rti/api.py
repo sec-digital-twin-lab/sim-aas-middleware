@@ -42,7 +42,7 @@ class RTIService(abc.ABC):
                                self.get_all_procs, List[Processor], None),
 
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.get_proc, Processor, [VerifyProcessorDeployed]),
+                               self.get_proc, Optional[Processor], []),
 
             EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
                                self.deploy, Processor,
@@ -166,9 +166,9 @@ class RTIProxy(EndpointProxy):
         results = self.get("proc")
         return [Processor.parse_obj(result) for result in results]
 
-    def get_proc(self, proc_id: str) -> Processor:
+    def get_proc(self, proc_id: str) -> Optional[Processor]:
         result = self.get(f"proc/{proc_id}")
-        return Processor.parse_obj(result)
+        return Processor.parse_obj(result) if result else None
 
     def deploy(self, proc_id: str, authority: Keystore) -> Processor:
         result = self.post(f"proc/{proc_id}", with_authorisation_by=authority)
