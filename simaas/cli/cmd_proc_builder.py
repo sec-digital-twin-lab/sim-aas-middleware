@@ -3,12 +3,12 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
+import traceback
 from typing import Optional, Tuple
 
 import docker
 from dotenv import load_dotenv
-from git import Repo, NoSuchPathError, GitCommandError
+from git import Repo
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
@@ -128,10 +128,18 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
                         '-t', image_name, '.'
                     ]
 
-                    subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True)
+                    env = os.environ.copy()
+                    env['DOCKER_BUILDKIT'] = '1'
+
+                    subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True, env=env)
 
                 else:
-                    client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
+                    build_args = {
+                        'DOCKER_BUILDKIT': '1'
+                    }
+
+                    client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True,
+                                        buildargs=build_args)
 
             except subprocess.CalledProcessError as e:
                 raise CLIRuntimeError(f"Creating docker image failed.", details={
@@ -141,8 +149,10 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
                 })
 
             except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 raise CLIRuntimeError("Creating docker image failed.", details={
-                    'exception': str(e)
+                    'exception': str(e),
+                    'trace': trace
                 })
 
             finally:
