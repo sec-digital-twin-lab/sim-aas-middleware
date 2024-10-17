@@ -119,33 +119,28 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
         with tempfile.TemporaryDirectory() as tempdir:
             credentials_path = os.path.join(tempdir, "credentials")
             try:
+                # assemble the command
+                command = ['docker', 'build', '--no-cache']
                 if credentials:
+                    # write the credentials to file (temporarily)
                     with open(credentials_path, 'w') as f:
                         f.write(f"{credentials[0]}:{credentials[1]}")
 
-                    command = [
-                        'docker', 'build', '--no-cache', '--secret', f'id=git_credentials,src={credentials_path}',
-                        '-t', image_name, '.'
-                    ]
+                    command.extend(['--secret', f'id=git_credentials,src={credentials_path}'])
+                command.extend(['-t', image_name, '.'])
 
-                    env = os.environ.copy()
-                    env['DOCKER_BUILDKIT'] = '1'
+                env = os.environ.copy()
+                env['DOCKER_BUILDKIT'] = '1'
 
-                    subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True, env=env)
-
-                else:
-                    build_args = {
-                        'DOCKER_BUILDKIT': '1'
-                    }
-
-                    client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True,
-                                        buildargs=build_args)
+                subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True, env=env)
 
             except subprocess.CalledProcessError as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 raise CLIRuntimeError(f"Creating docker image failed.", details={
                     'stdout': e.stdout.decode('utf-8'),
                     'stderr': e.stderr.decode('utf-8'),
-                    'exception': str(e)
+                    'exception': str(e),
+                    'trace': trace
                 })
 
             except Exception as e:
