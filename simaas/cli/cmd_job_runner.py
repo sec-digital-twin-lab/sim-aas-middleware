@@ -692,7 +692,7 @@ class JobRunner(CLICommand, ProgressListener):
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e.reason}"
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            print(f"{msg}:\n{trace}")
+            print(f"{msg}\n{trace}")
 
             self._logger.error(trace)
             self._write_exitcode(ExitCode.ERROR, e)
@@ -705,7 +705,7 @@ class JobRunner(CLICommand, ProgressListener):
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e}"
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            print(f"{msg}:\n{trace}")
+            print(f"{msg}\n{trace}")
 
             self._logger.error(trace)
             self._write_exitcode(ExitCode.ERROR, e)
