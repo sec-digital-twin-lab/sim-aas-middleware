@@ -264,12 +264,14 @@ class JobRunner(CLICommand, ProgressListener):
         # create server socket and wait for incoming connection
         self._p2p_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._p2p_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._p2p_socket.settimeout(5.0)
+        self._p2p_socket.settimeout(30.0)
         self._p2p_socket.bind(p2p_address)
         self._p2p_socket.listen(5)
 
-        # accept incoming connection, create messenger and wait for custodian to connect
+        # accept incoming connection
         peer_socket, _ = self._p2p_socket.accept()
+
+        # create messenger and wait for custodian to connect
         peer, messenger = SecureMessenger.accept(peer_socket, self._keystore.identity, self._wd_path)
         peer: Identity = peer
         messenger: SecureMessenger = messenger

@@ -80,8 +80,8 @@ def verify_job_container_integrity(p2p_address: Tuple[str, int], job_hash: bytes
                 peer, messenger = SecureMessenger.connect(p2p_address, custodian.identity, temp_dir)
                 break
 
-            except PeerUnavailableError | TimeoutError:
-                time.sleep(1)
+            except (PeerUnavailableError, TimeoutError):
+                pass
 
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -446,8 +446,12 @@ class DefaultRTIService(RTIService):
         docker_run_job_container(proc.image_name, job_path, rest_address, p2p_address)
 
         # verify integrity
-        gpp_hash = hash_json_object(proc.gpp.dict())
-        verify_job_container_integrity(p2p_address, job_hash, gpp_hash, self._node.keystore)
+        try:
+            gpp_hash = hash_json_object(proc.gpp.dict())
+            verify_job_container_integrity(p2p_address, job_hash, gpp_hash, self._node.keystore)
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            print(e)
 
         return job
 
