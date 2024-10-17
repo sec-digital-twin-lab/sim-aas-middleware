@@ -290,7 +290,7 @@ class JobRunner(CLICommand, ProgressListener):
         # send the GPP information to the custodian so the custodian can verify us
         signature = self._keystore.sign(gpp_hash)
         messenger.send_response(P2PMessage(protocol='check_integrity', type='verify_gpp', content={
-            # 'gpp': self._gpp.dict(),
+            'gpp': self._gpp.dict(),
             'signature': signature
         }, attachment=None, sequence_id=None))
 

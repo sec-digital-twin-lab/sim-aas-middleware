@@ -74,23 +74,22 @@ def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str
 def verify_job_container_integrity(p2p_address: Tuple[str, int], job_hash: bytes, gpp_hash: bytes,
                                    custodian: Keystore):
     with tempfile.TemporaryDirectory() as temp_dir:
-        # try to establish a connection first
-        while True:
+        # try to establish a connection first. this may fail for any reason because the container may have
+        # just started and the app is not running yet. attempt to establish a connection 10 times. if it doesn't
+        # work by then, give up.
+        peer: Optional[Identity] = None
+        messenger: Optional[SecureMessenger] = None
+        for _ in range(10):
             try:
                 peer, messenger = SecureMessenger.connect(p2p_address, custodian.identity, temp_dir)
                 break
 
-            except (PeerUnavailableError, TimeoutError):
-                pass
+            except Exception:
+                time.sleep(0.5)
 
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                raise RTIException(f"Unexpected error while connecting to job container", details={
-                    'trace': trace
-                })
-
-        peer: Identity = peer  # this is the identity of the ephemeral job container -> may need to keep this somewhere
-        messenger: SecureMessenger = messenger
+        # do we have a connection?
+        if not peer or not messenger:
+            raise RTIException(f"Establishing P2P connection to job container failed")
 
         # inform the job container about the job hash, signed by the custodian
         response = messenger.send_message(P2PMessage(protocol='check_integrity', type='verify_job',
