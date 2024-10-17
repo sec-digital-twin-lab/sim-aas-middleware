@@ -37,7 +37,7 @@ from simaas.p2p.messenger import SecureMessenger, P2PMessage
 from simaas.rti.api import JobRESTProxy
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
-from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
+from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL, DOCKERFILE_COMMIT_ID
 
 logger = Logging.get(__name__)
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
@@ -1178,7 +1178,8 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 
 def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, proc: DataObject, job_id: str,
                             a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
-                            sig_a: str = None, sig_b: str = None, target_node: Node = None) -> str:
+                            sig_a: str = None, sig_b: str = None,
+                            target_node: Node = None) -> Tuple[str, bytes, GitProcessorPointer]:
     proc_descriptor = ProcessorDescriptor.parse_obj(proc.tags['proc_descriptor'])
 
     if a is None:
@@ -1217,14 +1218,10 @@ def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, pro
     # write job descriptor
     job_descriptor_path = os.path.join(job_path, 'job.descriptor')
     with open(job_descriptor_path, 'w') as f:
+        job_hash = hash_json_object(job.dict())
         json.dump(job.dict(), f, indent=2)
 
-    # write gpp descriptor
-    gpp_descriptor_path = os.path.join(job_path, 'gpp.descriptor')
-    with open(gpp_descriptor_path, 'w') as f:
-        json.dump(gpp.dict(), f, indent=2)
-
-    return job_path
+    return job_path, job_hash, gpp
 
 
 def run_job_cmd(job_path: str, host: str, rest_port: int, p2p_port: int) -> None:
@@ -1247,6 +1244,37 @@ def run_job_cmd_noname(job_path: str, host: str, port: int) -> None:
         'rest_address': f"{host}:{port}"
     }
     cmd.execute(args)
+
+
+def perform_job_integrity_check(p2p_address: Tuple[str, int], custodian: Identity, wd_path: str, node,
+                                job_hash: bytes, gpp: GitProcessorPointer, commit_id: str) -> None:
+    # determine GPP hash
+    content = gpp.dict()
+    content['commit_id'] = commit_id
+    gpp_hash = hash_json_object(content)
+
+    while True:
+        try:
+            peer, messenger = SecureMessenger.connect(p2p_address, custodian, wd_path)
+            break
+
+        except PeerUnavailableError:
+            time.sleep(1)
+        except Exception as e:
+            assert False
+
+    peer: Identity = peer
+    messenger: SecureMessenger = messenger
+
+    response = messenger.send_message(P2PMessage(protocol='check_integrity', type='verify_job',
+                                                 content={'signature': node.keystore.sign(job_hash)},
+                                                 attachment=None, sequence_id=None))
+    assert response.protocol == 'check_integrity'
+    assert response.type == 'verify_gpp'
+    signature = response.content.get('signature', '') if response.content else None
+    assert signature
+    assert peer.verify(gpp_hash, signature)
+    messenger.close()
 
 
 class ProcessorRunner(threading.Thread, ProgressListener):
@@ -1445,6 +1473,7 @@ def test_cli_runner(temp_dir, node):
     os.makedirs(job_path, exist_ok=True)
 
     user = node.identity
+    custodian = node.identity
 
     proc_path = os.path.join('examples', 'adapters', 'proc_example')
     abs_proc_path = os.path.join(os.getcwd(), '..', '..', proc_path)
@@ -1472,12 +1501,6 @@ def test_cli_runner(temp_dir, node):
         job_hash = hash_json_object(job.dict())
         json.dump(job.dict(), f, indent=2)
 
-    # write gpp descriptor
-    gpp_descriptor_path = os.path.join(job_path, 'gpp.descriptor')
-    with open(gpp_descriptor_path, 'w') as f:
-        gpp_hash = hash_json_object(gpp.dict())
-        json.dump(gpp.dict(), f, indent=2)
-
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
     p2p_address = PortMaster.generate_p2p_address()
@@ -1486,34 +1509,31 @@ def test_cli_runner(temp_dir, node):
     thread0 = threading.Thread(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1], p2p_address[1]))
     thread0.start()
 
-    while True:
-        try:
-            peer, messenger = SecureMessenger.connect(p2p_address, user, temp_dir)
-            break
-
-        except PeerUnavailableError:
-            time.sleep(1)
-        except Exception as e:
-            assert False
-
-    peer: Identity = peer
-    messenger: SecureMessenger = messenger
-
-    # step 1: verify job/proc signatures
-    response = messenger.send_message(P2PMessage(protocol='check_integrity', type='verify_job',
-                                                 content={'signature': node.keystore.sign(job_hash)},
-                                                 attachment=None, sequence_id=None))
-    assert response.protocol == 'check_integrity'
-    assert response.type == 'verify_proc'
-    signature = response.content.get('signature', '') if response.content else None
-    assert signature
-    assert peer.verify(gpp_hash, signature)
-    messenger.close()
+    # do integrity check (with custom commit id)
+    perform_job_integrity_check(p2p_address, custodian, temp_dir, node, job_hash, gpp,
+                                '066ab532d9d20e6b32d5f1d534a3380d7eaa38ca')
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
     assert status.progress == 100
     assert job_result.exitcode == ExitCode.DONE
+
+
+def kickstart_job(job_path: str, temp_dir: str, node: Node, job_hash: bytes, gpp: GitProcessorPointer) -> Tuple[str, int]:
+    # determine REST and P2P address
+    rest_address = PortMaster.generate_rest_address()
+    p2p_address = PortMaster.generate_p2p_address()
+
+    # execute the job runner command
+    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1],
+                                                                    p2p_address[1]))
+    job_process.start()
+
+    # do integrity check
+    custodian = node.identity
+    perform_job_integrity_check(p2p_address, custodian, temp_dir, node, job_hash, gpp, DOCKERFILE_COMMIT_ID)
+
+    return rest_address
 
 
 def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_test_processor):
@@ -1522,16 +1542,12 @@ def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_
 
     # prepare the job folder
     job_id = '398h36g3_00'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-    p2p_address = PortMaster.generate_p2p_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1],
-                                                                    p2p_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1545,15 +1561,12 @@ def test_cli_runner_failing_validation(docker_available, temp_dir, node, deploye
 
     # prepare the job folder
     job_id = '398h36g3_01'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
-                                       a={'wrong': 55}, b=1)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a={'wrong': 55}, b=1
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1572,14 +1585,12 @@ def test_cli_runner_success_by_reference(docker_available, temp_dir, node, deplo
 
     # prepare the job folder
     job_id = '398h36g3_02'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1600,14 +1611,12 @@ def test_cli_runner_failing_no_access(docker_available, temp_dir, node, deployed
 
     # prepare the job folder
     job_id = '398h36g3_03'
-    job_path = prepare_full_job_folder(temp_dir, node, user.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, user.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1626,14 +1635,12 @@ def test_cli_runner_failing_no_signature(docker_available, temp_dir, node, deplo
 
     # prepare the job folder
     job_id = '398h36g3_04'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1656,14 +1663,12 @@ def test_cli_runner_failing_no_data_object(docker_available, temp_dir, node, dep
 
     # prepare the job folder
     job_id = '398h36g3_05'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp_hash = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp_hash)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1682,14 +1687,12 @@ def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, node, de
 
     # prepare the job folder
     job_id = '398h36g3_06'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1708,14 +1711,12 @@ def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, node, 
 
     # prepare the job folder
     job_id = '398h36g3_07'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1730,14 +1731,12 @@ def test_cli_runner_success_no_name(docker_available, temp_dir, node, deployed_t
 
     # prepare the job folder
     job_id = '398h36g3_08'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd_noname, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)
@@ -1751,14 +1750,12 @@ def test_cli_runner_cancelled(docker_available, temp_dir, node, deployed_test_pr
 
     # prepare the job folder
     job_id = '398h36g3_09'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=5, b=6)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=5, b=6
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # try to cancel the job
     proxy = JobRESTProxy(rest_address)
@@ -1780,15 +1777,12 @@ def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, exe
 
     # prepare the job folder
     job_id = '398h36g3_10'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
-                                       a=a, b=b, target_node=exec_only_node)
+    job_path, job_hash, gpp = prepare_full_job_folder(
+        temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b, target_node=exec_only_node
+    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+    # get the job started
+    rest_address = kickstart_job(job_path, temp_dir, node, job_hash, gpp)
 
     # wait for the job to be finished
     job_result, status = wait_for_job_runner(job_path, rest_address)

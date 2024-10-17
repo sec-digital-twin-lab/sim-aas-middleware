@@ -1,7 +1,9 @@
 import json
 import os
 import socket
+import tempfile
 import threading
+import time
 
 import traceback
 from threading import Lock
@@ -15,11 +17,16 @@ from sqlalchemy_json import NestedMutableJson
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
-from simaas.core.helpers import generate_random_string, get_timestamp_now
+from simaas.core.assets import GithubCredentialsAsset
+from simaas.core.helpers import generate_random_string, get_timestamp_now, hash_json_object
 from simaas.core.identity import Identity
+from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container
+from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.p2p.messenger import SecureMessenger, P2PMessage
 from simaas.rti.api import RTIService, JobRESTProxy
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
 from simaas.rti.schemas import Processor, Job, Task, JobStatus
@@ -62,6 +69,40 @@ def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str
         })
     except Exception as e:
         logger.error(e)
+
+
+def verify_job_container_integrity(p2p_address: Tuple[str, int], job_hash: bytes, gpp_hash: bytes,
+                                   custodian: Keystore):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # try to establish a connection first
+        while True:
+            try:
+                peer, messenger = SecureMessenger.connect(p2p_address, custodian.identity, temp_dir)
+                break
+
+            except PeerUnavailableError | TimeoutError:
+                time.sleep(1)
+
+            except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                raise RTIException(f"Unexpected error while connecting to job container", details={
+                    'trace': trace
+                })
+
+        peer: Identity = peer  # this is the identity of the ephemeral job container -> may need to keep this somewhere
+        messenger: SecureMessenger = messenger
+
+        # inform the job container about the job hash, signed by the custodian
+        response = messenger.send_message(P2PMessage(protocol='check_integrity', type='verify_job',
+                                                     content={'signature': custodian.sign(job_hash)},
+                                                     attachment=None, sequence_id=None))
+
+        # verify that the job container GPP hash is what it should be
+        signature = response.content.get('signature', '') if response.content else None
+        if not peer.verify(gpp_hash, signature):
+            raise RTIException(f"Job container verification failed")
+
+        messenger.close()
 
 
 class DefaultRTIService(RTIService):
@@ -133,15 +174,22 @@ class DefaultRTIService(RTIService):
                         raise RTIException(f"Image loaded but {image_name} not found.")
 
                 else:
-                    # clone the repository and checkout the specified commit
                     repo_path = os.path.join(self._procs_path, proc.id)
                     repository = proc_obj.tags['repository']
                     commit_id = proc_obj.tags['commit_id']
-                    clone_repository(repository, repo_path, commit_id=commit_id)
+
+                    # get credentials (if any)
+                    credentials: GithubCredentialsAsset = self._node.keystore.github_credentials
+                    credentials: GithubCredentials = credentials.get(repository)
+                    credentials: Tuple[str, str] = \
+                        (credentials.login, credentials.personal_access_token) if credentials else None
+
+                    # clone the repository and checkout the specified commit
+                    clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
                     # build the image
                     proc_path = proc_obj.tags['proc_path']
-                    image_name_new, _, _ = build_processor_image(repo_path, proc_path)
+                    image_name_new, _, _ = build_processor_image(repo_path, proc_path, credentials=credentials)
                     if image_name_new != image_name:
                         raise RTIException(f"Mismatching image names after building from GPP: actual={image_name_new} "
                                            f"!= expected={image_name}")
@@ -369,12 +417,8 @@ class DefaultRTIService(RTIService):
                   owner=user, proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
         descriptor_path = os.path.join(job_path, 'job.descriptor')
         with open(descriptor_path, 'w') as f:
+            job_hash = hash_json_object(job.dict())
             json.dump(job.dict(), f, indent=2)
-
-        # write the gpp descriptor
-        gpp_path = os.path.join(job_path, 'gpp.descriptor')
-        with open(gpp_path, 'w') as f:
-            json.dump(proc.gpp.dict(), f, indent=2)
 
         # create the initial job status and write to file
         status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
@@ -400,6 +444,10 @@ class DefaultRTIService(RTIService):
         # start the job container
         logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
         docker_run_job_container(proc.image_name, job_path, rest_address, p2p_address)
+
+        # verify integrity
+        gpp_hash = hash_json_object(proc.gpp.dict())
+        verify_job_container_integrity(p2p_address, job_hash, gpp_hash, self._node.keystore)
 
         return job
 

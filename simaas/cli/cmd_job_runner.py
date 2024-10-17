@@ -10,6 +10,7 @@ from typing import Dict, Tuple, Set, Union, Optional, List
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from git import Repo
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
@@ -213,31 +214,32 @@ class JobRunner(CLICommand, ProgressListener):
                 descriptor = ProcessorDescriptor.parse_obj(json.load(f))
                 proc_name = descriptor.name
 
-        # do we have the processor we are looking for?
-        self._proc: ProcessorBase = procs_by_name.get(proc_name, None)
-        if self._proc is None:
+        # have we found the processor we are looking for?
+        found = procs_by_name.get(proc_name, None)
+        if found is None:
             raise CLIRuntimeError(f"No processor '{proc_name}' found at '{proc_path}'.")
+        proc_path: str = found[0]
+        self._proc: ProcessorBase = found[1]
         print(f"Found processor '{proc_name}' at '{proc_path}'")
 
-        # read the gpp descriptor
-        gpp_descriptor_path = os.path.join(self._wd_path, 'gpp.descriptor')
-        with open(gpp_descriptor_path, 'r') as f:
-            content = json.load(f)
-            gpp_hash = hash_json_object(content)
-            self._gpp = GitProcessorPointer.parse_obj(content)
-        print(f"Read GPP descriptor at {gpp_descriptor_path}")
+        # determine the GPP fields
+        repo = Repo(proc_path, search_parent_directories=True)
+        remote_url = repo.remotes.origin.url
+        remote_url = remote_url[:-4] if remote_url.endswith('.git') else remote_url
+        git_root = repo.git.rev_parse("--show-toplevel")
+        proc_path = os.path.relpath(proc_path, git_root)
+        commit_id = repo.head.commit.hexsha
+
+        # create the GPP descriptor and calculate the hash
+        self._gpp = GitProcessorPointer(repository=remote_url, commit_id=commit_id, proc_path=proc_path,
+                                        proc_descriptor=self._proc.descriptor.dict())
+        gpp_hash = hash_json_object(self._gpp.dict())
+        print(f"Created GPP descriptor: hash={gpp_hash.hex()})")
 
         return gpp_hash
 
     def _verify_integrity(self, p2p_address: Tuple[str, int], gpp_hash: bytes) -> None:
-        # verify we agree on what the processor descriptor is
-        proc_descriptor_hash0 = hash_json_object(self._gpp.proc_descriptor.dict())
-        proc_descriptor_hash1 = hash_json_object(self._proc.descriptor.dict())
-        if proc_descriptor_hash0 != proc_descriptor_hash1:
-            raise CLIRuntimeError(f"Mismatching processor descriptors.")
-        print(f"Found matching processor descriptors in GPP and processor.")
-
-        # read the job descriptor (it contains information about the custodian)
+        # read the job descriptor (it contains information about the custodian and the user)
         job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
         with open(job_descriptor_path, 'r') as f:
             content = json.load(f)
@@ -246,13 +248,18 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Read job descriptor at {job_descriptor_path}")
 
         # create shortcuts to user (job owner) and custodian identities
-        self._user = self._job.owner
-        self._custodian = self._job.custodian.identity
-        print(f"Using user (job owner) identity {self._user.id}")
+        self._user: Identity = self._job.owner
+        self._custodian: Identity = self._job.custodian.identity
+        print(f"Using user/owner identity:    {self._user.id}")
+        print(f"Using custodian identity:     {self._custodian.id}")
+
+        # check integrity of custodian and user identities
+        if not self._user.verify_integrity() or not self._custodian.verify_integrity():
+            raise CLIRuntimeError(f"Verification of user and/or custodian identity failed.")
 
         # create the ephemeral keystore, i.e., the job identity
         self._keystore = Keystore.new(name=f"job:{self._job.id}")
-        print(f"Using ephemeral job identity {self._keystore.identity.id}")
+        print(f"Using ephemeral job identity: {self._keystore.identity.id}")
 
         # create server socket and wait for incoming connection
         self._p2p_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -261,28 +268,27 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p_socket.bind(p2p_address)
         self._p2p_socket.listen(5)
 
-        # accept incoming connection
+        # accept incoming connection, create messenger and wait for custodian to connect
         peer_socket, _ = self._p2p_socket.accept()
-
-        # create messenger and wait for custodian to connect
         peer, messenger = SecureMessenger.accept(peer_socket, self._keystore.identity, self._wd_path)
         peer: Identity = peer
         messenger: SecureMessenger = messenger
 
-        # verify the peer to be the custodian
+        # the peer that is connecting should be the same as the custodian of the job
         if not peer.verify_integrity() or peer.id != self._custodian.id:
-            raise CLIRuntimeError(f"Custodian authentication failed.")
+            raise CLIRuntimeError(f"Verification of connecting peer failed.")
 
         # verify we agree with the custodian about what the job is
         message: P2PMessage = messenger.receive_message()
         signature = message.content.get('signature', '') if message.content else ''
         if (message.protocol != 'check_integrity' or message.type != 'verify_job' or
                 not self._custodian.verify(job_hash, signature)):
-            raise CLIRuntimeError(f"Job verification failed.")
+            raise CLIRuntimeError(f"Verification of failed.")
 
-        # send a response about what we know about the processor so the custodian can verify us
+        # send the GPP information to the custodian so the custodian can verify us
         signature = self._keystore.sign(gpp_hash)
-        messenger.send_response(P2PMessage(protocol='check_integrity', type='verify_proc', content={
+        messenger.send_response(P2PMessage(protocol='check_integrity', type='verify_gpp', content={
+            # 'gpp': self._gpp.dict(),
             'signature': signature
         }, attachment=None, sequence_id=None))
 

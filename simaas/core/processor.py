@@ -6,7 +6,7 @@ import sys
 import threading
 from importlib.util import spec_from_file_location, module_from_spec
 
-from typing import Dict
+from typing import Dict, Tuple
 
 from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string
@@ -177,7 +177,7 @@ class ProcessorBase(abc.ABC):
         pass
 
 
-def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
+def find_processors(search_path: str) -> Dict[str, Tuple[str, ProcessorBase]]:
     """
     Convenient function that finds all processor implementations in a given search path (including all its
     subdirectories) and returns a dictionary with the findings.
@@ -207,7 +207,7 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
                     if inspect.isclass(obj) and obj != ProcessorBase and issubclass(obj, ProcessorBase):
                         try:
                             instance: ProcessorBase = obj(root)
-                            result[instance.name] = instance
+                            result[instance.name] = (root, instance)
                         except Exception as e:
                             logger.warning(f"creating instance of {obj} failed: {e}")
 
