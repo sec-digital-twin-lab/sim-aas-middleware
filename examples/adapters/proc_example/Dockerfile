@@ -18,7 +18,7 @@ RUN --mount=type=secret,id=git_credentials \
     fi
 
 WORKDIR /sim-aas-middleware
-RUN git checkout a41da1a9b32a668d9072ce62670a560573b034df
+RUN git checkout 807c83d3d91218bdfd95a8b7b6c1d77c8783adbc
 
 # Install the repository with the processor -> in this example that happens to be the same repository
 RUN ln -s /sim-aas-middleware /proc-repo
