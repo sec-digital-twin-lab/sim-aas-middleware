@@ -623,10 +623,10 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Using job path at {self._wd_path}")
 
         try:
-            self._logger.info(f"begin processing job at {self._wd_path}")
-
             # setup logger
             self._setup_logger(args.get('log_level'))
+
+            self._logger.info(f"begin processing job at {self._wd_path}")
 
             # initialise processor
             gpp_hash = self._initialise_processor(args['proc_path'], args.get('proc_name'))

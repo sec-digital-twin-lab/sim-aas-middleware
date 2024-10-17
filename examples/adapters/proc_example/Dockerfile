@@ -1,12 +1,9 @@
 FROM ubuntu:24.04
 
 # Setup system
-RUN apt update -y && \
-    apt install -y tzdata && \
-    apt install -y software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa && \
+RUN DEBIAN_FRONTEND=noninteractive \
     apt update -y && \
-    apt install -y python3.12 python3-pip python3.12-venv git
+    apt install -y tzdata python3.12 python3-pip python3.12-venv git
 
 # Install the Sim-aaS Middleware
 RUN --mount=type=secret,id=git_credentials \
