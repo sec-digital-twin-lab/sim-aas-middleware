@@ -15,7 +15,7 @@ RUN --mount=type=secret,id=git_credentials \
     fi
 
 WORKDIR /sim-aas-middleware
-RUN git checkout a5bf32474a807716c59630cae0ce082b204026f2
+RUN git checkout 34edb566b53db5d2ba4dbc5fbaf2b4a79717a7da
 
 # Clone the repository of the processor. In this case, the example happens to be part of sim-aas-middleware which
 # has already been cloned above. Hence ln -s instead of cloning the repository again.
