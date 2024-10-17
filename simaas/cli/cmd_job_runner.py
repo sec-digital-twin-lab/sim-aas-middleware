@@ -622,11 +622,11 @@ class JobRunner(CLICommand, ProgressListener):
         self._wd_path = args['job_path']
         print(f"Using job path at {self._wd_path}")
 
-        # setup logger
-        self._setup_logger(args.get('log_level'))
-
         try:
             self._logger.info(f"begin processing job at {self._wd_path}")
+
+            # setup logger
+            self._setup_logger(args.get('log_level'))
 
             # initialise processor
             gpp_hash = self._initialise_processor(args['proc_path'], args.get('proc_name'))
@@ -694,7 +694,8 @@ class JobRunner(CLICommand, ProgressListener):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             print(f"{msg}\n{trace}")
 
-            self._logger.error(trace)
+            if self._logger:
+                self._logger.error(trace)
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
@@ -707,5 +708,6 @@ class JobRunner(CLICommand, ProgressListener):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             print(f"{msg}\n{trace}")
 
-            self._logger.error(trace)
+            if self._logger:
+                self._logger.error(trace)
             self._write_exitcode(ExitCode.ERROR, e)
