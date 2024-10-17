@@ -53,19 +53,21 @@ class SecureMessenger:
         self._cipher: Optional[Fernet] = None
 
     @classmethod
-    def connect(cls, peer_address: (str, int), identity: Identity, storage_path: str) -> (Identity, SecureMessenger):
+    def connect(cls, peer_address: (str, int), identity: Identity, storage_path: str,
+                timeout: int = 2) -> (Identity, SecureMessenger):
         """
         Attempts to connect to a peer by performing a handshake once the connection is established.
         :param peer_address: the address (host:port) of the peer
         :param identity: the identity of the peer's counterparty
         :param storage_path: path to where attachments are being stored
+        :param timeout:
         :return: the identity of the peer and the SecureMessenger object if successful.
         :raise PeerUnavailableError
         :raise HandshakeFailedError
         """
         try:
             # try to establish a socket connection to the peer and create a messenger
-            messenger = SecureMessenger(socket.create_connection(peer_address), storage_path)
+            messenger = SecureMessenger(socket.create_connection(peer_address, timeout=timeout), storage_path)
             peer = messenger._handshake(identity)
             return peer, messenger
 
