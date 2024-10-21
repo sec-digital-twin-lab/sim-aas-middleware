@@ -2,15 +2,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-import cryptography.hazmat.primitives.serialization as serialization
-from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey, EllipticCurvePublicKey
-
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.keypair import KeyPair
 from simaas.core.logging import Logging
 
@@ -25,11 +20,11 @@ class ECKeyPair(KeyPair):
     a number of methods for creating and verifying signatures and authentication/authorisation tokens.
     """
 
-    def __init__(self, private_key: Optional[EllipticCurvePrivateKey], public_key: EllipticCurvePublicKey) -> None:
+    def __init__(self, private_key: Optional[Ed25519PrivateKey], public_key: Ed25519PublicKey) -> None:
         KeyPair.__init__(self, private_key, public_key)
 
     def info(self) -> str:
-        return f"EC/{self.private_key.curve.name}/{self.private_key.curve.key_size}/{self.iid}"
+        return f"EC/Ed25519/256/{self.iid}"
 
     @classmethod
     def create_new(cls) -> ECKeyPair:
@@ -37,14 +32,11 @@ class ECKeyPair(KeyPair):
         Creates an ECKeyPair instance with a randomly generated private key.
         :return: ECKeyPair instance
         """
-        private_key = ec.generate_private_key(
-            curve=ec.SECP384R1(),
-            backend=default_backend()
-        )
+        private_key = ed25519.Ed25519PrivateKey.generate()
         return ECKeyPair.from_private_key(private_key)
 
     @classmethod
-    def from_private_key(cls, private_key: EllipticCurvePrivateKey) -> ECKeyPair:
+    def from_private_key(cls, private_key: Ed25519PrivateKey) -> ECKeyPair:
         """
         Creates an ECKeyPair instance based on a given private key.
         :param private_key:
@@ -61,32 +53,8 @@ class ECKeyPair(KeyPair):
         :param password: the password used to protect the private key
         :return: ECKeyPair instance
         """
-        if password:
-            password = password.encode('utf-8')
-
-            if '-----BEGIN ENCRYPTED PRIVATE KEY-----' not in private_key_string:
-                private_key_string = \
-                    '\n'.join(private_key_string[i:i + 64] for i in range(0, len(private_key_string), 64))
-                private_key_string = \
-                    f"-----BEGIN ENCRYPTED PRIVATE KEY-----\n{private_key_string}\n-----END ENCRYPTED PRIVATE KEY-----"
-
-        else:
-            if '-----BEGIN PRIVATE KEY-----' not in private_key_string:
-                private_key_string = \
-                    '\n'.join(private_key_string[i:i + 64] for i in range(0, len(private_key_string), 64))
-                private_key_string = f"-----BEGIN PRIVATE KEY-----\n{private_key_string}\n-----END PRIVATE KEY-----"
-
-        try:
-            private_key = serialization.load_pem_private_key(
-                data=private_key_string.encode('utf-8'),
-                password=password,
-                backend=default_backend()
-            )
-            public_key = private_key.public_key()
-            return ECKeyPair(private_key, public_key)
-
-        except Exception:
-            raise SaaSRuntimeException("Loading key failed. Password wrong?")
+        private_key_bytes = bytes.fromhex(private_key_string)
+        return ECKeyPair.from_private_key(Ed25519PrivateKey.from_private_bytes(private_key_bytes))
 
     @classmethod
     def from_private_key_file(cls, path: str, password: str) -> ECKeyPair:
@@ -97,15 +65,11 @@ class ECKeyPair(KeyPair):
         :return: ECKeyPair instance
         """
         with open(path, "rb") as f:
-            private_key = serialization.load_pem_private_key(
-                data=f.read(),
-                password=password.encode('utf-8'),
-                backend=default_backend()
-            )
-            return ECKeyPair.from_private_key(private_key)
+            private_key_bytes = f.read()
+            return ECKeyPair.from_private_key(Ed25519PrivateKey.from_private_bytes(private_key_bytes))
 
     @classmethod
-    def from_public_key(cls, public_key: EllipticCurvePublicKey) -> ECKeyPair:
+    def from_public_key(cls, public_key: Ed25519PublicKey) -> ECKeyPair:
         """
         Creates an ECKeyPair instance based on a given public key. Note that the private key cannot be derived
         from the public key. An ECKeyPair instance generated this way cannot be used for creating signatures, only
@@ -124,11 +88,7 @@ class ECKeyPair(KeyPair):
         :param public_key_bytes: the public key as byte array
         :return: ECKeyPair instance
         """
-        public_key = serialization.load_pem_public_key(
-            data=public_key_bytes,
-            backend=default_backend()
-        )
-        return ECKeyPair.from_public_key(public_key)
+        return ECKeyPair.from_public_key(Ed25519PublicKey.from_public_bytes(public_key_bytes))
 
     @classmethod
     def from_public_key_string(cls, public_key_string: str) -> ECKeyPair:
@@ -139,11 +99,8 @@ class ECKeyPair(KeyPair):
         :param public_key_string: the public key as string (full-length or truncated)
         :return: ECKeyPair instance
         """
-        if '-----BEGIN PUBLIC KEY-----' not in public_key_string:
-            public_key_string = '\n'.join(public_key_string[i:i + 64] for i in range(0, len(public_key_string), 64))
-            public_key_string = f"-----BEGIN PUBLIC KEY-----\n{public_key_string}\n-----END PUBLIC KEY-----"
-
-        return ECKeyPair.from_public_key_bytes(public_key_string.encode('utf-8'))
+        public_key_bytes = bytes.fromhex(public_key_string)
+        return ECKeyPair.from_public_key_bytes(public_key_bytes)
 
     @classmethod
     def from_public_key_file(cls, path: str) -> ECKeyPair:
@@ -155,11 +112,20 @@ class ECKeyPair(KeyPair):
         :return: ECKeyPair instance
         """
         with open(path, "rb") as f:
-            public_key = serialization.load_pem_public_key(
-                data=f.read(),
-                backend=default_backend()
-            )
-            return ECKeyPair.from_public_key(public_key)
+            public_key_bytes = f.read()
+            return ECKeyPair.from_public_key_bytes(public_key_bytes)
+
+    def private_as_bytes(self, password: str = None) -> bytes:
+        return self.private_key.private_bytes_raw()
+
+    def private_as_string(self, password: str = None, truncate: bool = True) -> str:
+        return self.private_as_bytes().hex()
+
+    def public_as_bytes(self) -> bytes:
+        return self.public_key.public_bytes_raw()
+
+    def public_as_string(self, truncate: bool = True) -> str:
+        return self.public_as_bytes().hex()
 
     def sign(self, message: bytes) -> str:
         """
@@ -167,7 +133,7 @@ class ECKeyPair(KeyPair):
         :param message: the message that has to be signed
         :return: the signature
         """
-        return self.private_key.sign(message, ec.ECDSA(hashes.SHA256())).hex()
+        return self.private_key.sign(message).hex()
 
     def verify(self, message: bytes, signature: str) -> bool:
         """
@@ -177,7 +143,7 @@ class ECKeyPair(KeyPair):
         :return: True of False depending on whether the signature is valid
         """
         try:
-            self.public_key.verify(bytes.fromhex(signature), message, ec.ECDSA(hashes.SHA256()))
+            self.public_key.verify(bytes.fromhex(signature), message)
             return True
         except InvalidSignature:
             return False

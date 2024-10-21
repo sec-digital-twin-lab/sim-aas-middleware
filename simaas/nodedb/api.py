@@ -4,7 +4,6 @@ import abc
 from typing import Optional, List, Dict, Tuple
 
 from simaas.core.identity import Identity
-from simaas.nodedb.protocol import NodeDBP2PProtocol
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
@@ -13,9 +12,6 @@ DB_ENDPOINT_PREFIX = "/api/v1/db"
 
 
 class NodeDBService(abc.ABC):
-    def __init__(self, protocol: NodeDBP2PProtocol):
-        self._protocol = protocol
-
     def endpoints(self) -> List[EndpointDefinition]:
         return [
             EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'node',
@@ -33,10 +29,6 @@ class NodeDBService(abc.ABC):
             EndpointDefinition('POST', DB_ENDPOINT_PREFIX, 'identity',
                                self.update_identity, Identity, None),
         ]
-
-    @property
-    def protocol(self) -> NodeDBP2PProtocol:
-        return self._protocol
 
     @abc.abstractmethod
     def get_node(self) -> NodeInfo:
