@@ -17,7 +17,6 @@ from simaas.core.helpers import validate_json, hash_json_object
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rest.exceptions import UnsuccessfulRequestError

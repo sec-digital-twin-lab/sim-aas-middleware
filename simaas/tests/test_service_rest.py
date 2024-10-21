@@ -1,3 +1,4 @@
+import asyncio
 import random
 import string
 import logging
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.node.base import Node
 from simaas.rest.auth import VerifyAuthorisation
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
@@ -142,7 +144,7 @@ class TestProxy(EndpointProxy):
 
 
 @pytest.fixture(scope='session')
-def rest_node(test_context, keystore):
+def rest_node(test_context, keystore) -> Node:
     _node = test_context.get_node(keystore, enable_rest=True)
     rest_service = TestRESTService()
 

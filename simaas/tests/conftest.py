@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -6,7 +7,7 @@ import subprocess
 import tempfile
 import time
 import traceback
-from typing import List
+from typing import List, Tuple
 
 import pytest
 from dotenv import load_dotenv
@@ -298,15 +299,15 @@ class TestContext:
             f.write(content)
         return path
 
-    def get_node(self, keystore: Keystore, enable_rest: bool = False,
-                 use_dor: bool = True, use_rti: bool = True, retain_job_history: bool = True,
-                 strict_deployment: bool = False, job_concurrency: bool = False, wd_path: str = None) -> Node:
+    def get_node(self, keystore: Keystore, enable_rest: bool = False, use_dor: bool = True, use_rti: bool = True,
+                 retain_job_history: bool = True, strict_deployment: bool = False, job_concurrency: bool = False,
+                 wd_path: str = None) -> Node:
         name = keystore.identity.id
         if name in self.nodes:
             return self.nodes[name]
 
-        p2p_address = PortMaster.generate_p2p_address(self.host)
-        rest_address = PortMaster.generate_rest_address(self.host)
+        p2p_address: str = PortMaster.generate_p2p_address(self.host)
+        rest_address: Tuple[str, int] = PortMaster.generate_rest_address(self.host)
 
         storage_path = os.path.join(wd_path if wd_path else self.testing_dir, name)
         os.makedirs(storage_path, exist_ok=True)
@@ -317,6 +318,7 @@ class TestContext:
                            strict_deployment=strict_deployment if use_rti else None,
                            job_concurrency=job_concurrency if use_rti else None)
         node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
+        time.sleep(2)
 
         self.nodes[name] = node
 

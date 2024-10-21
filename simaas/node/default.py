@@ -45,12 +45,12 @@ class DefaultNode(Node):
         return self._datastore_path
 
     @classmethod
-    def create(cls, keystore: Keystore, storage_path: str, p2p_address: (str, int), rest_address: (str, int) = None,
-               boot_node_address: (str, int) = None, bind_all_address: bool = False,
-               enable_db: bool = True, enable_dor: bool = False, enable_rti: bool = False,
-               retain_job_history: bool = False, strict_deployment: bool = True, job_concurrency: bool = False
-               ) -> Node:
-
+    def create(
+            cls, keystore: Keystore, storage_path: str, p2p_address: str, rest_address: (str, int) = None,
+            boot_node_address: (str, int) = None, bind_all_address: bool = False, enable_db: bool = True,
+            enable_dor: bool = False, enable_rti: bool = False, retain_job_history: bool = False,
+            strict_deployment: bool = True, job_concurrency: bool = False
+    ) -> Node:
         node = DefaultNode(keystore, storage_path,
                            enable_db=enable_db, enable_dor=enable_dor, enable_rti=enable_rti,
                            retain_job_history=retain_job_history, strict_deployment=strict_deployment,

@@ -1,288 +1,244 @@
+import asyncio
+import json
 import logging
 import os
-import socket
-import time
-from threading import Thread
-from typing import Optional, List
+import tempfile
+from typing import List, Dict
 
 import pytest
-from pydantic import BaseModel
 
-from simaas.core.helpers import hash_file_content
+from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
+from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.dor.api import DORProxy
+from simaas.dor.exceptions import FetchDataObjectFailedError
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
+from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
+from simaas.node.base import Node
+from simaas.node.default import DefaultNode
+from simaas.nodedb.api import NodeDBProxy
+from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.exceptions import PeerUnavailableError
-from simaas.p2p.messenger import SecureMessenger, P2PMessage
-from simaas.p2p.protocol import P2PProtocol, BroadcastResponse
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
-class Bounce(BaseModel):
-    value: str
-    bounced_to: Optional[Identity]
+@pytest.fixture(scope="module")
+def p2p_server(test_context, extra_keystores) -> Node:
+    _node: Node = test_context.get_node(extra_keystores[0], enable_rest=True, use_dor=True, use_rti=False)
+
+    yield _node
+
+    _node.shutdown(leave_network=False)
 
 
-class BounceRequest(BaseModel):
-    value: int
+@pytest.fixture(scope="module")
+def p2p_client(test_context, extra_keystores) -> Node:
+    _node: Node = test_context.get_node(extra_keystores[1], enable_rest=False, use_dor=False, use_rti=False)
+
+    yield _node
+
+    _node.shutdown(leave_network=False)
 
 
-class BounceResponse(BaseModel):
-    value: int
+@pytest.mark.asyncio
+async def test_p2p_unreachable(p2p_server, p2p_client):
+    protocol = P2PUpdateIdentity(p2p_client)
+
+    info: NodeInfo = p2p_server.info
+    info.p2p_address = PortMaster.generate_p2p_address()
+
+    try:
+        await protocol.perform(info)
+        assert False
+    except PeerUnavailableError:
+        assert True
+    except Exception:
+        assert False
 
 
-class OneWayMessage(BaseModel):
-    msg: str
+@pytest.mark.asyncio
+async def test_p2p_update_identity(p2p_server, p2p_client):
+    protocol = P2PUpdateIdentity(p2p_client)
+
+    try:
+        result: Identity = await protocol.perform(p2p_server.info)
+        assert result.id == p2p_server.identity.id
+    except Exception:
+        assert False
 
 
-class SimpleProtocol(P2PProtocol):
-    def __init__(self, node):
-        self._node = node
-        super().__init__(node.identity, node.datastore, 'simple_protocol', [
-            (BounceRequest, self._handle_bounce, BounceResponse),
-            (OneWayMessage, self._handle_oneway, None)
-        ])
+@pytest.mark.asyncio
+async def test_p2p_join_leave_network(p2p_server, p2p_client):
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    assert len(networkS) == 1
+    assert len(networkC) == 1
 
-    def send_bounce(self, peer_address: (str, int), value: int) -> int:
-        response, attachment, peer = self.request(peer_address, BounceRequest(value=value))
-        return response.value
+    # since we don't know anything about the peer yet, get some info first
+    boot_node: NodeInfo = p2p_server.info
 
-    def send_oneway(self, peer_address: (str, int), msg: str) -> None:
-        response, attachment, peer = self.request(peer_address, OneWayMessage(msg=msg))
-        assert(response is None)
-        assert(attachment is None)
-        assert(peer is not None)
+    protocol = P2PJoinNetwork(p2p_client)
+    result: NodeInfo = await protocol.perform(boot_node)
+    assert result.identity.id == p2p_server.identity.id
 
-    def broadcast_bounce(self, network: List[NodeInfo], value: int) -> BroadcastResponse:
-        return self.broadcast(network, BounceRequest(value=value), exclude_self=False)
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    assert len(networkS) == 2
+    assert len(networkC) == 2
 
-    def _handle_bounce(self, request: BounceRequest, _: Identity) -> BounceResponse:
-        return BounceResponse(value=request.value+1)
+    protocol = P2PLeaveNetwork(p2p_client)
+    await protocol.perform(blocking=True)
 
-    def _handle_oneway(self, request: OneWayMessage, _: Identity) -> None:
-        print(f"received one-way message: {request.msg}")
-
-
-@pytest.fixture()
-def p2p_node(test_context, keystore):
-    node = test_context.get_node(keystore, use_dor=False, use_rti=False)
-    return node
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    assert len(networkS) == 1
+    assert len(networkC) == 2
 
 
-@pytest.fixture()
-def server_identity(extra_keystores):
-    return extra_keystores[0].identity
+@pytest.mark.asyncio
+async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
+    # client is supposed to be the owner of the data object -> make the server aware of the identity
+    owner = p2p_client.identity
+    nodedb = NodeDBProxy(p2p_server.rest.address())
+    nodedb.update_identity(owner)
+
+    # upload the data object
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'content.json')
+        with open(content_path, 'w') as f:
+            json.dump({'v': 1}, f, indent=2)
+
+        dor = DORProxy(p2p_server.rest.address())
+        meta = dor.add_data_object(content_path, owner, False, False, 'JSONObject', 'json')
+        obj_id = meta.obj_id
+
+    # perform the lookup
+    protocol = P2PLookupDataObject(p2p_client)
+    result: Dict[str, DataObject] = await protocol.perform(p2p_server.info, [obj_id])
+    assert len(result) == 1
+    assert obj_id in result
+
+    protocol = P2PFetchDataObject(p2p_client)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        meta_path = os.path.join(temp_dir, 'meta.json')
+        content_path = os.path.join(temp_dir, 'content.json')
+
+        # perform a valid fetch
+        try:
+            meta: DataObject = await protocol.perform(p2p_server.info, obj_id, meta_path, content_path)
+            assert meta.obj_id == obj_id
+            assert os.path.isfile(meta_path)
+            assert os.path.isfile(content_path)
+        except Exception:
+            assert False
+
+        # perform an invalid fetch
+        try:
+            await protocol.perform(p2p_server.info, '01234', meta_path, content_path)
+            assert False
+        except FetchDataObjectFailedError as e:
+            assert 'data object not found' in e.details['reason']
+        except Exception:
+            assert False
 
 
-@pytest.fixture()
-def client_identity(extra_keystores):
-    return extra_keystores[1].identity
-
-
-def test_simple_protocol(p2p_node):
-    protocol = SimpleProtocol(p2p_node)
-    p2p_node.p2p.add(protocol)
-
-    value = protocol.send_bounce(p2p_node.info.p2p_address, 42)
-    assert(value == 43)
-
-    b_response = protocol.broadcast_bounce(p2p_node.db.get_network(), 42)
-    assert(len(b_response.responses) == 1)
-    assert(p2p_node.identity.id in b_response.responses)
-    for response, attachment, peer in b_response.responses.values():
-        assert(response.value == 43)
-        assert(attachment is None)
-        assert(peer.id == p2p_node.identity.id)
-
-    protocol.send_oneway(p2p_node.info.p2p_address, 'hello!!!')
-
-
-def test_unreachable(test_context, p2p_node):
-    with pytest.raises(PeerUnavailableError):
+@pytest.mark.asyncio
+async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # create a fresh client node
+        keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
+        client = DefaultNode(keystore, os.path.join(temp_dir, f'client_node'),
+                             enable_db=True, enable_dor=False, enable_rti=False)
         p2p_address = PortMaster.generate_p2p_address()
-        SecureMessenger.connect(p2p_address, p2p_node.identity, test_context.testing_dir)
+        rest_address = PortMaster.generate_rest_address()
+        client.startup(p2p_address, rest_address=rest_address)
+        await asyncio.sleep(1)
 
+        # create an owner for the data object -> make the server aware of the identity
+        owner = Keystore.new(f"owner-{get_timestamp_now()}")
+        nodedb = NodeDBProxy(p2p_server.rest.address())
+        nodedb.update_identity(owner.identity)
 
-def test_secure_connect_accept(test_context, server_identity, client_identity):
-    wd_path = test_context.testing_dir
-    server_address = PortMaster.generate_p2p_address()
+        # upload the data object
+        content_path = os.path.join(temp_dir, 'content.json')
+        with open(content_path, 'w') as f:
+            json.dump({'v': 1}, f, indent=2)
 
-    class TestServer(Thread):
-        def run(self):
-            # create server socket
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind(server_address)
-            server_socket.listen(1)
+        dor = DORProxy(p2p_server.rest.address())
+        meta = dor.add_data_object(content_path, owner.identity, True, False, 'JSONObject', 'json')
+        obj_id = meta.obj_id
 
-            peer_socket, peer_address = server_socket.accept()
+        protocol = P2PFetchDataObject(client)
+        meta_path = os.path.join(temp_dir, 'meta.json')
+        content_path = os.path.join(temp_dir, 'content.json')
 
-            # create messenger and perform handshake
-            server_peer_identity, server_messenger = \
-                SecureMessenger.accept(peer_socket, server_identity, wd_path)
-            assert(server_peer_identity.id == client_identity.id)
-            server_messenger.close()
+        # try to fetch a data object that doesn't exist
+        try:
+            fake_obj_id = 'abcdef'
+            await protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
+            assert False
+        except FetchDataObjectFailedError as e:
+            assert 'data object not found' in e.details['reason']
+        except Exception:
+            assert False
 
-            server_socket.close()
+        # the client identity is not known to the server at this point to receive the data object
+        try:
+            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            assert False
+        except FetchDataObjectFailedError as e:
+            assert 'user id not found' in e.details['reason']
+        except Exception:
+            assert False
 
-    server = TestServer()
-    server.start()
-    time.sleep(1)
+        # update the server with the client identity
+        p2p_server.db.update_identity(client.identity)
 
-    client_peer_identity, client_messenger = \
-        SecureMessenger.connect(server_address, client_identity, wd_path)
-    assert(client_peer_identity.id == server_identity.id)
-    client_messenger.close()
-    server.join()
+        # the client does not have permission at this point to receive the data object
+        try:
+            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            assert False
+        except FetchDataObjectFailedError as e:
+            assert 'user does not have access' in e.details['reason']
+        except Exception:
+            assert False
 
+        # grant permission
+        dor = DORProxy(p2p_server.rest.address())
+        meta = dor.grant_access(obj_id, owner, client.identity)
+        assert client.identity.id in meta.access
 
-def test_secure_send_receive_object(test_context, server_identity, client_identity):
-    wd_path = test_context.testing_dir
-    server_address = PortMaster.generate_p2p_address()
+        # the client does not have a valid permission at this point to receive the data object
+        try:
+            token = f"{client.identity.id}:12343245"
+            invalid_signature = client.keystore.sign(token.encode('utf-8'))
 
-    class TestMessage(BaseModel):
-        key1: str
-        key2: int
+            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
+                                   user_signature=invalid_signature)
+            assert False
+        except FetchDataObjectFailedError as e:
+            assert 'authorisation failed' in e.details['reason']
+        except Exception:
+            assert False
 
-    ref_obj = TestMessage(key1='value', key2=2)
+        # create valid user signature
+        token = f"{client.identity.id}:{obj_id}"
+        signature = client.keystore.sign(token.encode('utf-8'))
 
-    class TestServer(Thread):
-        def run(self):
-            # create server socket
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind(server_address)
-            server_socket.listen(1)
-
-            peer_socket, peer_address = server_socket.accept()
-
-            # create messenger and perform handshake
-            server_peer_identity, server_messenger = \
-                SecureMessenger.accept(peer_socket, server_identity, wd_path)
-            # FIXME: Assertions do not work for threads in test
-            assert(server_peer_identity.id == client_identity.id)
-
-            server_obj = TestMessage.parse_obj(server_messenger._receive_object())
-            assert(server_obj == ref_obj)
-            server_messenger.close()
-
-            server_socket.close()
-
-    server = TestServer()
-    server.start()
-    time.sleep(1)
-
-    client_peer_identity, client_messenger = SecureMessenger.connect(server_address, client_identity, wd_path)
-    assert(client_peer_identity.id == server_identity.id)
-    client_messenger._send_object(ref_obj.dict())
-    client_messenger.close()
-    server.join()
-
-
-def test_secure_send_receive_stream(test_context, server_identity, client_identity):
-    wd_path = test_context.testing_dir
-    server_address = PortMaster.generate_p2p_address()
-
-    # generate some data
-    source_path = os.path.join(wd_path, 'source.dat')
-    destination_path = os.path.join(wd_path, 'destination.dat')
-    file_size = 5*1024*1024
-    test_context.generate_random_file(source_path, file_size)
-    file_hash = hash_file_content(source_path).hex()
-
-    class TestServer(Thread):
-        def run(self):
-            # create server socket
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind(server_address)
-            server_socket.listen(1)
-
-            peer_socket, peer_address = server_socket.accept()
-
-            # create messenger and perform handshake
-            server_peer_identity, server_messenger = \
-                SecureMessenger.accept(peer_socket, server_identity, wd_path)
-            assert(server_peer_identity.id == client_identity.id)
-
-            server_file_size = server_messenger._receive_stream(destination_path)
-            assert(server_file_size == file_size)
-
-            server_file_hash = hash_file_content(destination_path).hex()
-            assert(server_file_hash == file_hash)
-
-            server_messenger.close()
-            server_socket.close()
-
-    server = TestServer()
-    server.start()
-    time.sleep(5)
-
-    client_peer_identity, client_messenger = SecureMessenger.connect(server_address, client_identity, wd_path)
-    assert(client_peer_identity.id == server_identity.id)
-    client_messenger._send_stream(source_path)
-
-    client_messenger.close()
-    server.join()
-
-
-def test_secure_send_receive_request(test_context, server_identity, client_identity):
-    wd_path = test_context.testing_dir
-    server_address = PortMaster.generate_p2p_address()
-
-    class TestServer(Thread):
-        def run(self):
-            # create server socket
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server_socket.bind(server_address)
-            server_socket.listen(1)
-
-            peer_socket, peer_address = server_socket.accept()
-
-            # create messenger and perform handshake
-            server_peer_identity, server_messenger = \
-                SecureMessenger.accept(peer_socket, server_identity, wd_path)
-            assert(server_peer_identity.id == client_identity.id)
-
-            request: P2PMessage = server_messenger.receive_message()
-            assert(request.type == 'Q')
-            assert('question' in request.content)
-            logger.debug(f"request received: {request}")
-
-            server_messenger.send_response(P2PMessage.parse_obj({
-                'protocol': request.protocol,
-                'type': 'A',
-                'content': {'answer': '42'},
-                'attachment': None,
-                'sequence_id': request.sequence_id
-            }))
-            server_messenger.close()
-
-            server_socket.close()
-
-    server = TestServer()
-    server.start()
-    time.sleep(1)
-
-    client_peer_identity, client_messenger = SecureMessenger.connect(server_address, client_identity, wd_path)
-    assert(client_peer_identity.id == server_identity.id)
-
-    response = client_messenger.send_message(P2PMessage.parse_obj({
-        'protocol': 'Hitchhiker',
-        'type': 'Q',
-        'content': {'question': 'What is the answer to the ultimate question of life, the universe and everything?'},
-        'attachment': None,
-        'sequence_id': None
-    }))
-
-    logger.debug(f"response received: {response}")
-    assert(response.type == 'A')
-    assert('answer' in response.content)
-    assert(response.content['answer'] == '42')
-
-    client_messenger.close()
-    server.join()
+        # the client does not have permission at this point to receive the data object
+        try:
+            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path,
+                                   user_iid=client.identity.id, user_signature=signature)
+            assert meta.obj_id == obj_id
+            assert os.path.isfile(meta_path)
+            assert os.path.isfile(content_path)
+        except FetchDataObjectFailedError:
+            assert False
+        except Exception:
+            assert False

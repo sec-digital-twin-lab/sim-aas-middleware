@@ -8,12 +8,10 @@ import pytest
 
 from simaas.core.helpers import hash_json_object, symmetric_decrypt, symmetric_encrypt, generate_random_file, \
     hash_file_content
-from simaas.dor.exceptions import FetchDataObjectFailedError
 from simaas.dor.schemas import DataObject
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import Logging
 from simaas.rest.exceptions import UnsuccessfulRequestError
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -461,54 +459,6 @@ def test_content_encryption(test_context, known_users, dor_proxy):
     assert(unprotected_content == content_plain)
 
     dor_proxy.delete_data_object(obj_id, owner2)
-
-
-def test_fetch_data_object(test_context, known_users, dor_proxy, node_db_proxy, node, receiver):
-    owner = known_users[0]
-    meta = dor_proxy.add_data_object(test_context.generate_zero_file('test000.dat', 1024*1024),
-                                     owner.identity, True, False, 'map', 'json')
-    obj_id = meta.obj_id
-
-    # update identity
-    receiver_identity = receiver.update_identity()
-    node_db_proxy.update_identity(receiver_identity)
-
-    protocol = DataObjectRepositoryP2PProtocol(receiver)
-
-    # try to fetch a data object that doesn't exist
-    fake_obj_id = 'abcdef'
-    meta_path = os.path.join(test_context.testing_dir, f"{fake_obj_id}.meta")
-    content_path = os.path.join(test_context.testing_dir, f"{fake_obj_id}.content")
-    with pytest.raises(FetchDataObjectFailedError):
-        protocol.fetch(node.p2p.address(), fake_obj_id,
-                       destination_meta_path=meta_path,
-                       destination_content_path=content_path)
-
-    # the receiver does not have permission at this point to receive the data object
-    meta_path = os.path.join(test_context.testing_dir, f"{obj_id}.meta")
-    content_path = os.path.join(test_context.testing_dir, f"{obj_id}.content")
-    with pytest.raises(FetchDataObjectFailedError):
-        protocol.fetch(node.p2p.address(), obj_id,
-                       destination_meta_path=meta_path,
-                       destination_content_path=content_path)
-
-    # grant permission
-    meta = dor_proxy.grant_access(obj_id, owner, receiver_identity)
-    assert receiver_identity.id in meta.access
-
-    # create user signature to delegate access rights
-    token = f"{receiver_identity.id}:{obj_id}"
-    signature = receiver.keystore.sign(token.encode('utf-8'))
-
-    # the receiver does have permission at this point to receive the data object
-    protocol.fetch(node.p2p.address(), obj_id,
-                   destination_meta_path=meta_path,
-                   destination_content_path=content_path,
-                   user_signature=signature, user_iid=receiver_identity.id)
-    assert os.path.isfile(meta_path)
-    assert os.path.isfile(content_path)
-
-    dor_proxy.delete_data_object(obj_id, owner)
 
 
 def test_search_by_content_hashes(test_context, known_users, dor_proxy):

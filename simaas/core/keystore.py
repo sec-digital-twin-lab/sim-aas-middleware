@@ -6,7 +6,9 @@ import string
 from threading import Lock
 from typing import Optional
 
+import zmq
 from pydantic import ValidationError
+from zmq.utils import z85
 
 from simaas.core.eckeypair import ECKeyPair
 from simaas.core.exceptions import SaaSRuntimeException
@@ -56,6 +58,11 @@ class Keystore:
         self._s_key = self._loaded['signing-key'].get()
         self._e_key = self._loaded['encryption-key'].get()
 
+        # create curve public key
+        self._curve_secret: bytes = self._s_key.private_as_bytes()
+        self._curve_secret: bytes = z85.encode(self._curve_secret)
+        self._curve_public: bytes = zmq.curve_public(self._curve_secret)
+
         # check if signature is valid
         content_hash = hash_json_object(content.dict(), exclusions=['signature'])
         if not self._s_key.verify(content_hash, content.signature):
@@ -65,7 +72,7 @@ class Keystore:
         self._update_identity()
 
     @classmethod
-    def new(cls, name: str, email: str, path: str = None, password: str = None) -> Keystore:
+    def new(cls, name: str, email: str = None, path: str = None, password: str = None) -> Keystore:
         # create random keystore id
         iid = generate_random_string(64, characters=string.ascii_lowercase+string.digits)
 
@@ -82,7 +89,7 @@ class Keystore:
             'iid': iid,
             'profile': {
                 'name': name,
-                'email': email
+                'email': email if email else 'none'
             },
             'nonce': 0,
             'assets': {
@@ -178,6 +185,12 @@ class Keystore:
         with self._mutex:
             return self._s_key
 
+    def curve_secret_key(self) -> bytes:
+        return self._curve_secret
+
+    def curve_public_key(self) -> bytes:
+        return self._curve_public
+
     def update_profile(self, name: str = None, email: str = None) -> Identity:
         with self._mutex:
             if name is not None:
@@ -238,6 +251,7 @@ class Keystore:
                                   email=self._content.profile.email,
                                   s_public_key=self._s_key.public_as_string(),
                                   e_public_key=self._e_key.public_as_string(),
+                                  c_public_key=self._curve_public.hex(),
                                   nonce=self._content.nonce,
                                   signature=signature,
                                   last_seen=get_timestamp_now())

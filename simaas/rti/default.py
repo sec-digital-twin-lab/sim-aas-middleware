@@ -18,7 +18,6 @@ from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container
 from simaas.rti.api import RTIService, JobRESTProxy
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError

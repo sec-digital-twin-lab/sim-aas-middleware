@@ -114,6 +114,55 @@ class RSAKeyPair(KeyPair):
             )
             return RSAKeyPair.from_public_key(public_key)
 
+    def private_as_bytes(self, password: str = None) -> bytes:
+        if self.private_key is None:
+            raise SaaSRuntimeException('No private key found')
+
+        # encrypt with a password?
+        key_encryption_algorithm = serialization.NoEncryption()
+        if password:
+            key_encryption_algorithm = serialization.BestAvailableEncryption(password.encode('utf-8'))
+
+        return self.private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=key_encryption_algorithm
+        )
+
+    def private_as_string(self, password: str = None, truncate: bool = True) -> str:
+        if self.private_key is None:
+            raise SaaSRuntimeException('No private key found')
+
+        result = self.private_as_bytes(password).decode('utf-8')
+        if truncate:
+            if password:
+                result = result.replace('\n', '')
+                result = result[37:-35]
+            else:
+                result = result.replace('\n', '')
+                result = result[27:-25]
+
+        return result
+
+    def public_as_bytes(self) -> bytes:
+        return self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+    def public_as_string(self, truncate: bool = True) -> str:
+        result = self.public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        result = result.decode('utf-8')
+
+        if truncate:
+            result = result.replace('\n', '')
+            result = result[26:-24]
+
+        return result
+
     def sign(self, message: bytes) -> str:
         """
         Sign a message using the private key.

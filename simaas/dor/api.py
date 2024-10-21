@@ -4,7 +4,6 @@ import abc
 from typing import Optional, List, Tuple
 from fastapi import Response, Form, UploadFile, File
 
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -16,9 +15,6 @@ DOR_ENDPOINT_PREFIX = "/api/v1/dor"
 
 
 class DORService(abc.ABC):
-    def __init__(self, protocol: DataObjectRepositoryP2PProtocol):
-        self._protocol = protocol
-
     def endpoints(self) -> List[EndpointDefinition]:
         return [
             EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '',
@@ -57,10 +53,6 @@ class DORService(abc.ABC):
             EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/tags',
                                self.remove_tags, DataObject, [VerifyIsOwner])
         ]
-
-    @property
-    def protocol(self) -> DataObjectRepositoryP2PProtocol:
-        return self._protocol
 
     def search(self, p: SearchParameters) -> List[DataObject]:
         """
