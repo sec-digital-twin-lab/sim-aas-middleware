@@ -59,7 +59,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
 
 def build_processor_image(repository_path: str, processor_path: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False, use_cache: bool = True) -> Tuple[str, ProcessorDescriptor, bool]:
+                          force_build: bool = False) -> Tuple[str, ProcessorDescriptor, bool]:
     # does the path exist?
     processor_path = os.path.join(repository_path, processor_path)
     if not os.path.isdir(processor_path):
@@ -137,8 +137,8 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 raise CLIRuntimeError(f"Creating docker image failed.", details={
-                    'stdout': e.stdout.decode('utf-8'),
-                    'stderr': e.stderr.decode('utf-8'),
+                    'stdout': e.stdout,
+                    'stderr': e.stderr,
                     'exception': str(e),
                     'trace': trace
                 })
@@ -233,7 +233,7 @@ class ProcBuilder(CLICommand):
             # build the image
             image_name, descriptor, image_existed = \
                 build_processor_image(repo_path, args['proc_path'], credentials=credentials,
-                                      force_build=args['force_build'], use_cache=args['use_cache'])
+                                      force_build=args['force_build'])
             if args['force_build'] or not image_existed:
                 print(f"Done building image '{image_name}'.")
             else:

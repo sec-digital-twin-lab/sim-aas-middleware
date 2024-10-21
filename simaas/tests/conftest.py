@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import traceback
-from typing import List
+from typing import List, Tuple
 
 import pytest
 from dotenv import load_dotenv
@@ -28,7 +28,7 @@ from simaas.rti.schemas import Processor
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'd265d46506adf34c0e70e3bc276c1c6f45cd548a'
+REPOSITORY_COMMIT_ID = '63dee612e2ab91651038683ebad118be5ff56917'
 DOCKERFILE_COMMIT_ID = '066ab532d9d20e6b32d5f1d534a3380d7eaa38ca'
 
 # deactivate annoying DEBUG messages by multipart
@@ -111,35 +111,13 @@ def node(keystore):
 
         _node = DefaultNode.create(
             keystore=keystore, storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, enable_dor=True, enable_rti=True,
             retain_job_history=True, strict_deployment=False, job_concurrency=True
         )
 
         # sleep a bit to give the node time to startup...
         time.sleep(2)
-
-        yield _node
-
-        _node.shutdown()
-
-
-@pytest.fixture(scope="session")
-def exec_only_node(extra_keystores, node):
-    with tempfile.TemporaryDirectory() as tempdir:
-        local_ip = determine_local_ip()
-        rest_address = PortMaster.generate_rest_address(host=local_ip)
-        p2p_address = PortMaster.generate_p2p_address(host=local_ip)
-
-        _node = DefaultNode.create(
-            keystore=extra_keystores[1], storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
-            enable_db=True, enable_dor=False, enable_rti=True,
-            retain_job_history=True, strict_deployment=False, job_concurrency=True
-        )
-
-        #  make exec-only node known to node
-        _node.join_network(node.p2p.address())
 
         yield _node
 
@@ -299,15 +277,15 @@ class TestContext:
             f.write(content)
         return path
 
-    def get_node(self, keystore: Keystore, enable_rest: bool = False,
-                 use_dor: bool = True, use_rti: bool = True, retain_job_history: bool = True,
-                 strict_deployment: bool = False, job_concurrency: bool = False, wd_path: str = None) -> Node:
+    def get_node(self, keystore: Keystore, enable_rest: bool = False, use_dor: bool = True, use_rti: bool = True,
+                 retain_job_history: bool = True, strict_deployment: bool = False, job_concurrency: bool = False,
+                 wd_path: str = None) -> Node:
         name = keystore.identity.id
         if name in self.nodes:
             return self.nodes[name]
 
-        p2p_address = PortMaster.generate_p2p_address(self.host)
-        rest_address = PortMaster.generate_rest_address(self.host)
+        p2p_address: str = PortMaster.generate_p2p_address(self.host)
+        rest_address: Tuple[str, int] = PortMaster.generate_rest_address(self.host)
 
         storage_path = os.path.join(wd_path if wd_path else self.testing_dir, name)
         os.makedirs(storage_path, exist_ok=True)
@@ -318,6 +296,7 @@ class TestContext:
                            strict_deployment=strict_deployment if use_rti else None,
                            job_concurrency=job_concurrency if use_rti else None)
         node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
+        time.sleep(2)
 
         self.nodes[name] = node
 

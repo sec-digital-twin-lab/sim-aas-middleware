@@ -9,7 +9,7 @@ from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.nodedb.api import NodeDBService
 from simaas.nodedb.exceptions import InvalidIdentityError, IdentityNotFoundError
-from simaas.nodedb.protocol import NodeDBP2PProtocol, NodeDBSnapshot
+from simaas.nodedb.protocol import NodeDBSnapshot
 from simaas.nodedb.schemas import NodeInfo
 
 logger = Logging.get('nodedb.service')
@@ -37,6 +37,7 @@ class IdentityRecord(Base):
     email = Column(String, nullable=False)
     s_public_key = Column(String, nullable=True)
     e_public_key = Column(String, nullable=True)
+    c_public_key = Column(String, nullable=True)
     nonce = Column(Integer, nullable=False)
     signature = Column(String, nullable=True)
     last_seen = Column(BigInteger, nullable=False)
@@ -44,8 +45,6 @@ class IdentityRecord(Base):
 
 class DefaultNodeDBService(NodeDBService):
     def __init__(self, node, db_path: str):
-        super().__init__(NodeDBP2PProtocol(node))
-
         # initialise properties
         self._node = node
 
@@ -65,7 +64,7 @@ class DefaultNodeDBService(NodeDBService):
                 last_seen=record.last_seen,
                 dor_service=record.dor_service,
                 rti_service=record.rti_service,
-                p2p_address=record.p2p_address.split(':'),
+                p2p_address=record.p2p_address,
                 rest_address=record.rest_address.split(':') if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
                 strict_deployment=record.strict_deployment if record.strict_deployment is not None else None,
@@ -82,7 +81,7 @@ class DefaultNodeDBService(NodeDBService):
                 last_seen=record.last_seen,
                 dor_service=record.dor_service,
                 rti_service=record.rti_service,
-                p2p_address=record.p2p_address.split(':'),
+                p2p_address=record.p2p_address,
                 rest_address=record.rest_address.split(':') if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
                 strict_deployment=record.strict_deployment if record.strict_deployment is not None else None,
@@ -97,8 +96,9 @@ class DefaultNodeDBService(NodeDBService):
         with self._Session() as session:
             # find all conflicting records, i.e., records of a node with a different iid but on the same P2P/REST
             # address but different (if any).
-            p2p_address = f"{node.p2p_address[0]}:{node.p2p_address[1]}"
+            p2p_address = node.p2p_address
             rest_address = f"{node.rest_address[0]}:{node.rest_address[1]}" if node.rest_address else None
+
             conflicting_records = session.query(NodeRecord).filter(
                 (NodeRecord.iid != node.identity.id) & (
                     (NodeRecord.p2p_address == p2p_address) |
@@ -194,6 +194,7 @@ class DefaultNodeDBService(NodeDBService):
                 email=record.email,
                 s_public_key=record.s_public_key,
                 e_public_key=record.e_public_key,
+                c_public_key=record.c_public_key,
                 nonce=record.nonce,
                 signature=record.signature,
                 last_seen=record.last_seen
@@ -212,6 +213,7 @@ class DefaultNodeDBService(NodeDBService):
                     email=record.email,
                     s_public_key=record.s_public_key,
                     e_public_key=record.e_public_key,
+                    c_public_key=record.c_public_key,
                     nonce=record.nonce,
                     signature=record.signature,
                     last_seen=record.last_seen
@@ -235,8 +237,8 @@ class DefaultNodeDBService(NodeDBService):
             if record is None:
                 session.add(IdentityRecord(iid=identity.id, name=identity.name, email=identity.email,
                                            s_public_key=identity.s_public_key, e_public_key=identity.e_public_key,
-                                           nonce=identity.nonce, signature=identity.signature,
-                                           last_seen=get_timestamp_now()))
+                                           c_public_key=identity.c_public_key, nonce=identity.nonce,
+                                           signature=identity.signature, last_seen=get_timestamp_now()))
                 session.commit()
 
             # only perform update if either the record does not exist yet OR if the information provided is valid
@@ -247,6 +249,7 @@ class DefaultNodeDBService(NodeDBService):
                 record.nonce = identity.nonce
                 record.s_key = identity.s_public_key
                 record.e_key = identity.e_public_key
+                record.c_key = identity.c_public_key
                 record.signature = identity.signature
                 record.last_seen = get_timestamp_now()
                 session.commit()

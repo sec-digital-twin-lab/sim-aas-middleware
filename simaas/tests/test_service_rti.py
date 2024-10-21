@@ -35,8 +35,8 @@ def non_strict_node(test_context):
             REPOSITORY_URL,
             GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
         )
-        node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=False)
-        yield node
+        _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=False)
+        yield _node
 
 
 @pytest.fixture(scope='session')
@@ -47,15 +47,15 @@ def strict_node(test_context, extra_keystores):
             REPOSITORY_URL,
             GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
         )
-        node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=True)
-        yield node
+        _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=True)
+        yield _node
 
 
 @pytest.fixture()
 def known_user(extra_keystores, node_db_proxy):
-    keystore = extra_keystores[2]
-    node_db_proxy.update_identity(keystore.identity)
-    return keystore
+    _keystore = extra_keystores[2]
+    node_db_proxy.update_identity(_keystore.identity)
+    return _keystore
 
 
 def test_rest_get_deployed(rti_proxy):
@@ -126,8 +126,7 @@ def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, kn
     rti0.undeploy(proc_id0, wrong_user)
 
     try:
-        while True:
-            rti1.get_proc(proc_id0)
+        while rti1.get_proc(proc_id0) is not None:
             time.sleep(0.5)
     except UnsuccessfulRequestError as e:
         assert ('Processor not deployed' in e.reason)
@@ -141,8 +140,7 @@ def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, kn
     rti1.undeploy(proc_id1, node1.keystore)
 
     try:
-        while True:
-            rti1.get_proc(proc_id1)
+        while rti1.get_proc(proc_id1) is not None:
             time.sleep(0.5)
     except UnsuccessfulRequestError as e:
         assert ('Processor not deployed' in e.reason)

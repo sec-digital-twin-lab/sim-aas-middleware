@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -14,13 +15,13 @@ from git import Repo
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
 from simaas.core.helpers import validate_json, hash_json_object
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
+from simaas.dor.protocol import P2PFetchDataObject, P2PLookupDataObject
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.nodedb.api import NodeDBProxy
 from simaas.p2p.messenger import SecureMessenger, P2PMessage
@@ -364,79 +365,107 @@ class JobRunner(CLICommand, ProgressListener):
         network = db_proxy.get_network()
         network = [node for node in network if node.dor_service]
 
-        # try to fetch all referenced data objects using the P2P protocol
-        protocol = DataObjectRepositoryP2PProtocol((self._user, self._wd_path))
-        pending: Dict[str, str] = {item.obj_id: item.user_signature for item in relevant.values()}
-        found: Dict[str, str] = {}
-        for peer in network:
-            # does the remote DOR have any of the pending data objects?
-            try:
-                result: Dict[str, DataObject] = protocol.lookup(peer.p2p_address, list(pending.keys()))
-            except Exception:
-                continue
+        loop = asyncio.new_event_loop()
+        try:
+            class KeystoreWrapper:
+                def __init__(self, keystore: Keystore):
+                    self.keystore = keystore
 
-            # process the results (if any)
-            for obj_id, meta in result.items():
-                meta_path = os.path.join(self._wd_path, f"{obj_id}.meta")
-                content_path = os.path.join(self._wd_path, f"{obj_id}.content")
+            # try to fetch all referenced data objects using the P2P protocol
+            lookup = P2PLookupDataObject(KeystoreWrapper(self._keystore))
+            fetch = P2PFetchDataObject(KeystoreWrapper(self._keystore))
+            pending: Dict[str, str] = {item.obj_id: item.user_signature for item in relevant.values()}
+            found: Dict[str, str] = {}
+            for peer in network:
+                # does the remote DOR have any of the pending data objects?
+                try:
+                    result: Dict[str, DataObject] = loop.run_until_complete(
+                        lookup.perform(peer, list(pending.keys()))
+                    )
 
-                # store the meta information
-                with open(meta_path, 'w') as f:
-                    json.dump(meta.dict(), f, indent=2)
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    continue
 
-                if meta.access_restricted:
-                    # does the user have access?
-                    if self._user.id not in meta.access:
-                        raise AccessNotPermittedError({
-                            'obj_id': obj_id,
-                            'user_iid': self._user.id
-                        })
+                # process the results (if any)
+                for obj_id, meta in result.items():
+                    meta_path = os.path.join(self._wd_path, f"{obj_id}.meta")
+                    content_path = os.path.join(self._wd_path, f"{obj_id}.content")
 
-                    # do we have a user signature?
-                    signature = pending[obj_id]
-                    if signature is None:
-                        raise MissingUserSignatureError({
-                            'obj_id': obj_id,
-                            'user_iid': self._user.id
-                        })
+                    # store the meta information
+                    with open(meta_path, 'w') as f:
+                        json.dump(meta.dict(), f, indent=2)
 
-                    # try to download it
-                    protocol.fetch(peer.p2p_address, obj_id, meta_path, content_path, self._user.id, signature)
+                    if meta.access_restricted:
+                        # does the user have access?
+                        if self._user.id not in meta.access:
+                            raise AccessNotPermittedError({
+                                'obj_id': obj_id,
+                                'user_iid': self._user.id
+                            })
 
-                else:
-                    # try to download it
-                    protocol.fetch(peer.p2p_address, obj_id, meta_path, content_path)
+                        # do we have a user signature?
+                        signature = pending[obj_id]
+                        if signature is None:
+                            raise MissingUserSignatureError({
+                                'obj_id': obj_id,
+                                'user_iid': self._user.id
+                            })
 
-                found[obj_id] = meta.c_hash
-                pending.pop(obj_id)
+                        # try to download it
+                        loop.run_until_complete(
+                            fetch.perform(
+                                peer, obj_id, meta_path, content_path, user_iid=self._user.id, user_signature=signature
+                            )
+                        )
 
-            # still pending object ids? if not, we are done.
-            if len(pending) == 0:
-                break
+                    else:
+                        # try to download it
+                        loop.run_until_complete(
+                            fetch.perform(
+                                peer, obj_id, meta_path, content_path
+                            )
+                        )
 
-        # do we still have pending data objects?
-        if len(pending) > 0:
-            raise UnresolvedInputDataObjectsError({
-                'pending': pending,
-                'found': found
+                    found[obj_id] = meta.c_hash
+                    pending.pop(obj_id)
+
+                # still pending object ids? if not, we are done.
+                if len(pending) == 0:
+                    break
+
+            # do we still have pending data objects?
+            if len(pending) > 0:
+                raise UnresolvedInputDataObjectsError({
+                    'pending': pending,
+                    'found': found
+                })
+
+            # create symbolic links to the contents for every input AND update references with c_hash
+            for name, item in relevant.items():
+                # link the content
+                os.symlink(
+                    src=os.path.join(self._wd_path, f"{item.obj_id}.content"),
+                    dst=os.path.join(self._wd_path, item.name)
+                )
+
+                # link the meta information
+                os.symlink(
+                    src=os.path.join(self._wd_path, f"{item.obj_id}.meta"),
+                    dst=os.path.join(self._wd_path, f"{item.name}.meta")
+                )
+
+                # set the content hash
+                item.c_hash = found[item.obj_id]
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise CLIRuntimeError("Fetching reference input objects failed", details={
+                'trace': trace
             })
 
-        # create symbolic links to the contents for every input AND update references with c_hash
-        for name, item in relevant.items():
-            # link the content
-            os.symlink(
-                src=os.path.join(self._wd_path, f"{item.obj_id}.content"),
-                dst=os.path.join(self._wd_path, item.name)
-            )
-
-            # link the meta information
-            os.symlink(
-                src=os.path.join(self._wd_path, f"{item.obj_id}.meta"),
-                dst=os.path.join(self._wd_path, f"{item.name}.meta")
-            )
-
-            # set the content hash
-            item.c_hash = found[item.obj_id]
+        finally:
+            loop.close()
 
     def _verify_inputs_and_outputs(self) -> None:
         proc_descriptor: ProcessorDescriptor = self._gpp.proc_descriptor
@@ -687,13 +716,19 @@ class JobRunner(CLICommand, ProgressListener):
                 self._write_exitcode(ExitCode.DONE)
 
         except SaaSRuntimeException as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+
             # update state
             if self._job_status:
+                exception = e.content
+                exception.details = exception.details if exception.details else {}
+                exception.details['trace'] = trace
+
                 self._job_status.state = JobStatus.State.FAILED
+                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
                 self._store_job_status()
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e.reason}"
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             print(f"{msg}\n{trace}")
 
             if self._logger:
@@ -701,13 +736,17 @@ class JobRunner(CLICommand, ProgressListener):
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+
             # update state
             if self._job_status:
+                exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
+
                 self._job_status.state = JobStatus.State.FAILED
+                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
                 self._store_job_status()
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e}"
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             print(f"{msg}\n{trace}")
 
             if self._logger:

@@ -1,8 +1,5 @@
 from abc import abstractmethod, ABC
 
-import cryptography.hazmat.primitives.serialization as serialization
-
-from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.helpers import hash_bytes_object
 from simaas.core.logging import Logging
 
@@ -26,71 +23,21 @@ class KeyPair(ABC):
     def info(self) -> str:
         pass
 
+    @abstractmethod
     def private_as_bytes(self, password: str = None) -> bytes:
-        """
-        Serialises the private key and returns it as byte array (or None in case this KeyPair instance does not
-        have a private key).
-        :param password: the password to protect the private key
-        :return: byte array representing the password-protected private key or None if no private key is available
-        """
-        if self.private_key is None:
-            raise SaaSRuntimeException('No private key found')
+        pass
 
-        # encrypt with a password?
-        key_encryption_algorithm = serialization.NoEncryption()
-        if password:
-            key_encryption_algorithm = serialization.BestAvailableEncryption(password.encode('utf-8'))
-
-        return self.private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=key_encryption_algorithm
-        )
-
+    @abstractmethod
     def public_as_bytes(self) -> bytes:
-        """
-        Serialises the public key and returns it as byte array.
-        :return: byte array representing the public key
-        """
-        return self.public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+        pass
 
+    @abstractmethod
     def private_as_string(self, password: str = None, truncate: bool = True) -> str:
-        """
-        Serialises the private key and returns it as string (or None in case this KeyPair instance does not
-        have a private key).
-        :param password: the password to protect the private key
-        :param truncate: indicates whether to create a truncated string (default: False)
-        :return: string representing of the private key or None if no private key is available
-        """
-        if self.private_key is None:
-            raise SaaSRuntimeException('No private key found')
+        pass
 
-        result = self.private_as_bytes(password).decode('utf-8')
-        if truncate:
-            if password:
-                result = result.replace('\n', '')
-                result = result[37:-35]
-            else:
-                result = result.replace('\n', '')
-                result = result[27:-25]
-
-        return result
-
+    @abstractmethod
     def public_as_string(self, truncate: bool = True) -> str:
-        """
-        Serialises the public key and returns it as string. If truncate=True, the PEM prefix and suffix is removed
-        as well as all white space characters.
-        :param truncate: indicates whether to create a truncated string (default: True)
-        :return: string representing the public key
-        """
-        result = self.public_as_bytes().decode('utf-8')
-        if truncate:
-            result = result.replace('\n', '')
-            result = result[26:-24]
-        return result
+        pass
 
     def write_private(self, path: str, password: str) -> None:
         """

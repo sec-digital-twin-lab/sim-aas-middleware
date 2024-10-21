@@ -30,7 +30,7 @@ LOCAL_IP = determine_local_ip()
 
 
 def determine_default_p2p_address() -> str:
-    return f"{LOCAL_IP}:4001" if LOCAL_IP else "127.0.0.1:4001"
+    return f"tcp://{LOCAL_IP}:4001" if LOCAL_IP else "tcp://127.0.0.1:4001"
 
 
 def determine_default_rest_address() -> str:
@@ -48,13 +48,14 @@ class PortMaster:
     _next_ws = {}
 
     @classmethod
-    def generate_p2p_address(cls, host: str = '127.0.0.1') -> (str, int):
+    def generate_p2p_address(cls, host: str = '127.0.0.1', protocol: str = 'tcp') -> str:
         with cls._mutex:
             if host not in cls._next_p2p:
                 cls._next_p2p[host] = 4100
 
-            address = (host, cls._next_p2p[host])
+            address = f"{protocol}://{host}:{cls._next_p2p[host]}"
             cls._next_p2p[host] += 1
+
             return address
 
     @classmethod

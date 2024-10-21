@@ -21,7 +21,6 @@ from simaas.dor.exceptions import DataObjectContentNotFoundError, DataObjectNotF
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import Logging
 from simaas.nodedb.exceptions import IdentityNotFoundError
-from simaas.dor.protocol import DataObjectRepositoryP2PProtocol
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
     SearchParameters, AddDataObjectParameters
@@ -132,7 +131,6 @@ class DefaultDORService(DORService):
         # initialise properties
         self._db_mutex = Lock()
         self._node = node
-        self._protocol = DataObjectRepositoryP2PProtocol(node)
 
         # initialise database things
         self._engine = create_engine(db_path)
@@ -142,10 +140,6 @@ class DefaultDORService(DORService):
         # initialise directories
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH), exist_ok=True)
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_TEMP_PATH), exist_ok=True)
-
-    @property
-    def protocol(self) -> DataObjectRepositoryP2PProtocol:
-        return self._protocol
 
     def obj_content_path(self, c_hash: str) -> str:
         return os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH, c_hash)
