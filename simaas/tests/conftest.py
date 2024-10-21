@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -29,7 +28,7 @@ from simaas.rti.schemas import Processor
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'ad6531e4b548f0408b46fe44548ee3f72220cf1d'
+REPOSITORY_COMMIT_ID = '320870909679c2e41351136822a308a6b199a68b'
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
@@ -111,35 +110,13 @@ def node(keystore):
 
         _node = DefaultNode.create(
             keystore=keystore, storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, enable_dor=True, enable_rti=True,
             retain_job_history=True, strict_deployment=False, job_concurrency=True
         )
 
         # sleep a bit to give the node time to startup...
         time.sleep(2)
-
-        yield _node
-
-        _node.shutdown()
-
-
-@pytest.fixture(scope="session")
-def exec_only_node(extra_keystores, node):
-    with tempfile.TemporaryDirectory() as tempdir:
-        local_ip = determine_local_ip()
-        rest_address = PortMaster.generate_rest_address(host=local_ip)
-        p2p_address = PortMaster.generate_p2p_address(host=local_ip)
-
-        _node = DefaultNode.create(
-            keystore=extra_keystores[1], storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
-            enable_db=True, enable_dor=False, enable_rti=True,
-            retain_job_history=True, strict_deployment=False, job_concurrency=True
-        )
-
-        #  make exec-only node known to node
-        _node.join_network(node.p2p.address())
 
         yield _node
 

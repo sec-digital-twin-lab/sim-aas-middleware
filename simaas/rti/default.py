@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import socket
@@ -5,7 +6,7 @@ import threading
 
 import traceback
 from threading import Lock
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 from fastapi import Request
 from sqlalchemy import create_engine, Column, String
@@ -18,11 +19,13 @@ from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
+from simaas.core.schemas import GithubCredentials
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container
 from simaas.rti.api import RTIService, JobRESTProxy
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
 from simaas.rti.schemas import Processor, Job, Task, JobStatus
-from simaas.dor.schemas import GitProcessorPointer
+from simaas.dor.schemas import GitProcessorPointer, DataObject
 
 logger = Logging.get('rti.service')
 
@@ -95,13 +98,15 @@ class DefaultRTIService(RTIService):
         return os.path.join(self._jobs_path, job_id, 'job_status.json')
 
     def _perform_deployment(self, proc: Processor) -> None:
+        loop = asyncio.new_event_loop()
         try:
             # search the network for the processor docker image data object and fetch it
+            protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj = None
             for node in [node for node in self._node.db.get_network() if node.dor_service]:
-                protocol = DataObjectRepositoryP2PProtocol(self._node)
-                proc_obj = protocol.lookup(node.p2p_address, [proc.id]).get(proc.id)
+                result: Dict[str, DataObject] = loop.run_until_complete(protocol.perform(node, [proc.id]))
+                proc_obj = result.get(proc.id)
                 if proc_obj:
                     custodian = node
                     break
@@ -122,8 +127,10 @@ class DefaultRTIService(RTIService):
                     # fetch the data object
                     meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
                     content_path = os.path.join(self._procs_path, f"{proc.id}.content")
-                    protocol = DataObjectRepositoryP2PProtocol(self._node)
-                    protocol.fetch(custodian.p2p_address, proc.id, meta_path, content_path)
+                    protocol = P2PFetchDataObject(self._node)
+                    loop.run_until_complete(
+                        protocol.perform(custodian, proc.id, meta_path, content_path)
+                    )
 
                     # load the image
                     image = docker_load_image(content_path, image_name)
@@ -131,15 +138,20 @@ class DefaultRTIService(RTIService):
                         raise RTIException(f"Image loaded but {image_name} not found.")
 
                 else:
+                    # do we have credentials for this repo?
+                    repository = proc_obj.tags['repository']
+                    credentials: Optional[GithubCredentials] = self._node.keystore.github_credentials.get(repository)
+                    credentials: Optional[Tuple[str, str]] = \
+                        (credentials.login, credentials.personal_access_token) if credentials else None
+
                     # clone the repository and checkout the specified commit
                     repo_path = os.path.join(self._procs_path, proc.id)
-                    repository = proc_obj.tags['repository']
                     commit_id = proc_obj.tags['commit_id']
-                    clone_repository(repository, repo_path, commit_id=commit_id)
+                    clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
                     # build the image
                     proc_path = proc_obj.tags['proc_path']
-                    image_name_new, _, _ = build_processor_image(repo_path, proc_path)
+                    image_name_new, _, _ = build_processor_image(repo_path, proc_path, credentials=credentials)
                     if image_name_new != image_name:
                         raise RTIException(f"Mismatching image names after building from GPP: actual={image_name_new} "
                                            f"!= expected={image_name}")
@@ -175,17 +187,10 @@ class DefaultRTIService(RTIService):
 
             proc.state = Processor.State.FAILED
             proc.error = str(e)
+        finally:
+            loop.close()
 
     def _perform_undeployment(self, proc_id: str, image_name: str, keep_image: bool = True) -> None:
-        if not keep_image:
-            # remove the docker image (if applicable)
-            try:
-                docker_delete_image(image_name)
-
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
-
         # remove the record from the db
         with self._mutex:
             with self._session_maker() as session:
@@ -195,6 +200,16 @@ class DefaultRTIService(RTIService):
                     session.commit()
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc_id)}] db record not found for removal.")
+
+        # remove the docker image (if applicable)
+        if not keep_image:
+            try:
+                docker_delete_image(image_name)
+
+            except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
+
 
     def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
         host = self._node.info.rest_address[0]

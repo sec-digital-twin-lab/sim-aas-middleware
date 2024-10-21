@@ -37,7 +37,7 @@ class NetworkList(CLICommand):
                 'Yes' if node.dor_service else 'No',
                 'Yes' if node.rti_service else 'No',
                 f"{node.rest_address[0]}:{node.rest_address[1]}" if node.rest_address else '-',
-                f"{node.p2p_address[0]}:{node.p2p_address[1]}",
+                f"{node.p2p_address}",
                 datetime.datetime.fromtimestamp(node.last_seen / 1000.0).strftime('%Y-%m-%d %H:%M:%S UTC')
             ])
 

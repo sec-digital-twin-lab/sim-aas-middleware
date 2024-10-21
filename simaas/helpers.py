@@ -30,7 +30,7 @@ LOCAL_IP = determine_local_ip()
 
 
 def determine_default_p2p_address() -> str:
-    return f"{LOCAL_IP}:4001" if LOCAL_IP else "127.0.0.1:4001"
+    return f"tcp://{LOCAL_IP}:4001" if LOCAL_IP else "tcp://127.0.0.1:4001"
 
 
 def determine_default_rest_address() -> str:

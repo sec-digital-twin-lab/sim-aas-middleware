@@ -7,9 +7,7 @@ from typing import Optional, List, Any, Tuple
 from pydantic import BaseModel
 from zmq import Again
 from zmq.asyncio import Socket, Context
-from zmq.utils import z85
 
-from simaas.core.eckeypair import ECKeyPair
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import NodeInfo

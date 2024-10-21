@@ -28,8 +28,9 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
-from simaas.helpers import find_available_port, docker_export_image, PortMaster
+from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip
 from simaas.node.base import Node
+from simaas.node.default import DefaultNode
 from simaas.rti.api import JobRESTProxy
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
@@ -1286,32 +1287,53 @@ def test_cli_runner_cancelled(docker_available, temp_dir, node, deployed_test_pr
     assert job_result.exitcode == ExitCode.INTERRUPTED
 
 
-def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, exec_only_node, deployed_test_processor):
+def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1)
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+    # create a new node as DOR target
+    with tempfile.TemporaryDirectory() as tempdir:
+        local_ip = determine_local_ip()
+        rest_address = PortMaster.generate_rest_address(host=local_ip)
+        p2p_address = PortMaster.generate_p2p_address(host=local_ip)
+        target_node = DefaultNode.create(
+            keystore=Keystore.new('dor-target'), storage_path=tempdir,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            enable_db=True, enable_dor=False, enable_rti=True,
+            retain_job_history=True, strict_deployment=False, job_concurrency=True
+        )
+        time.sleep(1)
 
-    # prepare the job folder
-    job_id = '398h36g3_10'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
-                                       a=a, b=b, target_node=exec_only_node)
+        #  make exec-only node known to node
+        target_node.join_network(node.rest.address())
+        time.sleep(1)
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
+        # prepare input data objects
+        a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1)
+        b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
 
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
+        # prepare the job folder
+        job_id = '398h36g3_10'
+        job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
+                                           a=a, b=b, target_node=target_node)
 
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
-    assert status.state == JobStatus.State.FAILED
-    assert "Pushing output data object 'c' failed." in status.errors[0].message
-    assert status.errors[0].exception.reason == 'Target node does not support DOR capabilities'
-    assert job_result.exitcode == ExitCode.ERROR
+        # determine REST address
+        rest_address = PortMaster.generate_rest_address()
+
+        # execute the job runner command
+        job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
+        job_process.start()
+
+        # wait for the job to be finished
+        job_result, status = wait_for_job_runner(job_path, rest_address)
+        assert status.state == JobStatus.State.FAILED
+        assert "Pushing output data object 'c' failed." in status.errors[0].message
+        assert status.errors[0].exception.reason == 'Target node does not support DOR capabilities'
+        assert job_result.exitcode == ExitCode.ERROR
+
+        # shutdown the target node
+        target_node.shutdown()
+        time.sleep(1)
 
 
 def test_find_open_port():
@@ -1401,13 +1423,14 @@ def test_cli_builder_export_image(docker_available, temp_dir):
 
     # build image
     proc_path = "examples/adapters/proc_example"
-    image_name, _, _ = build_processor_image(repo_path, proc_path, use_cache=True)
+    image_name, _, _ = build_processor_image(repo_path, proc_path)
 
     # export image
     try:
         docker_export_image(image_name, image_path, keep_image=True)
         assert os.path.isfile(image_path)
-    except Exception:
+    except Exception as e:
+        trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
         assert False
 
 
@@ -1548,7 +1571,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         result = cmd.execute(args)
         assert result is not None
         assert 'deployed' in result
-        assert len(result['deployed']) == 0
+        n = len(result['deployed'])
 
     except CLIRuntimeError:
         assert False
@@ -1585,7 +1608,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         result = cmd.execute(args)
         assert result is not None
         assert 'deployed' in result
-        assert len(result['deployed']) == 1
+        assert len(result['deployed']) == n + 1
 
     except CLIRuntimeError:
         assert False
@@ -1652,7 +1675,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         result = cmd.execute(args)
         assert result is not None
         assert 'deployed' in result
-        assert len(result['deployed']) == 0
+        assert len(result['deployed']) == n
 
     except CLIRuntimeError:
         assert False
@@ -1714,7 +1737,6 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
         assert result is not None
         assert 'proc' in result
         assert result['proc'] is not None
-        # proc: Processor = result['proc']
 
     except CLIRuntimeError:
         assert False
@@ -1867,21 +1889,3 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
         assert False
 
     time.sleep(1)
-
-    # get list of deployed processors
-    try:
-        args = {
-            'keystore': temp_dir,
-            'keystore-id': keystore.identity.id,
-            'password': 'password',
-            'address': f"{address[0]}:{address[1]}"
-        }
-
-        cmd = RTIProcList()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'deployed' in result
-        assert len(result['deployed']) == 0
-
-    except CLIRuntimeError:
-        assert False

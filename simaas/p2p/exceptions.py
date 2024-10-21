@@ -15,9 +15,3 @@ class PeerUnavailableError(P2PException):
 class UnexpectedP2PError(P2PException):
     def __init__(self, details: dict) -> None:
         super().__init__('Unexpected P2P error', details=details)
-
-#
-#
-# class BootNodeUnavailableError(P2PException):
-#     def __init__(self, details: dict) -> None:
-#         super().__init__('Boot node is not available', details=details)

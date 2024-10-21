@@ -12,6 +12,7 @@ from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
 from simaas.node.base import Node
+from simaas.node.default import DefaultNode
 
 logger = Logging.get('cli')
 
@@ -68,7 +69,7 @@ class Service(CLICommand):
     default_datastore = os.path.join(os.environ['HOME'], '.datastore')
     default_rest_address = determine_default_rest_address()
     default_p2p_address = determine_default_p2p_address()
-    default_boot_node_address = determine_default_p2p_address()
+    default_boot_node_address = determine_default_rest_address()
     default_service = 'full'
     default_retain_job_history = False
     default_strict_deployment = True
@@ -157,20 +158,20 @@ class Service(CLICommand):
 
         # extract host/ports
         rest_service_address = extract_address(args['rest-address'])
-        p2p_service_address = extract_address(args['p2p-address'])
+        p2p_service_address = args['p2p-address']
         boot_node_address = extract_address(args['boot-node'])
 
         # create a node instance
-        node = Node.create(keystore, args['datastore'],
-                           p2p_address=p2p_service_address,
-                           rest_address=rest_service_address,
-                           boot_node_address=boot_node_address,
-                           enable_dor=args['type'] == 'full' or args['type'] == 'storage',
-                           enable_rti=args['type'] == 'full' or args['type'] == 'execution',
-                           retain_job_history=args['retain-job-history'],
-                           strict_deployment=args['strict-deployment'],
-                           job_concurrency=args['job-concurrency'],
-                           bind_all_address=args['bind-all-address'])
+        node = DefaultNode.create(keystore, args['datastore'],
+                                  p2p_address=p2p_service_address,
+                                  rest_address=rest_service_address,
+                                  boot_node_address=boot_node_address,
+                                  enable_dor=args['type'] == 'full' or args['type'] == 'storage',
+                                  enable_rti=args['type'] == 'full' or args['type'] == 'execution',
+                                  retain_job_history=args['retain-job-history'],
+                                  strict_deployment=args['strict-deployment'],
+                                  job_concurrency=args['job-concurrency'],
+                                  bind_all_address=args['bind-all-address'])
 
         # print info message
         if args['type'] == 'full' or args['type'] == 'execution':

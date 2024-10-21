@@ -3,12 +3,12 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
+import traceback
 from typing import Optional, Tuple
 
 import docker
 from dotenv import load_dotenv
-from git import Repo, NoSuchPathError, GitCommandError
+from git import Repo
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
@@ -59,7 +59,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
 
 def build_processor_image(repository_path: str, processor_path: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False, use_cache: bool = True) -> Tuple[str, ProcessorDescriptor, bool]:
+                          force_build: bool = False) -> Tuple[str, ProcessorDescriptor, bool]:
     # does the path exist?
     processor_path = os.path.join(repository_path, processor_path)
     if not os.path.isdir(processor_path):
@@ -119,30 +119,35 @@ def build_processor_image(repository_path: str, processor_path: str, credentials
         with tempfile.TemporaryDirectory() as tempdir:
             credentials_path = os.path.join(tempdir, "credentials")
             try:
+                # assemble the command
+                command = ['docker', 'build', '--no-cache']
                 if credentials:
+                    # write the credentials to file (temporarily)
                     with open(credentials_path, 'w') as f:
                         f.write(f"{credentials[0]}:{credentials[1]}")
 
-                    command = [
-                        'docker', 'build', '--no-cache', '--secret', f'id=git_credentials,src={credentials_path}',
-                        '-t', image_name, '.'
-                    ]
+                    command.extend(['--secret', f'id=git_credentials,src={credentials_path}'])
+                command.extend(['-t', image_name, '.'])
 
-                    subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True)
+                env = os.environ.copy()
+                env['DOCKER_BUILDKIT'] = '1'
 
-                else:
-                    client.images.build(path=processor_path, tag=image_name, nocache=not use_cache, rm=True)
+                subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True, env=env)
 
             except subprocess.CalledProcessError as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 raise CLIRuntimeError(f"Creating docker image failed.", details={
-                    'stdout': e.stdout.decode('utf-8'),
-                    'stderr': e.stderr.decode('utf-8'),
-                    'exception': str(e)
+                    'stdout': e.stdout,
+                    'stderr': e.stderr,
+                    'exception': str(e),
+                    'trace': trace
                 })
 
             except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 raise CLIRuntimeError("Creating docker image failed.", details={
-                    'exception': str(e)
+                    'exception': str(e),
+                    'trace': trace
                 })
 
             finally:
@@ -228,7 +233,7 @@ class ProcBuilder(CLICommand):
             # build the image
             image_name, descriptor, image_existed = \
                 build_processor_image(repo_path, args['proc_path'], credentials=credentials,
-                                      force_build=args['force_build'], use_cache=args['use_cache'])
+                                      force_build=args['force_build'])
             if args['force_build'] or not image_existed:
                 print(f"Done building image '{image_name}'.")
             else:
