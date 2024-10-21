@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
 from simaas.core.helpers import validate_json, hash_json_object
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -251,10 +251,6 @@ class JobRunner(CLICommand, ProgressListener):
         # create the ephemeral job keystore
         self._keystore = Keystore.new(f"job:{self._job.id}")
         print(f"Created ephemeral job keystore with id={self._keystore.identity.id}")
-
-        # # publish the identity
-        # db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        # identity = db_proxy.update_identity(self._keystore.identity)
 
     def _setup_rest_server(self, rest_address: str) -> None:
         app = FastAPI(openapi_url='/openapi.json', docs_url='/docs')
@@ -653,23 +649,35 @@ class JobRunner(CLICommand, ProgressListener):
                 self._write_exitcode(ExitCode.DONE)
 
         except SaaSRuntimeException as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+
             # update state
             if self._job_status:
+                exception = e.content
+                exception.details = exception.details if exception.details else {}
+                exception.details['trace'] = trace
+
                 self._job_status.state = JobStatus.State.FAILED
+                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
                 self._store_job_status()
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e.reason}"
-            print(msg)
+            print(f"{msg}\n{trace}")
             self._logger.error(msg)
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+
             # update state
             if self._job_status:
+                exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
+
                 self._job_status.state = JobStatus.State.FAILED
+                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
                 self._store_job_status()
 
             msg = f"end processing job at {self._wd_path} -> FAILED: {e}"
-            print(msg)
+            print(f"{msg}\n{trace}")
             self._logger.error(msg)
             self._write_exitcode(ExitCode.ERROR, e)
