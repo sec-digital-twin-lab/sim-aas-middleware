@@ -87,7 +87,7 @@ class Service(CLICommand):
             Argument('--p2p-address', dest='p2p-address', action='store',
                      help=f"address used by the P2P service interface (default: '{self.default_p2p_address}')."),
             Argument('--boot-node', dest='boot-node', action='store',
-                     help=f"address of an existing node for joining a network "
+                     help=f"REST address of an existing node for joining a network "
                           f"(default: '{self.default_boot_node_address}')."),
             Argument('--type', dest='type', action='store', choices=['full', 'storage', 'execution'],
                      help=f"indicate the type of service provided by the node: 'storage' and 'execution' "
@@ -131,7 +131,7 @@ class Service(CLICommand):
                               message="Enter address for P2P service:",
                               default=self.default_p2p_address)
             prompt_if_missing(args, 'boot-node', prompt_for_string,
-                              message="Enter address for boot node:",
+                              message="Enter REST address of boot node:",
                               default=self.default_boot_node_address)
 
             if args['type'] is None:

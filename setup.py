@@ -41,8 +41,8 @@ setup(
     long_description_content_type='text/markdown',
     entry_points={
         'console_scripts': [
-            'saas-cli = simaas.cli.saas_cli:main',
-            'saas-node = simaas.service:main'
+            'simaas-cli = simaas.cli.saas_cli:main',
+            'simaas-node = simaas.service:main'
         ]
     },
     classifiers=[
