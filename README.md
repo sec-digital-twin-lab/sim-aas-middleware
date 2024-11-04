@@ -610,6 +610,9 @@ processor/
 └── Dockerfile
 ```
 
+> *An example processor can be found in this repository at `/examples/adapters/proc_example`.*
+
+
 #### Processor Descriptor (`descriptor.json`)
 A processor descriptor specifies the name, input/output interfaces and configurations of a 
 processor. It is in the form of a JSON file and is structured as follows:
@@ -729,7 +732,7 @@ to gracefully terminate once receiving an interrupt signal. Developers of proces
 should keep in mind that the RTI might forcefully terminate a processor at any 
 point in time for any reason.
 
-The `run()` method expects three arguments: `wd_path:`, `listener`, and `logger`. A
+The `run()` method expects three arguments: `wd_path`, `listener`, and `logger`. A
 processor may use the working directory `wd_path` to store the output data as well
 as any intermediate data needed to process a job. The RTI will delete the working
 directory and its contents upon completion of the job. The `listener` object is of
