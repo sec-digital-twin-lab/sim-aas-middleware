@@ -12,7 +12,7 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityRemove, IdentityShow
     CredentialsAddGithubCredentials, CredentialsTestSSHCredentials, CredentialsTestGithubCredentials
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import ProcBuilder
+from simaas.cli.cmd_proc_builder import ProcBuilderLocal, ProcBuilderGithub
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
     RTIProcShow, RTIJobList, RTIJobCancel
 from simaas.cli.cmd_service import Service
@@ -73,7 +73,8 @@ def main():
             ]),
             Service(),
             JobRunner(),
-            ProcBuilder(),
+            ProcBuilderLocal(),
+            ProcBuilderGithub(),
             CLICommandGroup('dor', 'interact with a Data Object Repository (DOR)', arguments=[
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")

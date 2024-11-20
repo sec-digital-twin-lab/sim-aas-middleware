@@ -108,7 +108,7 @@ def test_add_c(keystore, dor_proxy, unknown_user, random_content):
 
 def test_add_c_large(test_context, keystore, dor_proxy):
     # this is necessary to avoid getting thousands of 'Calling on_part_data with data' messages...
-    mp_logger = logging.getLogger('multipart.multipart')
+    mp_logger = logging.getLogger('python_multipart.multipart')
     mp_logger.setLevel(logging.INFO)
 
     owner = keystore
@@ -135,13 +135,14 @@ def test_add_c_large(test_context, keystore, dor_proxy):
         return size, dt0, dt1, dt2
 
     results = [
-        upload_cycle(1 * 1024 * 1024),
-        upload_cycle(4 * 1024 * 1024),
-        upload_cycle(16 * 1024 * 1024),
-        upload_cycle(64 * 1024 * 1024),
-        # upload_cycle(256 * 1024 * 1024),
+        # upload_cycle(1 * 1024 * 1024),
+        # upload_cycle(4 * 1024 * 1024),
+        # upload_cycle(16 * 1024 * 1024),
+        # upload_cycle(64 * 1024 * 1024),
+        upload_cycle(252 * 1024 * 1024),
         # upload_cycle(512 * 1024 * 1024),
-        # upload_cycle(1024 * 1024 * 1024)
+        # upload_cycle(1024 * 1024 * 1024),
+        # upload_cycle(4096 * 1024 * 1024)
     ]
 
     print("upload performance: size, generation, upload, hashing")

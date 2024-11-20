@@ -5,6 +5,12 @@ from pydantic import BaseModel, Field
 from simaas.nodedb.schemas import NodeInfo
 
 
+class DORFilePartInfo(BaseModel):
+    id: str
+    idx: int
+    n: int
+
+
 class DORStatistics(BaseModel):
     """
     Provides information about contents in the DOR.

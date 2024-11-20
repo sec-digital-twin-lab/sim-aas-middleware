@@ -635,7 +635,7 @@ class DORAccessRevoke(CLICommand):
                 choices.append(Choice(identity.id, label_identity(identity)))
 
         # do we have removable identities?
-        if args['iids'] is None:
+        if not args.get('iids'):
             # do we have any choices?
             if not choices:
                 raise CLIRuntimeError("No identities whose access could be revoked.")

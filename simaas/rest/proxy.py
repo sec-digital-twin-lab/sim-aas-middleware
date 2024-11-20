@@ -1,4 +1,6 @@
 import json
+import math
+import os
 import traceback
 from datetime import datetime, timezone
 from typing import Union, Optional, Tuple
@@ -10,7 +12,9 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 
 from simaas.core.exceptions import ExceptionContent
+from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
+from simaas.dor.schemas import DORFilePartInfo
 from simaas.rest.exceptions import UnexpectedHTTPError, UnsuccessfulRequestError, UnexpectedContentType, \
     UnsuccessfulConnectionError, AuthorisationFailedError
 from simaas.rest.schemas import Token
@@ -229,7 +233,8 @@ class EndpointProxy:
             raise UnsuccessfulConnectionError(url)
 
     def post(self, endpoint: str, body: Union[dict, list, str] = None, data=None, parameters: dict = None,
-             attachment_path: str = None, with_authorisation_by: Keystore = None) -> Union[dict, list]:
+             attachment_path: str = None, with_authorisation_by: Keystore = None,
+             max_part_size: int = 128*1024*1024) -> Union[dict, list]:
 
         url = self._make_url(endpoint, parameters)
         headers = _make_headers(f"POST:{url}", body=body, authority=with_authorisation_by,
@@ -237,12 +242,39 @@ class EndpointProxy:
 
         try:
             if attachment_path:
+                # determine the number of parts
+                file_size = os.path.getsize(attachment_path)
+                n_parts = int(math.ceil(file_size / max_part_size))
+
                 with open(attachment_path, 'rb') as f:
-                    response = requests.post(url,
-                                             headers=headers,
-                                             data={'body': json.dumps(body)} if body else None,
-                                             files={'attachment': f}
-                                             )
+                    rnd_id = generate_random_string(4)
+                    i = 0
+                    while True:
+                        # read the i-th part
+                        part = f.read(max_part_size)
+                        if not part:
+                            break
+
+                        # write the part to disk
+                        part_path = f"{attachment_path}.{i}"
+                        with open(part_path, 'wb') as f_part:
+                            f_part.write(part)
+
+                        # update the body
+                        part_info = DORFilePartInfo(id=rnd_id, idx=i, n=n_parts)
+                        body['__part_info'] = part_info.dict()
+
+                        # send the part
+                        with open(part_path, 'rb') as f_part:
+                            response = requests.post(url,
+                                                     headers=headers,
+                                                     data={'body': json.dumps(body)} if body else None,
+                                                     files={'attachment': f_part}
+                                                     )
+                        # delete the part
+                        os.remove(part_path)
+
+                        i += 1
 
                     return extract_response(response)
 
@@ -250,8 +282,11 @@ class EndpointProxy:
                 response = requests.post(url, headers=headers, data=data, json=body)
                 return extract_response(response)
 
-        except requests.exceptions.ConnectionError:
-            raise UnsuccessfulConnectionError(url)
+        except requests.exceptions.ConnectionError as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise UnsuccessfulConnectionError(url, details={
+                'trace': trace
+            })
 
     def delete(self, endpoint: str, body: Union[dict, list] = None, parameters: dict = None,
                with_authorisation_by: Keystore = None) -> Union[dict, list]:
