@@ -16,7 +16,7 @@ RUN --mount=type=secret,id=git_credentials \
     fi
 
 WORKDIR /sim-aas-middleware
-RUN git checkout 59c05de1f06bb5f4e4dfab4b30d5b964c7abfade
+RUN git checkout 33d795ecbd53eae4c4f9ef3c9d7a8e90821a0053
 
 WORKDIR /processor
 COPY . .
@@ -27,4 +27,4 @@ RUN ./venv/bin/pip install /sim-aas-middleware
 
 EXPOSE 5000
 
-ENTRYPOINT ["venv/bin/saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
+ENTRYPOINT ["venv/bin/simaas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
