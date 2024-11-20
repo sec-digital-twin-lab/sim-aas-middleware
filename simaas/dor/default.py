@@ -23,7 +23,7 @@ from simaas.core.logging import Logging
 from simaas.nodedb.exceptions import IdentityNotFoundError
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
-    SearchParameters, AddDataObjectParameters
+    SearchParameters, AddDataObjectParameters, DORFilePartInfo
 
 logger = Logging.get('dor.service')
 
@@ -131,6 +131,7 @@ class DefaultDORService(DORService):
         # initialise properties
         self._db_mutex = Lock()
         self._node = node
+        self._parts = {}
 
         # initialise database things
         self._engine = create_engine(db_path)
@@ -143,6 +144,9 @@ class DefaultDORService(DORService):
 
     def obj_content_path(self, c_hash: str) -> str:
         return os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH, c_hash)
+
+    def tmp_content_path(self, name: str) -> str:
+        return os.path.join(self._node.datastore, DOR_INFIX_TEMP_PATH, name)
 
     def _add_provenance_record(self, c_hash: str, provenance: dict) -> None:
         with self._db_mutex:
@@ -305,14 +309,66 @@ class DefaultDORService(DORService):
                 data_formats=[value[0] for value in session.query(DataObjectRecord.data_format).distinct()]
             )
 
-    def add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
+    def add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
         of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
         size of the content.
         """
-        # create parameters object
         body = json.loads(body)
+
+        # read the part information
+        part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
+        if part_info.idx == 0:
+            attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
+            digest: hashes.Hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
+            f = open(attachment_path, 'wb')
+            self._parts[part_info.id] = {
+                'attachment_path': attachment_path,
+                'digest': digest,
+                'idx': 0,
+                'f': f
+            }
+        else:
+            attachment_path: str = self._parts[part_info.id]['attachment_path']
+            digest: hashes.Hash = self._parts[part_info.id]['digest']
+            f = self._parts[part_info.id]['f']
+
+            # check sequence
+            if part_info.idx != self._parts[part_info.id]['idx'] + 1:
+                raise RuntimeError(f"Received out-of-sequence file part: "
+                                   f"received={part_info['i']}, "
+                                   f"expected={self._parts[part_info.id]['idx'] + 1}")
+            self._parts[part_info.id]['idx'] = part_info.idx
+
+        try:
+            # write the part to disk (reading from stream in 1MB chunks)
+            while True:
+                chunk = attachment.file.read(1024 * 1024)
+                if chunk:
+                    digest.update(chunk)
+                    f.write(chunk)
+                else:
+                    break
+
+        except Exception as e:
+            if os.path.exists(attachment_path):
+                os.remove(attachment_path)
+                f.close()
+                self._parts.pop(part_info.id)
+            raise DORException("upload failed", details={'exception': e})
+
+        finally:
+            attachment.file.close()
+
+        # have we received all parts?
+        if part_info.idx < part_info.n - 1:
+            return None
+        else:
+            f.close()
+            self._parts.pop(part_info.id)
+
+        # create parameters object
         p = AddDataObjectParameters.parse_obj(body)
 
         # get the owner identity
@@ -323,28 +379,6 @@ class DefaultDORService(DORService):
         #  node isn't aware of.
         for creator_iid in p.creators_iid:
             self._node.db.get_identity(creator_iid, raise_if_unknown=True)
-
-        # temp file for attachment
-        attachment_path = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{generate_random_string(4)}"))
-        digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-        try:
-            with open(attachment_path, 'wb') as f:
-                buffer = bytearray()
-                while True:
-                    # we read 1MB chunks
-                    chunk = attachment.file.read(1024*1024)
-                    if not chunk:
-                        break
-
-                    buffer.extend(chunk)
-                    digest.update(chunk)
-                    f.write(chunk)
-
-        except Exception as e:
-            raise DORException("upload failed", details={'exception': e})
-
-        finally:
-            attachment.file.close()
 
         # calculate the hash for the data object content
         c_hash = digest.finalize().hex()

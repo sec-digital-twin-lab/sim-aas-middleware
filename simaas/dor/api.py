@@ -24,7 +24,7 @@ class DORService(abc.ABC):
                                self.statistics, DORStatistics, None),
 
             EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, 'add',
-                               self.add, DataObject, None),
+                               self.add, Optional[DataObject], None),
 
             EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}',
                                self.remove, DataObject, [VerifyIsOwner]),
