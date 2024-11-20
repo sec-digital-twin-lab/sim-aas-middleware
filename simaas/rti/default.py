@@ -211,6 +211,15 @@ class DefaultRTIService(RTIService):
                 logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
 
     def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
+        def is_port_free(host: str, port: int) -> bool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
+                try:
+                    sock.connect((host, port))
+                    return False  # Connection succeeded, port is in use
+                except (socket.timeout, ConnectionRefusedError):
+                    return True  # Port is free
+
         host = self._node.info.rest_address[0]
         for i in range(max_attempts):
             # update the most recent port
@@ -220,22 +229,10 @@ class DefaultRTIService(RTIService):
                     self._most_recent_port = self._port_range[0]
                 port = self._most_recent_port
 
-            # create a socket object and set a timeout to avoid blocking indefinitely
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)
+            if is_port_free(host, port):
+                return host, port
 
-            # try to connect to the specified host and port
-            try:
-                sock.connect((host, port))
-            except socket.error as e:
-                if isinstance(e, (TimeoutError, ConnectionRefusedError)):
-                    return host, port
-
-            finally:
-                sock.close()
-
-        # if we reach here we haven't found an available port after exhausting the maximum attempts
-        raise RTIException("No available port found for REST address.")
+        raise RuntimeError("No free ports found in the specified range.")
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
