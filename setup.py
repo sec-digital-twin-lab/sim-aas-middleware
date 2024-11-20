@@ -30,10 +30,10 @@ setup(
     },
     packages=find_packages(),
     include_package_data=True,
-    url='https://github.com/sec-digital-twin-lab/saas-middleware',
+    url='https://github.com/sec-digital-twin-lab/sim-aas-middleware',
     project_urls={
-        'Source': 'https://github.com/sec-digital-twin-lab/saas-middleware',
-        'Tracker': 'https://github.com/sec-digital-twin-lab/saas-middleware/issues',
+        'Source': 'https://github.com/sec-digital-twin-lab/sim-aas-middleware',
+        'Tracker': 'https://github.com/sec-digital-twin-lab/sim-aas-middleware/issues',
     },
     license='MIT',
     description=_locals["__description__"],
@@ -41,8 +41,8 @@ setup(
     long_description_content_type='text/markdown',
     entry_points={
         'console_scripts': [
-            'saas-cli = simaas.cli.saas_cli:main',
-            'saas-node = simaas.service:main'
+            'simaas-cli = simaas.cli.saas_cli:main',
+            'simaas-node = simaas.service:main'
         ]
     },
     classifiers=[

@@ -20,11 +20,11 @@ RUN git checkout 59c05de1f06bb5f4e4dfab4b30d5b964c7abfade
 
 WORKDIR /processor
 COPY . .
-RUN python3.12 -m venv venv
-RUN ./venv/bin/pip install --upgrade pip setuptools
-RUN ./venv/bin/pip install -r ./requirements.txt
-RUN ./venv/bin/pip install /sim-aas-middleware
+RUN python3.12 -m venv /venv
+RUN /venv/bin/pip install --upgrade pip setuptools
+RUN /venv/bin/pip install -r ./requirements.txt
+RUN /venv/bin/pip install /sim-aas-middleware
 
 EXPOSE 5000
 
-ENTRYPOINT ["venv/bin/saas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
+ENTRYPOINT ["/venv/bin/simaas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
