@@ -143,7 +143,8 @@ class Node(abc.ABC):
         finally:
             loop.close()
 
-        logger.info(f"Nodes found:\n{'\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in self.db.get_network()])}")
+        found = '\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in self.db.get_network()])
+        logger.info(f"Nodes found:\n{found}")
 
     def leave_network(self, blocking: bool = False) -> None:
         loop = asyncio.new_event_loop()
