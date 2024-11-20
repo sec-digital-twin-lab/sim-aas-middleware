@@ -161,5 +161,5 @@ def docker_run_job_container(image_name: str, job_path: str, job_address: Tuple[
         },
         detach=True,
         stderr=True, stdout=True,
-        auto_remove=True
+        auto_remove=False
     )

@@ -210,7 +210,6 @@ class DefaultRTIService(RTIService):
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
 
-
     def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
         host = self._node.info.rest_address[0]
         for i in range(max_attempts):
