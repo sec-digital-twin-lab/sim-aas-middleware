@@ -151,10 +151,8 @@ class DefaultRTIService(RTIService):
 
                     # build the image
                     proc_path = proc_obj.tags['proc_path']
-                    image_name_new, _, _ = build_processor_image(repo_path, proc_path, credentials=credentials)
-                    if image_name_new != image_name:
-                        raise RTIException(f"Mismatching image names after building from GPP: actual={image_name_new} "
-                                           f"!= expected={image_name}")
+                    proc_path = os.path.join(repo_path, proc_path)
+                    build_processor_image(proc_path, image_name, credentials=credentials)
 
             # update processor object
             proc.state = Processor.State.READY
