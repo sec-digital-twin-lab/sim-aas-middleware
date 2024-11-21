@@ -317,29 +317,38 @@ class DefaultDORService(DORService):
         """
         body = json.loads(body)
 
-        # read the part information
-        part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
-        if part_info.idx == 0:
-            attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
+        # is this request part of a multi-part add?
+        if '__part_info' in body:
+            # read the part information
+            part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
+            if part_info.idx == 0:
+                attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
+                digest: hashes.Hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
+                f = open(attachment_path, 'wb')
+                self._parts[part_info.id] = {
+                    'attachment_path': attachment_path,
+                    'digest': digest,
+                    'idx': 0,
+                    'f': f
+                }
+            else:
+                attachment_path: str = self._parts[part_info.id]['attachment_path']
+                digest: hashes.Hash = self._parts[part_info.id]['digest']
+                f = self._parts[part_info.id]['f']
+
+                # check sequence
+                if part_info.idx != self._parts[part_info.id]['idx'] + 1:
+                    raise RuntimeError(f"Received out-of-sequence file part: "
+                                       f"received={part_info['i']}, "
+                                       f"expected={self._parts[part_info.id]['idx'] + 1}")
+                self._parts[part_info.id]['idx'] = part_info.idx
+        else:
+            part_info = None
+            attachment_path: str = os.path.join(
+                self.obj_content_path(f"{get_timestamp_now()}_{generate_random_string(4)}")
+            )
             digest: hashes.Hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
             f = open(attachment_path, 'wb')
-            self._parts[part_info.id] = {
-                'attachment_path': attachment_path,
-                'digest': digest,
-                'idx': 0,
-                'f': f
-            }
-        else:
-            attachment_path: str = self._parts[part_info.id]['attachment_path']
-            digest: hashes.Hash = self._parts[part_info.id]['digest']
-            f = self._parts[part_info.id]['f']
-
-            # check sequence
-            if part_info.idx != self._parts[part_info.id]['idx'] + 1:
-                raise RuntimeError(f"Received out-of-sequence file part: "
-                                   f"received={part_info['i']}, "
-                                   f"expected={self._parts[part_info.id]['idx'] + 1}")
-            self._parts[part_info.id]['idx'] = part_info.idx
 
         try:
             # write the part to disk (reading from stream in 1MB chunks)
@@ -355,18 +364,22 @@ class DefaultDORService(DORService):
             if os.path.exists(attachment_path):
                 os.remove(attachment_path)
                 f.close()
-                self._parts.pop(part_info.id)
+                if part_info:
+                    self._parts.pop(part_info.id)
             raise DORException("upload failed", details={'exception': e})
 
         finally:
             attachment.file.close()
 
         # have we received all parts?
-        if part_info.idx < part_info.n - 1:
-            return None
+        if part_info is not None:
+            if part_info.idx < part_info.n - 1:
+                return None
+            else:
+                f.close()
+                self._parts.pop(part_info.id)
         else:
             f.close()
-            self._parts.pop(part_info.id)
 
         # create parameters object
         p = AddDataObjectParameters.parse_obj(body)
