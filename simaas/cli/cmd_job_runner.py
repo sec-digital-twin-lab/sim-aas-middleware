@@ -63,13 +63,15 @@ class OutputObjectHandler(threading.Thread):
             raise CLIRuntimeError("Number of attempts to push output data object exceeded limit.")
 
         except SaaSRuntimeException as e:
-            self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e.reason}")
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e.reason}\n{trace}")
             error = JobStatus.Error(message=f"Pushing output data object '{self._obj_name}' failed.",
                                     exception=e.content)
             self._owner.remove_pending_output(self._obj_name, error)
 
         except Exception as e:
-            self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e}")
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e}\n{trace}")
             error = JobStatus.Error(message=f"Pushing output data object '{self._obj_name}' failed.",
                                     exception=SaaSRuntimeException(str(e)).content)
             self._owner.remove_pending_output(self._obj_name, error)
