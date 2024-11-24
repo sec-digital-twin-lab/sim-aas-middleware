@@ -26,7 +26,7 @@ from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy, JOB_ENDPOINT_PREFIX
 from simaas.rti.exceptions import UnresolvedInputDataObjectsError, AccessNotPermittedError, MissingUserSignatureError, \
     InputDataObjectMissing, MismatchingDataTypeOrFormatError, InvalidJSONDataObjectError, \
-    DataObjectOwnerNotFoundError, DataObjectContentNotFoundError
+    DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Task, Job
 from simaas.core.processor import find_processors, ProcessorBase, ProgressListener
 
@@ -478,8 +478,13 @@ class JobRunner(CLICommand, ProgressListener):
     def push_data_object(self, obj_name: str) -> DataObject:
         # convenience variables
         task_out_items = {item.name: item for item in self._job.task.output}
-        task_out = task_out_items[obj_name]
-        output_spec = self._output_interface[obj_name]
+        task_out = task_out_items.get(obj_name)
+        output_spec = self._output_interface.get(obj_name)
+        if task_out is None or output_spec is None:
+            raise RTIException(f"Unexpected output '{obj_name}'", details={
+                'task_out_items': list(task_out_items.keys()),
+                'output_interface': list(self._output_interface.keys())
+            })
 
         # check if the output data object exists
         output_content_path = os.path.join(self._wd_path, obj_name)
