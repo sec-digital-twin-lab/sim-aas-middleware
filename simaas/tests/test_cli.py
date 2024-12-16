@@ -19,7 +19,7 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove
     IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilder
+from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilderGithub
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel
 from simaas.cli.exceptions import CLIRuntimeError
@@ -1384,22 +1384,23 @@ def test_cli_builder_build_image(docker_available, temp_dir):
     clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
 
     proc_path = "examples/adapters/proc_example"
+    image_name = 'test'
 
     try:
-        build_processor_image(repo_path+"_wrong", proc_path)
+        build_processor_image(os.path.join(repo_path+"_wrong", proc_path), image_name, credentials=credentials)
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
         proc_path_wrong = "examples/adapters"
-        build_processor_image(repo_path, proc_path_wrong)
+        build_processor_image(os.path.join(repo_path, proc_path_wrong), image_name, credentials=credentials)
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
-        build_processor_image(repo_path, proc_path)
+        build_processor_image(os.path.join(repo_path, proc_path), image_name, credentials=credentials)
     except CLIRuntimeError:
         assert False
 
@@ -1423,7 +1424,8 @@ def test_cli_builder_export_image(docker_available, temp_dir):
 
     # build image
     proc_path = "examples/adapters/proc_example"
-    image_name, _, _ = build_processor_image(repo_path, proc_path)
+    image_name = 'test'
+    build_processor_image(os.path.join(repo_path, proc_path), image_name, credentials=credentials)
 
     # export image
     try:
@@ -1459,7 +1461,7 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
     node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilder()
+        cmd = ProcBuilderGithub()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -1501,7 +1503,7 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
     node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilder()
+        cmd = ProcBuilderGithub()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -1543,7 +1545,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
     node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilder()
+        cmd = ProcBuilderGithub()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -1707,7 +1709,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
     node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilder()
+        cmd = ProcBuilderGithub()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
