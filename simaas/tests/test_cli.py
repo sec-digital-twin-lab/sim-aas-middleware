@@ -1302,7 +1302,6 @@ def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, dep
             enable_db=True, enable_dor=False, enable_rti=True,
             retain_job_history=True, strict_deployment=False, job_concurrency=True
         )
-        time.sleep(1)
 
         #  make exec-only node known to node
         target_node.join_network(node.rest.address())

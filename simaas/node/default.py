@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -56,4 +57,5 @@ class DefaultNode(Node):
                            retain_job_history=retain_job_history, strict_deployment=strict_deployment,
                            job_concurrency=job_concurrency)
         node.startup(p2p_address, rest_address, boot_node_address, bind_all_address)
+
         return node

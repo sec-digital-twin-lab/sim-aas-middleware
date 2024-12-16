@@ -115,9 +115,6 @@ def node(keystore):
             retain_job_history=True, strict_deployment=False, job_concurrency=True
         )
 
-        # sleep a bit to give the node time to startup...
-        time.sleep(2)
-
         yield _node
 
         _node.shutdown()

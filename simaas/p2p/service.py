@@ -26,6 +26,9 @@ class P2PService:
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
 
+    def is_ready(self) -> bool:
+        return self._socket is not None
+
     def add(self, protocol: P2PProtocol) -> None:
         """Adds a protocol to the P2P service."""
         logger.info(f"add P2P protocol: {protocol.name()}")

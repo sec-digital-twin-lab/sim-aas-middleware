@@ -1,3 +1,5 @@
+import socket
+
 import uvicorn
 
 from threading import Thread
@@ -66,6 +68,13 @@ class RESTService:
         self._thread = None
         self._bind_all_address = bind_all_address
 
+    def is_ready(self) -> bool:
+        try:
+            with socket.create_connection((self._host, self._port), timeout=1):
+                return True
+        except (ConnectionRefusedError, OSError):
+            return False
+
     def address(self) -> (str, int):
         return self._host, self._port
 
@@ -93,7 +102,6 @@ class RESTService:
                                   daemon=True)
 
             self._thread.start()
-            # await asyncio.sleep(0.1)
 
         else:
             logger.warning("REST service asked to start up but thread already exists! Ignoring...")

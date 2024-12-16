@@ -1,6 +1,7 @@
 import abc
 import asyncio
 import threading
+import time
 import traceback
 from typing import Optional, Tuple
 
@@ -54,7 +55,8 @@ class Node(abc.ABC):
         )
 
     def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
-                      boot_node_address: (str, int) = None, bind_all_address: bool = False) -> None:
+                boot_node_address: (str, int) = None, bind_all_address: bool = False,
+                wait_until_ready: bool = True) -> None:
 
         logger.info(f"Sim-aaS Middleware {__version__}")
 
@@ -85,6 +87,12 @@ class Node(abc.ABC):
             self.rest = RESTService(self, rest_address[0], rest_address[1], bind_all_address)
             self.rest.start_service()
             self.rest.add(endpoints)
+
+        if wait_until_ready:
+            logger.info("wait until node is ready...")
+            while not self.p2p.is_ready() or (self.rest and not self.rest.is_ready()):
+                time.sleep(0.5)
+            logger.info("node is ready.")
 
         # update our node db
         self.db.update_identity(self.identity)
