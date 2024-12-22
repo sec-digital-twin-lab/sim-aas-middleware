@@ -28,9 +28,13 @@ class ExampleProcessor(ProcessorBase):
 
     def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
         def interruptable_sleep(seconds: float) -> None:
-            t_done = get_timestamp_now() + seconds * 1000
-            while get_timestamp_now() < t_done and not self._is_cancelled:
-                time.sleep(0.1)
+            if seconds >= 0:  # interruptible
+                t_done = get_timestamp_now() + seconds * 1000
+                while get_timestamp_now() < t_done and not self._is_cancelled:
+                    time.sleep(0.1)
+
+            else:  # uninterruptible
+                time.sleep(abs(seconds))
 
         listener.on_progress_update(0)
         listener.on_message(Severity.INFO, "This is a message at the very beginning of the process.")
