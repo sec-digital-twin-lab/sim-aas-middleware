@@ -3,6 +3,7 @@ import json
 import os
 import socket
 import threading
+import time
 
 import traceback
 from threading import Lock
@@ -21,7 +22,8 @@ from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
-from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container
+from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
+    docker_kill_job_container, docker_container_running
 from simaas.rti.api import RTIService, JobRESTProxy
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
 from simaas.rti.schemas import Processor, Job, Task, JobStatus
@@ -49,6 +51,7 @@ class DBJobInfo(Base):
     rest_address = Column(String(64), nullable=False)
     status = Column(NestedMutableJson, nullable=False)
     job = Column(NestedMutableJson, nullable=False)
+    container_id = Column(String(16), nullable=False)
 
 
 def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str, rti_rest_address: str) -> None:
@@ -169,14 +172,14 @@ class DefaultRTIService(RTIService):
                     if record:
                         record.state = proc.state.value
                         record.image_name = proc.image_name
-                        record.gpp = proc.gpp.dict()
+                        record.gpp = proc.gpp.model_dump()
                         record.error = proc.error
 
                     else:
                         logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
                                        f"{proc.image_name} expected to exist but not found -> creating now.")
                         session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                        gpp=proc.gpp.dict() if proc.gpp else None, error=None))
+                                                        gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
                     session.commit()
 
         except Exception as e:
@@ -247,7 +250,7 @@ class DefaultRTIService(RTIService):
             for record in records:
                 result.append(Processor(id=record.id, state=Processor.State(record.state),
                                         image_name=record.image_name,
-                                        gpp=GitProcessorPointer.parse_obj(record.gpp) if record.gpp else None,
+                                        gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                         error=record.error))
 
             return result
@@ -376,35 +379,36 @@ class DefaultRTIService(RTIService):
                   proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
         descriptor_path = os.path.join(job_path, 'job.descriptor')
         with open(descriptor_path, 'w') as f:
-            json.dump(job.dict(), f, indent=2)
+            json.dump(job.model_dump(), f, indent=2)
 
         # write the gpp descriptor
         gpp_path = os.path.join(job_path, 'gpp.descriptor')
         with open(gpp_path, 'w') as f:
-            json.dump(proc.gpp.dict(), f, indent=2)
+            json.dump(proc.gpp.model_dump(), f, indent=2)
 
         # create the initial job status and write to file
         status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
                            errors=[], message=None)
         status_path = os.path.join(job_path, 'job.status')
         with open(status_path, 'w') as f:
-            json.dump(status.dict(), f, indent=2)
+            json.dump(status.model_dump(), f, indent=2)
 
         # determine REST address
         job_address = self._find_available_job_address()
+
+        # start the job container and keep the container id
+        logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
+        container_id = docker_run_job_container(proc.image_name, job_path, job_address)
 
         # write the initial job info database record
         with self._mutex:
             with self._session_maker() as session:
                 record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
                                    rest_address=f"{job_address[0]}:{job_address[1]}",
-                                   status=status.dict(), job=job.dict())
+                                   status=status.model_dump(), job=job.model_dump(),
+                                   container_id=container_id)
                 session.add(record)
                 session.commit()
-
-        # start the job container
-        logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
-        docker_run_job_container(proc.image_name, job_path, job_address)
 
         return job
 
@@ -511,6 +515,46 @@ class DefaultRTIService(RTIService):
 
         return JobStatus.parse_obj(record.status)
 
+    def _perform_cancel(self, job_id: str, rest_address: Tuple[str, int], grace_period: int = 30) -> None:
+        # attempt to cancel the job
+        try:
+            job_proxy = JobRESTProxy(rest_address)
+            job_proxy.job_cancel()
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
+            grace_period = 0
+
+        with self._session_maker() as session:
+            # get the record and status
+            record = session.query(DBJobInfo).get(job_id)
+            container_id = record.container_id
+
+            deadline = get_timestamp_now() + grace_period * 1000
+            while get_timestamp_now() < deadline:
+                try:
+                    # sleep for a bit and check the record
+                    time.sleep(1)
+
+                    # is the container still running -> if not, all good we are done
+                    if not docker_container_running(container_id):
+                        return
+
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    logger.warning(f"[job:{job_id}] checking status failed: {trace}")
+                    break
+
+            # if we get here then either the deadline has been reached or there was an exception -> kill container
+            try:
+                logger.warning(f"[job:{job_id}] grace period exceeded -> "
+                               f"killing Docker container {container_id}")
+                docker_kill_job_container(container_id)
+
+            except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+
     def job_cancel(self, job_id: str) -> JobStatus:
         """
         Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
@@ -524,21 +568,16 @@ class DefaultRTIService(RTIService):
                     raise RTIException(f"Job {job_id} does not exist.")
 
         # check the status
-        status = JobStatus.parse_obj(record.status)
+        status = JobStatus.model_validate(record.status)
         if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
                                 JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
                                 JobStatus.State.POSTPROCESSING]:
             raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
 
-        # attempt to cancel the job
-        try:
-            rest_address = record.rest_address.split(':')
-            rest_address = (rest_address[0], int(rest_address[1]))
-            job_proxy = JobRESTProxy(rest_address)
-            job_proxy.job_cancel()
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            raise RTIException(f"Attempt to cancel job {job_id} failed -> {trace}")
+        # start the cancellation worker
+        rest_address = record.rest_address.split(':')
+        rest_address = (rest_address[0], int(rest_address[1]))
+        threading.Thread(target=self._perform_cancel, args=(job_id, rest_address, )).start()
 
         return status
 
@@ -546,34 +585,24 @@ class DefaultRTIService(RTIService):
         """
         Purges a running job. It will be removed regardless of its state.
         """
-        # get the record
+        # remove the job from database
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                # get the record
+                record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
-        # check the status
-        status = JobStatus.parse_obj(record.status)
+                # try to kill the container (if anything is left)
+                try:
+                    docker_kill_job_container(record.container_id)
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    logger.warning(f"[job:{job_id}] killing Docker container {record.container_id} failed: {trace}")
 
-        # attempt to cancel the job
-        try:
-            rest_address = record.rest_address.split(':')
-            rest_address = (rest_address[0], int(rest_address[1]))
-            job_proxy = JobRESTProxy(rest_address)
-            job_proxy.job_cancel()
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] attempt to cancel failed -> {trace}")
+                # delete the record
+                session.delete(record)
+                session.commit()
 
-        # remove it from database
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
-                if record:
-                    session.delete(record)
-                    session.commit()
-                else:
-                    logger.warning(f"[job:{job_id}] db record not found for purging.")
-
-        return status
+                status = JobStatus.model_validate(record.status)
+                return status
