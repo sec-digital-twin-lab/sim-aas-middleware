@@ -486,7 +486,7 @@ class DefaultRTIService(RTIService):
                 status = JobStatus.parse_obj(record.status)
                 if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
                                         JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                        JobStatus.State.POSTPROCESSING]:
+                                        JobStatus.State.POSTPROCESSING, JobStatus.State.CANCELLED]:
                     raise RTIException(f"Job {job_id} is not active -> status cannot be updated.")
 
                 # update the status
