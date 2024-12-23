@@ -199,7 +199,8 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
 
                 try:
                     spec.loader.exec_module(module)
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"spec loader failed: {e}")
                     continue
 
                 # module = importlib.import_module(module_name)

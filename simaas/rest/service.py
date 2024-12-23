@@ -1,4 +1,5 @@
 import socket
+import traceback
 
 import uvicorn
 
@@ -23,13 +24,30 @@ class RESTApp:
         self.api.on_event("shutdown")(self.close)
 
         @self.api.exception_handler(SaaSRuntimeException)
-        async def saas_exception_handler(_: Request, exception: SaaSRuntimeException):
+        async def saas_exception_handler(_: Request, e: SaaSRuntimeException):
+            # add trace to details
+            details = dict(e.details)
+            details['trace'] = ''.join(traceback.format_exception(None, e, e.__traceback__))
+
+            logger.error(f"Exception: {e.reason} {e.id} -> {details}", exc_info=True)
             return JSONResponse(
                 status_code=500,
                 content={
-                    'reason': exception.reason,
-                    'id': exception.id,
-                    'details': exception.details
+                    'reason': e.reason,
+                    'id': e.id,
+                    'details': details
+                }
+            )
+
+        @self.api.exception_handler(Exception)
+        async def generic_exception_handler(_: Request, e: Exception):
+            logger.error(f"Unexpected exception: {e}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    'error': 'Internal Server Error',
+                    'message': f'An unexpected error occurred: {e}',
+                    'trace': ''.join(traceback.format_exception(None, e, e.__traceback__))
                 }
             )
 
