@@ -16,11 +16,12 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
+from simaas.helpers import docker_container_list
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
-from simaas.rti.schemas import Task, JobStatus, Processor
+from simaas.rti.schemas import Task, JobStatus, Processor, Job
 from simaas.tests.conftest import add_test_processor, REPOSITORY_URL
 
 Logging.initialise(level=logging.DEBUG)
@@ -268,10 +269,70 @@ def test_rest_submit_cancel_job(docker_available, node, rti_proxy, deployed_test
     # cancel the job (correct user)
     rti_proxy.cancel_job(job_id, owner)
 
+    # give it a bit...
+    time.sleep(5)
+
     # get information about the job
     status: JobStatus = rti_proxy.get_job_status(job_id, owner)
     print(json.dumps(status.dict(), indent=4))
     assert (status.state == JobStatus.State.CANCELLED)
+
+
+def test_rest_submit_cancel_kill_job(docker_available, node, rti_proxy, deployed_test_processor, known_user):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    proc_id = deployed_test_processor.obj_id
+    owner = node.keystore
+
+    task_input = [
+        Task.InputValue.parse_obj({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
+        Task.InputValue.parse_obj({'name': 'b', 'type': 'value', 'value': {'v': 100}})
+    ]
+
+    task_output = [
+        Task.Output.parse_obj({'name': 'c', 'owner_iid': owner.identity.id,
+                               'restricted_access': False, 'content_encrypted': False,
+                               'target_node_iid': None})
+    ]
+
+    # submit the job
+    job: Job = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
+    assert (job is not None)
+
+    job_id = job.id
+
+    # wait until the job is running
+    while True:
+        status: JobStatus = rti_proxy.get_job_status(job_id, owner)
+        if status.state == JobStatus.State.RUNNING:
+            break
+        else:
+            time.sleep(0.5)
+
+    containers = docker_container_list()
+    n0 = len(containers)
+
+    # cancel the job (correct user)
+    rti_proxy.cancel_job(job_id, owner)
+
+    # give it a bit...
+    time.sleep(5)
+
+    containers = docker_container_list()
+    n1 = len(containers)
+
+    # the job should still be running because interrupt doesn't work
+    assert n0 == n1
+
+    # give it a bit more for the grace period to end...
+    time.sleep(30)
+
+    containers = docker_container_list()
+    n2 = len(containers)
+
+    # the job should be cancelled now because the container was killed
+    assert n2 == n1 - 1
 
 
 def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node: NodeInfo,

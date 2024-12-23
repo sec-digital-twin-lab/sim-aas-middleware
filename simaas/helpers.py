@@ -3,9 +3,10 @@ from threading import Lock
 
 import netifaces
 import ipaddress
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 import docker
+from docker.models.containers import Container
 from docker.models.images import Image
 
 
@@ -149,9 +150,9 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
         return found
 
 
-def docker_run_job_container(image_name: str, job_path: str, job_address: Tuple[str, int]) -> None:
+def docker_run_job_container(image_name: str, job_path: str, job_address: Tuple[str, int]) -> str:
     client = docker.from_env()
-    client.containers.run(
+    container = client.containers.run(
         image=image_name,
         volumes={
             job_path: {'bind': '/job', 'mode': 'rw'}
@@ -163,3 +164,24 @@ def docker_run_job_container(image_name: str, job_path: str, job_address: Tuple[
         stderr=True, stdout=True,
         auto_remove=False
     )
+
+    return container.id
+
+
+def docker_kill_job_container(container_id: str) -> None:
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    container.kill()
+
+
+def docker_container_running(container_id: str) -> bool:
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    return container.status == "running"
+
+
+def docker_container_list() -> Dict[str, Container]:
+    client = docker.from_env()
+    return {
+        container.id: container for container in client.containers.list()
+    }
