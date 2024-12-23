@@ -28,7 +28,7 @@ from simaas.rti.schemas import Processor
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '63dee612e2ab91651038683ebad118be5ff56917'
+REPOSITORY_COMMIT_ID = '52fa934b9ecdc39d1d77fbf3b22750fb5100cb3b'
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
@@ -137,7 +137,7 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
             repo_path = os.path.join(tempdir, 'repository')
             commit_timestamp = clone_repository(repo_url, repo_path, commit_id=REPOSITORY_COMMIT_ID)
 
-            # read he processor descriptor
+            # read the processor descriptor
             descriptor_path = os.path.join(repo_path, proc_path, 'descriptor.json')
             with open(descriptor_path, 'r') as f:
                 descriptor = ProcessorDescriptor.parse_obj(json.load(f))
