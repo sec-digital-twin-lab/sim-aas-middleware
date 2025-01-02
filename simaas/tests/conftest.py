@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import traceback
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import pytest
 from dotenv import load_dotenv
@@ -185,7 +185,12 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
 
 
 @pytest.fixture(scope="session")
-def deployed_test_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+def deployed_test_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> Optional[DataObject]:
+    if not github_credentials_available:
+        return None
+
     # add test processor
     meta = add_test_processor(dor_proxy, session_node.keystore)
     proc_id = meta.obj_id
