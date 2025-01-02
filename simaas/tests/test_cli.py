@@ -1528,9 +1528,12 @@ def test_cli_builder_export_image(docker_available, github_credentials_available
         assert False
 
 
-def test_cli_builder_cmd(docker_available, session_node, temp_dir):
+def test_cli_builder_cmd(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     address = session_node.rest.address()
 
@@ -1569,9 +1572,12 @@ def test_cli_builder_cmd(docker_available, session_node, temp_dir):
         assert False
 
 
-def test_cli_builder_cmd_store_image(docker_available, session_node, temp_dir):
+def test_cli_builder_cmd_store_image(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     address = session_node.rest.address()
 
@@ -1611,9 +1617,12 @@ def test_cli_builder_cmd_store_image(docker_available, session_node, temp_dir):
         assert False
 
 
-def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, temp_dir):
+def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     address = session_node.rest.address()
 
@@ -1775,9 +1784,12 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, 
         assert False
 
 
-def test_cli_rti_job_submit_list_status_cancel(docker_available, session_node, temp_dir):
+def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     address = session_node.rest.address()
 
