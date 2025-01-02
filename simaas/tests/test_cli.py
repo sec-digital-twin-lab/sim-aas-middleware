@@ -1045,9 +1045,14 @@ def test_job_worker_error(temp_dir):
     assert "ValueError: invalid literal for int() with base 10: 'sdf'" in result.trace
 
 
-def test_cli_runner_success_by_value(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_success_by_value(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare the job folder
     job_id = '398h36g3_00'
@@ -1068,9 +1073,14 @@ def test_cli_runner_success_by_value(docker_available, temp_dir, session_node, d
     assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_failing_validation(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_failing_validation(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare the job folder
     job_id = '398h36g3_01'
@@ -1091,9 +1101,14 @@ def test_cli_runner_failing_validation(docker_available, temp_dir, session_node,
     assert 'InvalidJSONDataObjectError' in job_result.trace
 
 
-def test_cli_runner_success_by_reference(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_success_by_reference(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
@@ -1119,10 +1134,13 @@ def test_cli_runner_success_by_reference(docker_available, temp_dir, session_nod
 
 
 def test_cli_runner_failing_no_access(
-        docker_available, temp_dir, session_node, deployed_test_processor, extra_keystores
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor, extra_keystores
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     user = extra_keystores[0]
     session_node.db.update_identity(user.identity)
@@ -1151,9 +1169,14 @@ def test_cli_runner_failing_no_access(
     assert 'AccessNotPermittedError' in job_result.trace
 
 
-def test_cli_runner_failing_no_signature(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_failing_no_signature(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
@@ -1179,9 +1202,14 @@ def test_cli_runner_failing_no_signature(docker_available, temp_dir, session_nod
     assert 'MissingUserSignatureError' in job_result.trace
 
 
-def test_cli_runner_failing_no_data_object(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_failing_no_data_object(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
@@ -1211,9 +1239,14 @@ def test_cli_runner_failing_no_data_object(docker_available, temp_dir, session_n
     assert 'UnresolvedInputDataObjectsError' in job_result.trace
 
 
-def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_failing_wrong_data_type(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='wrong')
@@ -1239,9 +1272,14 @@ def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, session_
     assert 'MismatchingDataTypeOrFormatError' in job_result.trace
 
 
-def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_failing_wrong_data_format(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_format='wrong')
@@ -1267,9 +1305,14 @@ def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, sessio
     assert 'MismatchingDataTypeOrFormatError' in job_result.trace
 
 
-def test_cli_runner_success_no_name(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_success_no_name(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare the job folder
     job_id = '398h36g3_08'
@@ -1290,9 +1333,14 @@ def test_cli_runner_success_no_name(docker_available, temp_dir, session_node, de
     assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_cancelled(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_cancelled(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # prepare the job folder
     job_id = '398h36g3_09'
@@ -1317,9 +1365,14 @@ def test_cli_runner_cancelled(docker_available, temp_dir, session_node, deployed
     assert job_result.exitcode == ExitCode.INTERRUPTED
 
 
-def test_cli_runner_success_non_dor_target(docker_available, temp_dir, session_node, deployed_test_processor):
+def test_cli_runner_success_non_dor_target(
+        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # create a new node as DOR target
     with tempfile.TemporaryDirectory() as tempdir:
