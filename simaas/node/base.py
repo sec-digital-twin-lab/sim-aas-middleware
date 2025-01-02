@@ -146,7 +146,7 @@ class Node(abc.ABC):
             loop.run_until_complete(protocol.perform(boot_node))
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"Error during P2P network join")
+            logger.error("Error during P2P network join")
             logger.error(trace)
         finally:
             loop.close()
