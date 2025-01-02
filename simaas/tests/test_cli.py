@@ -1431,7 +1431,10 @@ def test_find_open_port():
     assert(port == 5996)
 
 
-def test_cli_builder_clone_repo(temp_dir):
+def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
     credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     repo_path = os.path.join(temp_dir, 'repository')
 
@@ -1459,6 +1462,9 @@ def test_cli_builder_clone_repo(temp_dir):
 def test_cli_builder_build_image(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     # clone the repository
     credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
@@ -1490,6 +1496,9 @@ def test_cli_builder_build_image(docker_available, temp_dir):
 def test_cli_builder_export_image(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     image_path = os.path.join(temp_dir, 'image.tar')
 
