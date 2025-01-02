@@ -15,8 +15,8 @@ class DORStatistics(BaseModel):
     """
     Provides information about contents in the DOR.
     """
-    data_types: List[str] = Field(..., title="Data Types", description="A list of all unqiue data types that can be found in the DOR.", example=['JSONObject', 'Heatmap'])
-    data_formats: List[str] = Field(..., title="Data Formats", description="A list of all unqiue data formats that can be found in the DOR.", example=['json', 'tiff'])
+    data_types: List[str] = Field(..., title="Data Types", description="A list of all unqiue data types that can be found in the DOR.", examples=['JSONObject', 'Heatmap'])
+    data_formats: List[str] = Field(..., title="Data Formats", description="A list of all unqiue data formats that can be found in the DOR.", examples=['json', 'tiff'])
 
 
 class ProcessorDescriptor(BaseModel):
@@ -25,12 +25,12 @@ class ProcessorDescriptor(BaseModel):
     data objects that are being consumed (input) and produced (output).
     """
     class IODataObject(BaseModel):
-        name: str = Field(..., title="Data Object Name", description="The name of the data object.", example="parameters")
-        data_type: str = Field(..., title="Data Type", description="The data type that is expected or produced in case of an input or output data objects, respectively.", example="JSONObject")
-        data_format: str = Field(..., title="Data Format", description="The data format that is expected or produced in case of an input or output data objects, respectively.", example="json")
+        name: str = Field(..., title="Data Object Name", description="The name of the data object.", examples=["parameters"])
+        data_type: str = Field(..., title="Data Type", description="The data type that is expected or produced in case of an input or output data objects, respectively.", examples=["JSONObject"])
+        data_format: str = Field(..., title="Data Format", description="The data format that is expected or produced in case of an input or output data objects, respectively.", examples=["json"])
         data_schema: Optional[dict] = Field(title="Data Schema", description="The scheme that can be used for validating the content of this data object. Note: this is only applicable in case the data type and format is `JSONObject` and `json`, respectively.")
 
-    name: str = Field(..., title="Processor Name", description="The name of the processor", example="urban-climate-sim")
+    name: str = Field(..., title="Processor Name", description="The name of the processor", examples=["urban-climate-sim"])
     input: List[IODataObject] = Field(..., title="Input Data Objects", description="A list of data objects that are consumed by the processor when executing a job.")
     output: List[IODataObject] = Field(..., title="Output Data Objects", description="A list of data objects that are produced by the processor when executing a job.")
 
@@ -40,9 +40,9 @@ class GitProcessorPointer(BaseModel):
     Contains all the necessary information to refer to a specific version of a processor and where it can be located.
     For convenience, it also contains the descriptor of the processor that is being referenced.
     """
-    repository: str = Field(..., title="Repository", description="The respoitory URL where the processor sourcecode can be found.", example="https://github.com/my-repo")
-    commit_id: str = Field(..., title="Commit Id", description="The commit id to be used. This allows to refer to a specific version of the code.", example="833e8f7")
-    proc_path: str = Field(..., title="", description="The relative path in the repository where the processor can be found.", example="/my_processor")
+    repository: str = Field(..., title="Repository", description="The respoitory URL where the processor sourcecode can be found.", examples=["https://github.com/my-repo"])
+    commit_id: str = Field(..., title="Commit Id", description="The commit id to be used. This allows to refer to a specific version of the code.", examples=["833e8f7"])
+    proc_path: str = Field(..., title="", description="The relative path in the repository where the processor can be found.", examples=["/my_processor"])
     proc_descriptor: ProcessorDescriptor = Field(..., title="Processor Descriptor", description="The processor descriptor is stored in the repository at the location indicated with `proc_path`. For convenience this descriptor is included in the GPP.")
 
 
@@ -52,10 +52,10 @@ class CObjectNode(BaseModel):
     about a specific instance of data object consumed or produced by a processor as input or output data object,
     respectively. In case of a 'by-value' data object, the actual content of the data object is included as well.
     """
-    c_hash: str = Field(..., title="Content Hash", description="The content hash used to uniquely identify a specific content.", example="9ab2253fc38981f5be9c25cf0a34b62cdf334652344bdef16b3d5dbc0b74f2f1")
-    data_type: str = Field(..., title="Data Type", description="The data type of the data object.", example="JSONObject")
-    data_format: str = Field(..., title="Data Type", description="The data format of the data object.", example="json")
-    content: Optional[dict] = Field(title="Content", description="The content of the data object (only used in case of 'by-value' data objects).", example="")
+    c_hash: str = Field(..., title="Content Hash", description="The content hash used to uniquely identify a specific content.", examples=["9ab2253fc38981f5be9c25cf0a34b62cdf334652344bdef16b3d5dbc0b74f2f1"])
+    data_type: str = Field(..., title="Data Type", description="The data type of the data object.", examples=["JSONObject"])
+    data_format: str = Field(..., title="Data Type", description="The data format of the data object.", examples=["json"])
+    content: Optional[dict] = Field(title="Content", description="The content of the data object (only used in case of 'by-value' data objects).", examples=[""])
 
 
 class DataObjectRecipe(BaseModel):
@@ -67,10 +67,10 @@ class DataObjectRecipe(BaseModel):
     Recipes are automatically generated by the RTI. In general, recipes are not available for data objects that have
     been manually added to a DOR.
     """
-    processor: GitProcessorPointer = Field(..., title="Git Processor Pointer", description="A GPP used to identify and locate the specific processor and version that has been used to generate the data object.", example="urban-climate-sim")
+    processor: GitProcessorPointer = Field(..., title="Git Processor Pointer", description="A GPP used to identify and locate the specific processor and version that has been used to generate the data object.", examples=["urban-climate-sim"])
     consumes: Dict[str, CObjectNode] = Field(..., title="Consumed Data Objects", description="A mapping 'name -> `CObjectNode`' of all input data objects that have been consumed by the processor to produce the data object.")
     product: CObjectNode = Field(..., title="Product Data Object", description="Details about the produced data object.")
-    name: str = Field(..., title="Product Name", description="The name of the data object produced by the processor.", example="air-temperature-map")
+    name: str = Field(..., title="Product Name", description="The name of the data object produced by the processor.", examples=["air-temperature-map"])
 
 
 class DataObjectProvenance(BaseModel):
@@ -107,16 +107,16 @@ class DataObject(BaseModel):
         """
         Details about who created the data object and when.
         """
-        timestamp: int = Field(..., title="Timestamp", description="The time of creation in millisecond (UTC) since the beginning of the epoch.", example=1664849510076)
-        creators_iid: List[str] = Field(..., title="Creators", description="A list of ids belong to the identities of the creators.", example="[vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2]")
+        timestamp: int = Field(..., title="Timestamp", description="The time of creation in millisecond (UTC) since the beginning of the epoch.", examples=[1664849510076])
+        creators_iid: List[str] = Field(..., title="Creators", description="A list of ids belong to the identities of the creators.", examples=["['vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2']"])
 
     class Tag(BaseModel):
         """
         Tags are key/value pairs. Keys are strings while values can be basic types (`str`, `int`, `float`, `bool`)
         and JSON-compatible complex types (`List` and `Dict`).
         """
-        key: str = Field(..., title="Key", description="The key of the tag.", example="module")
-        value: Optional[Union[str, int, float, bool, List, Dict]] = Field(title="Value", description="The value of the tag", example="D1.2")
+        key: str = Field(..., title="Key", description="The key of the tag.", examples=["module"])
+        value: Optional[Union[str, int, float, bool, List, Dict]] = Field(title="Value", description="The value of the tag", examples=["D1.2"])
 
     class License(BaseModel):
         """
@@ -124,23 +124,23 @@ class DataObject(BaseModel):
         creators of a data object have to be credited, whether derivative work should be shared alike (i.e., with
         the same license), whether commercial use is prohibited and whether creation of derivatives is allowed.
         """
-        by: bool = Field(..., title="Credit Creators", description="Indicates if creators must be credited.", example=True)
-        sa: bool = Field(..., title="Share Alike", description="Indicates if derivatives must be shared alike.", example=False)
-        nc: bool = Field(..., title="Non-Commercial", description="Indicates if commercial use is prohibited.", example=False)
-        nd: bool = Field(..., title="Non-Derive", description="Indicates if creating derivatives is prohibited.", example=False)
+        by: bool = Field(..., title="Credit Creators", description="Indicates if creators must be credited.", examples=[True])
+        sa: bool = Field(..., title="Share Alike", description="Indicates if derivatives must be shared alike.", examples=[False])
+        nc: bool = Field(..., title="Non-Commercial", description="Indicates if commercial use is prohibited.", examples=[False])
+        nd: bool = Field(..., title="Non-Derive", description="Indicates if creating derivatives is prohibited.", examples=[False])
 
-    obj_id: str = Field(..., title="Object Id", description="The id of the data object.", example="f25c8b96679aaf74eb41b17fbf7951d790423b6208a5d0efb1cd2a124c1f9cb4")
-    c_hash: str = Field(..., title="Content Hash", description="The content hash of the data object.", example="9ab2253fc38981f5be9c25cf0a34b62cdf334652344bdef16b3d5dbc0b74f2f1")
-    data_type: str = Field(..., title="Data Type", description="The data type of the data object.", example="JSONObject")
-    data_format: str = Field(..., title="Data Format", description="The data format of the data object.", example="json")
+    obj_id: str = Field(..., title="Object Id", description="The id of the data object.", examples=["f25c8b96679aaf74eb41b17fbf7951d790423b6208a5d0efb1cd2a124c1f9cb4"])
+    c_hash: str = Field(..., title="Content Hash", description="The content hash of the data object.", examples=["9ab2253fc38981f5be9c25cf0a34b62cdf334652344bdef16b3d5dbc0b74f2f1"])
+    data_type: str = Field(..., title="Data Type", description="The data type of the data object.", examples=["JSONObject"])
+    data_format: str = Field(..., title="Data Format", description="The data format of the data object.", examples=["json"])
     created: CreationDetails = Field(..., title="Creation Details", description="Information about the creation of this data object.")
-    owner_iid: str = Field(..., title="Owner IId", description="Owner IId", example="vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2")
-    access_restricted: bool = Field(..., title="Access Restriction", description="Indicates if this data object has restricted access to its content.", example=False)
-    access: List[str] = Field(..., title="Access", description="A list of ids of identities that have access to the contents of the data object.", example=["vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2"])
+    owner_iid: str = Field(..., title="Owner IId", description="Owner IId", examples=["vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2"])
+    access_restricted: bool = Field(..., title="Access Restriction", description="Indicates if this data object has restricted access to its content.", examples=[False])
+    access: List[str] = Field(..., title="Access", description="A list of ids of identities that have access to the contents of the data object.", examples=["vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2"])
     tags: Dict[str, Union[str, int, float, bool, List, Dict]] = Field(..., title="Tags", description="The tags of this data object.")
-    last_accessed: int = Field(..., title="Last Accessed", description="The timestamp (in UTC milliseconds since the beginning of the epoch) when the data object has been accessed the last time.", example=1664849510076)
+    last_accessed: int = Field(..., title="Last Accessed", description="The timestamp (in UTC milliseconds since the beginning of the epoch) when the data object has been accessed the last time.", examples=[1664849510076])
     custodian: Optional[NodeInfo] = Field(title='Custodian', description="Information about the node that hosts this data object.")
-    content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of the data object is encrypted.", example=False)
+    content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of the data object is encrypted.", examples=[False])
     license: License = Field(..., title="License", description="The license information for this data object.")
     recipe: Optional[DataObjectRecipe] = Field(title="Recipe", description="If this data object has been produced by a processor, a recipe is provided. Data objects that are uploaded by users typically do not come with a recipe unless the user provides one manually when uploading the content to the DOR.")
 

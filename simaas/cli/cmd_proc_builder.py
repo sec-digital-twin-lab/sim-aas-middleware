@@ -204,7 +204,7 @@ class ProcBuilderLocal(CLICommand):
         descriptor_path = os.path.join(args['location'], 'descriptor.json')
         with open(descriptor_path, 'r') as f:
             try:
-                descriptor = ProcessorDescriptor.parse_obj(json.load(f))
+                descriptor = ProcessorDescriptor.model_validate(json.load(f))
             except Exception as e:
                 raise CLIRuntimeError(f"Cannot read processor descriptor at {descriptor_path}: {e}")
 
@@ -255,7 +255,7 @@ class ProcBuilderLocal(CLICommand):
                                           DataObject.Tag(key='commit_id', value=content_hash),
                                           DataObject.Tag(key='commit_timestamp', value=content_timestamp),
                                           DataObject.Tag(key='proc_path', value=proc_path),
-                                          DataObject.Tag(key='proc_descriptor', value=descriptor.dict()),
+                                          DataObject.Tag(key='proc_descriptor', value=descriptor.model_dump()),
                                           DataObject.Tag(key='image_name', value=image_name)
                                       ])
             print(f"Done uploading image to DOR -> object id: {pdi.obj_id}")
@@ -354,7 +354,8 @@ class ProcBuilderGithub(CLICommand):
             descriptor_path = os.path.join(processor_path, 'descriptor.json')
             with open(descriptor_path, 'r') as f:
                 try:
-                    descriptor = ProcessorDescriptor.parse_obj(json.load(f))
+                    # noinspection PyTypeChecker
+                    descriptor = ProcessorDescriptor.model_validate(json.load(f))
                 except Exception as e:
                     raise CLIRuntimeError(f"Cannot read processor descriptor at {descriptor_path}: {e}")
 
@@ -388,7 +389,7 @@ class ProcBuilderGithub(CLICommand):
                                               DataObject.Tag(key='commit_id', value=args['commit_id']),
                                               DataObject.Tag(key='commit_timestamp', value=commit_timestamp),
                                               DataObject.Tag(key='proc_path', value=args['proc_path']),
-                                              DataObject.Tag(key='proc_descriptor', value=descriptor.dict()),
+                                              DataObject.Tag(key='proc_descriptor', value=descriptor.model_dump()),
                                               DataObject.Tag(key='image_name', value=image_name)
                                           ])
                 print(f"Done uploading image to DOR -> object id: {pdi.obj_id}")
@@ -403,7 +404,8 @@ class ProcBuilderGithub(CLICommand):
                 with open(gpp_path, 'w') as f:
                     gpp = GitProcessorPointer(repository=args['repository'], commit_id=args['commit_id'],
                                               proc_path=args['proc_path'], proc_descriptor=descriptor)
-                    json.dump(gpp.dict(), f)
+                    # noinspection PyTypeChecker
+                    json.dump(gpp.model_dump(), f)
 
                 # upload the image to the DOR and set GPP tags
                 pdi = dor.add_data_object(gpp_path, keystore.identity, False, False, 'ProcessorDockerImage', 'json',
@@ -412,7 +414,7 @@ class ProcBuilderGithub(CLICommand):
                                               DataObject.Tag(key='commit_id', value=args['commit_id']),
                                               DataObject.Tag(key='commit_timestamp', value=commit_timestamp),
                                               DataObject.Tag(key='proc_path', value=args['proc_path']),
-                                              DataObject.Tag(key='proc_descriptor', value=descriptor.dict()),
+                                              DataObject.Tag(key='proc_descriptor', value=descriptor.model_dump()),
                                               DataObject.Tag(key='image_name', value=image_name)
                                           ])
                 print(f"Done uploading PDI to DOR -> object id: {pdi.obj_id}")

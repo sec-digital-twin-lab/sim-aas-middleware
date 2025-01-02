@@ -46,22 +46,20 @@ class ECKeyPair(KeyPair):
         return ECKeyPair(private_key, public_key)
 
     @classmethod
-    def from_private_key_string(cls, private_key_string: str, password: str = None) -> ECKeyPair:
+    def from_private_key_string(cls, private_key_string: str) -> ECKeyPair:
         """
         Creates an ECKeyPair instance based on a given private key string.
         :param private_key_string:
-        :param password: the password used to protect the private key
         :return: ECKeyPair instance
         """
         private_key_bytes = bytes.fromhex(private_key_string)
         return ECKeyPair.from_private_key(Ed25519PrivateKey.from_private_bytes(private_key_bytes))
 
     @classmethod
-    def from_private_key_file(cls, path: str, password: str) -> ECKeyPair:
+    def from_private_key_file(cls, path: str) -> ECKeyPair:
         """
         Creates an ECKeyPair instance by reading a private key from a PEM file.
         :param path: the path to the file containing the private key
-        :param password: the password used to protect the private key
         :return: ECKeyPair instance
         """
         with open(path, "rb") as f:

@@ -111,6 +111,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'content.json')
         with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())
@@ -168,6 +169,7 @@ async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
         # upload the data object
         content_path = os.path.join(temp_dir, 'content.json')
         with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())

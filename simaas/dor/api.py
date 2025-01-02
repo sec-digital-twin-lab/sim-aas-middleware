@@ -158,11 +158,11 @@ class DORProxy(EndpointProxy):
         }
 
         results = self.get('', body=body)
-        return [DataObject.parse_obj(result) for result in results]
+        return [DataObject.model_validate(result) for result in results]
 
     def statistics(self) -> DORStatistics:
         result = self.get('statistics')
-        return DORStatistics.parse_obj(result)
+        return DORStatistics.model_validate(result)
 
     def add_data_object(self, content_path: str, owner: Identity, access_restricted: bool, content_encrypted: bool,
                         data_type: str, data_format: str, creators: List[Identity] = None, recipe: dict = None,
@@ -186,42 +186,42 @@ class DORProxy(EndpointProxy):
         }
 
         result = self.post('add', body=body, attachment_path=content_path)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)
 
     def delete_data_object(self, obj_id: str, with_authorisation_by: Keystore) -> Optional[DataObject]:
         result = self.delete(f"{obj_id}", with_authorisation_by=with_authorisation_by)
-        return DataObject.parse_obj(result) if result else None
+        return DataObject.model_validate(result) if result else None
 
     def get_meta(self, obj_id: str) -> Optional[DataObject]:
         result = self.get(f"{obj_id}/meta")
-        return DataObject.parse_obj(result) if result else None
+        return DataObject.model_validate(result) if result else None
 
     def get_content(self, obj_id: str, with_authorisation_by: Keystore, download_path: str) -> None:
         self.get(f"{obj_id}/content", download_path=download_path, with_authorisation_by=with_authorisation_by)
 
     def get_provenance(self, c_hash: str) -> DataObjectProvenance:
         result = self.get(f"{c_hash}/provenance")
-        return DataObjectProvenance.parse_obj(result)
+        return DataObjectProvenance.model_validate(result)
 
     def grant_access(self, obj_id: str, authority: Keystore, identity: Identity) -> DataObject:
         result = self.post(f"{obj_id}/access/{identity.id}", with_authorisation_by=authority)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)
 
     def revoke_access(self, obj_id: str, authority: Keystore, identity: Identity) -> DataObject:
         result = self.delete(f"{obj_id}/access/{identity.id}", with_authorisation_by=authority)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)
 
     def transfer_ownership(self, obj_id: str, authority: Keystore, new_owner: Identity) -> DataObject:
         # TODO: reminder that the application layer is responsible to transfer the content_key to the new owner
         result = self.put(f"{obj_id}/owner/{new_owner.id}", with_authorisation_by=authority)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)
 
     def update_tags(self, obj_id: str, authority: Keystore, tags: List[DataObject.Tag]) -> DataObject:
-        tags = [tag.dict() for tag in tags]
+        tags = [tag.model_dump() for tag in tags]
 
         result = self.put(f"{obj_id}/tags", body=tags, with_authorisation_by=authority)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)
 
     def remove_tags(self, obj_id: str, authority: Keystore, keys: List[str]) -> DataObject:
         result = self.delete(f"{obj_id}/tags", body=keys, with_authorisation_by=authority)
-        return DataObject.parse_obj(result)
+        return DataObject.model_validate(result)

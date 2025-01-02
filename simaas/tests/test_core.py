@@ -67,10 +67,10 @@ def test_ec_serialisation(temp_directory, ec_keypair):
     prvkey_string2 = ec_keypair.private_as_string(truncate=False)
     prvkey_string3 = ec_keypair.private_as_string(truncate=True)
 
-    result0 = ECKeyPair.from_private_key_file(prvkey_path, password)
+    result0 = ECKeyPair.from_private_key_file(prvkey_path)
     result1 = ECKeyPair.from_private_key(private_key)
-    result2 = ECKeyPair.from_private_key_string(prvkey_string0, password)
-    result3 = ECKeyPair.from_private_key_string(prvkey_string1, password)
+    result2 = ECKeyPair.from_private_key_string(prvkey_string0)
+    result3 = ECKeyPair.from_private_key_string(prvkey_string1)
     result4 = ECKeyPair.from_private_key_string(prvkey_string2)
     result5 = ECKeyPair.from_private_key_string(prvkey_string3)
 
@@ -261,10 +261,10 @@ def test_add_credentials(temp_directory):
 
 def test_defaults(logging):
     Logging.initialise()
-    logger = Logging.get('test')
+    l = Logging.get('test')
 
-    logger.info("you can see me!")
-    logger.debug("you should not be able to see me!")
+    l.info("you can see me!")
+    l.debug("you should not be able to see me!")
 
 
 def test_log_to_separate_file(logging, temp_directory):

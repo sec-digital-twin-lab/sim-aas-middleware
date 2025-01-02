@@ -19,12 +19,12 @@ class ExceptionContent(BaseModel):
 
 
 class SaaSRuntimeException(Exception):
-    def __init__(self, reason: str, details: dict = None, id: str = None):
-        self._content = ExceptionContent(id=id if id else generate_random_string(16), reason=reason, details=details)
+    def __init__(self, reason: str, details: dict = None, eid: str = None):
+        self._content = ExceptionContent(id=eid if eid else generate_random_string(16), reason=reason, details=details)
 
         # check if the details can be JSON encoded
         try:
-            json.dumps(self._content.dict())
+            json.dumps(self._content.model_dump())
         except TypeError:
             logger.warning(f"Encountered JSON incompatible exception details: class={self.__class__.__name__} "
                            f"id={self._content.id} details: {self._content.details}")

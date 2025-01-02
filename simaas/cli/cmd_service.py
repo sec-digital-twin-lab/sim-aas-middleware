@@ -29,11 +29,11 @@ class WaitForTermination:
         self._running = False
 
     def wait_for_termination(self):
-        def handle_sigterm(signum, frame):
+        def handle_sigterm(_signum, _frame):
             print("SIGTERM signal received.")
             self.terminate()
 
-        def handle_keyboard_interruption(signum, frame):
+        def handle_keyboard_interruption(_signum, _frame):
             print("Keyboard interruption (CTRL+C) received.")
             self.terminate()
 

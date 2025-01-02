@@ -104,7 +104,7 @@ class DORAdd(CLICommand):
 
             os.remove(obj_path)
 
-        print(f"Data object added: {json.dumps(meta.dict(), indent=4)}")
+        print(f"Data object added: {json.dumps(meta.model_dump(), indent=4)}")
 
         return {
             'obj': meta
@@ -132,7 +132,7 @@ class DORMeta(CLICommand):
         if not meta:
             raise CLIRuntimeError(f"No data object with id={args['obj-id']}")
 
-        print(json.dumps(meta.dict(), indent=4))
+        print(json.dumps(meta.model_dump(), indent=4))
 
         return {
             'obj': meta

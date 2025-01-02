@@ -147,8 +147,8 @@ def test_cli_identity_list_create_show_remove(temp_dir):
         assert False
 
 
-def test_cli_identity_discover_publish_update(node, temp_dir):
-    address = node.rest.address()
+def test_cli_identity_discover_publish_update(session_node, temp_dir):
+    address = session_node.rest.address()
 
     # create an identity
     try:
@@ -382,8 +382,8 @@ def test_cli_identity_credentials_list_add_remove(temp_dir):
         assert False
 
 
-def test_cli_network_show(node, temp_dir):
-    address = node.rest.address()
+def test_cli_network_show(session_node, temp_dir):
+    address = session_node.rest.address()
 
     # get network information
     try:
@@ -401,8 +401,8 @@ def test_cli_network_show(node, temp_dir):
         assert False
 
 
-def test_cli_dor_add_meta_download_tag_search_untag_remove(node, temp_dir):
-    address = node.rest.address()
+def test_cli_dor_add_meta_download_tag_search_untag_remove(session_node, temp_dir):
+    address = session_node.rest.address()
 
     # create an identity
     try:
@@ -429,6 +429,7 @@ def test_cli_dor_add_meta_download_tag_search_untag_remove(node, temp_dir):
     try:
         file_path = os.path.join(temp_dir, 'test.json')
         with open(file_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump({
                 'test': 1
             }, f, indent=2)
@@ -596,8 +597,8 @@ def test_cli_dor_add_meta_download_tag_search_untag_remove(node, temp_dir):
         assert False
 
 
-def test_cli_dor_grant_show_revoke(node, temp_dir):
-    address = node.rest.address()
+def test_cli_dor_grant_show_revoke(session_node, temp_dir):
+    address = session_node.rest.address()
 
     # create an identity
     try:
@@ -624,6 +625,7 @@ def test_cli_dor_grant_show_revoke(node, temp_dir):
     try:
         file_path = os.path.join(temp_dir, 'test.json')
         with open(file_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump({
                 'test': 1
             }, f, indent=2)
@@ -754,6 +756,7 @@ def test_cli_dor_grant_show_revoke(node, temp_dir):
 def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: str = 'JSONObject',
                         data_format: str = 'json', access: List[Identity] = None) -> DataObject:
     with open(content_path, 'w') as f:
+        # noinspection PyTypeChecker
         json.dump({'v': v}, f, indent=2)
 
     proxy = DORProxy(node.rest.address())
@@ -783,7 +786,7 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, proc: DataObject, job_id: str,
                             a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
                             sig_a: str = None, sig_b: str = None, target_node: Node = None) -> str:
-    proc_descriptor = ProcessorDescriptor.parse_obj(proc.tags['proc_descriptor'])
+    proc_descriptor = ProcessorDescriptor.model_validate(proc.tags['proc_descriptor'])
 
     if a is None:
         a = {'v': 1}
@@ -820,12 +823,14 @@ def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, pro
     # write job descriptor
     job_descriptor_path = os.path.join(job_path, 'job.descriptor')
     with open(job_descriptor_path, 'w') as f:
-        json.dump(job.dict(), f, indent=2)
+        # noinspection PyTypeChecker
+        json.dump(job.model_dump(), f, indent=2)
 
     # write gpp descriptor
     gpp_descriptor_path = os.path.join(job_path, 'gpp.descriptor')
     with open(gpp_descriptor_path, 'w') as f:
-        json.dump(gpp.dict(), f, indent=2)
+        # noinspection PyTypeChecker
+        json.dump(gpp.model_dump(), f, indent=2)
 
     return job_path
 
@@ -888,14 +893,16 @@ class ProcessorRunner(threading.Thread, ProgressListener):
     def _store_job_status(self) -> None:
         job_status_path = os.path.join(self._wd_path, 'job.status')
         with open(job_status_path, 'w') as f:
-            json.dump(self._job_status.dict(), f, indent=2)
+            # noinspection PyTypeChecker
+            json.dump(self._job_status.model_dump(), f, indent=2)
 
     def _write_exitcode(self, exitcode: ExitCode, e: Exception = None) -> None:
         exitcode_path = os.path.join(self._wd_path, 'job.exitcode')
         with open(exitcode_path, 'w') as f:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             result = JobResult(exitcode=exitcode, trace=trace)
-            json.dump(result.dict(), f, indent=2)
+            # noinspection PyTypeChecker
+            json.dump(result.model_dump(), f, indent=2)
 
     def run(self) -> None:
         try:
@@ -939,11 +946,14 @@ def wait_for_job_runner(job_path: str, rest_address: (str, int)) -> Tuple[Option
         status: JobStatus = proxy.job_status()
         if status is None:
             # is there a job.exitcode and runner.exitcode file?
-            has_job_exitcode = os.path.isfile(job_exitcode_path)
-            has_job_status = os.path.isfile(job_status_path)
-            if has_job_exitcode:
-                job_result = JobResult.parse_file(job_exitcode_path) if has_job_exitcode else None
-                status = JobStatus.parse_file(job_status_path) if has_job_status else None
+            if os.path.isfile(job_exitcode_path):
+                with open(job_exitcode_path, 'r') as f:
+                    job_result = JobResult.model_validate(json.load(f))
+
+                if os.path.isfile(job_status_path):
+                    with open(job_status_path, 'r') as f:
+                        status = JobStatus.model_validate(json.load(f))
+
                 return job_result, status
 
             else:
@@ -976,7 +986,7 @@ def test_job_worker_done(temp_dir):
 
     exitcode_path = os.path.join(job_path, 'job.exitcode')
     with open(exitcode_path, 'r') as f:
-        result = JobResult.parse_obj(json.load(f))
+        result = JobResult.model_validate(json.load(f))
 
     assert result.exitcode == ExitCode.DONE
 
@@ -1003,7 +1013,7 @@ def test_job_worker_interrupted(temp_dir):
 
     exitcode_path = os.path.join(job_path, 'job.exitcode')
     with open(exitcode_path, 'r') as f:
-        result = JobResult.parse_obj(json.load(f))
+        result = JobResult.model_validate(json.load(f))
 
     assert result.exitcode == ExitCode.INTERRUPTED
 
@@ -1029,19 +1039,21 @@ def test_job_worker_error(temp_dir):
 
     exitcode_path = os.path.join(job_path, 'job.exitcode')
     with open(exitcode_path, 'r') as f:
-        result = JobResult.parse_obj(json.load(f))
+        result = JobResult.model_validate(json.load(f))
 
     assert result.exitcode == ExitCode.ERROR
     assert "ValueError: invalid literal for int() with base 10: 'sdf'" in result.trace
 
 
-def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_success_by_value(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare the job folder
     job_id = '398h36g3_00'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=1, b=1
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1056,13 +1068,13 @@ def test_cli_runner_success_by_value(docker_available, temp_dir, node, deployed_
     assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_failing_validation(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_failing_validation(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare the job folder
     job_id = '398h36g3_01'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
+    job_path = prepare_full_job_folder(temp_dir, session_node, session_node.identity, deployed_test_processor, job_id,
                                        a={'wrong': 55}, b=1)
 
     # determine REST address
@@ -1079,17 +1091,19 @@ def test_cli_runner_failing_validation(docker_available, temp_dir, node, deploye
     assert 'InvalidJSONDataObjectError' in job_result.trace
 
 
-def test_cli_runner_success_by_reference(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_success_by_reference(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1)
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
 
     # prepare the job folder
     job_id = '398h36g3_02'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1104,20 +1118,24 @@ def test_cli_runner_success_by_reference(docker_available, temp_dir, node, deplo
     assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_failing_no_access(docker_available, temp_dir, node, deployed_test_processor, extra_keystores):
+def test_cli_runner_failing_no_access(
+        docker_available, temp_dir, session_node, deployed_test_processor, extra_keystores
+):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     user = extra_keystores[0]
-    node.db.update_identity(user.identity)
+    session_node.db.update_identity(user.identity)
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1, access=[node.identity])
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1, access=[node.identity])
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
 
     # prepare the job folder
     job_id = '398h36g3_03'
-    job_path = prepare_full_job_folder(temp_dir, node, user.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, user.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1133,17 +1151,19 @@ def test_cli_runner_failing_no_access(docker_available, temp_dir, node, deployed
     assert 'AccessNotPermittedError' in job_result.trace
 
 
-def test_cli_runner_failing_no_signature(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_failing_no_signature(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1, access=[node.identity])
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1, access=[node.identity])
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
 
     # prepare the job folder
     job_id = '398h36g3_04'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1159,21 +1179,23 @@ def test_cli_runner_failing_no_signature(docker_available, temp_dir, node, deplo
     assert 'MissingUserSignatureError' in job_result.trace
 
 
-def test_cli_runner_failing_no_data_object(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_failing_no_data_object(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1)
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
 
     # delete the object so it can't be found
-    proxy = DORProxy(node.rest.address())
-    proxy.delete_data_object(b.obj_id, node.keystore)
+    proxy = DORProxy(session_node.rest.address())
+    proxy.delete_data_object(b.obj_id, session_node.keystore)
 
     # prepare the job folder
     job_id = '398h36g3_05'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1189,17 +1211,19 @@ def test_cli_runner_failing_no_data_object(docker_available, temp_dir, node, dep
     assert 'UnresolvedInputDataObjectsError' in job_result.trace
 
 
-def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1, data_type='wrong')
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='wrong')
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
 
     # prepare the job folder
     job_id = '398h36g3_06'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1215,17 +1239,19 @@ def test_cli_runner_failing_wrong_data_type(docker_available, temp_dir, node, de
     assert 'MismatchingDataTypeOrFormatError' in job_result.trace
 
 
-def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1, data_format='wrong')
-    b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_format='wrong')
+    b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
 
     # prepare the job folder
     job_id = '398h36g3_07'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=a, b=b)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1241,13 +1267,15 @@ def test_cli_runner_failing_wrong_data_format(docker_available, temp_dir, node, 
     assert 'MismatchingDataTypeOrFormatError' in job_result.trace
 
 
-def test_cli_runner_success_no_name(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_success_no_name(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare the job folder
     job_id = '398h36g3_08'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=1, b=1)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=1, b=1
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1262,13 +1290,15 @@ def test_cli_runner_success_no_name(docker_available, temp_dir, node, deployed_t
     assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_cancelled(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_cancelled(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     # prepare the job folder
     job_id = '398h36g3_09'
-    job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id, a=5, b=6)
+    job_path = prepare_full_job_folder(
+        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=5, b=6
+    )
 
     # determine REST address
     rest_address = PortMaster.generate_rest_address()
@@ -1287,7 +1317,7 @@ def test_cli_runner_cancelled(docker_available, temp_dir, node, deployed_test_pr
     assert job_result.exitcode == ExitCode.INTERRUPTED
 
 
-def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, deployed_test_processor):
+def test_cli_runner_success_non_dor_target(docker_available, temp_dir, session_node, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1304,17 +1334,17 @@ def test_cli_runner_success_non_dor_target(docker_available, temp_dir, node, dep
         )
 
         #  make exec-only node known to node
-        target_node.join_network(node.rest.address())
+        target_node.join_network(session_node.rest.address())
         time.sleep(1)
 
         # prepare input data objects
-        a = prepare_data_object(os.path.join(temp_dir, 'a'), node, 1)
-        b = prepare_data_object(os.path.join(temp_dir, 'b'), node, 1)
+        a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
+        b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
 
         # prepare the job folder
         job_id = '398h36g3_10'
-        job_path = prepare_full_job_folder(temp_dir, node, node.identity, deployed_test_processor, job_id,
-                                           a=a, b=b, target_node=target_node)
+        job_path = prepare_full_job_folder(temp_dir, session_node, session_node.identity, deployed_test_processor,
+                                           job_id, a=a, b=b, target_node=target_node)
 
         # determine REST address
         rest_address = PortMaster.generate_rest_address()
@@ -1436,11 +1466,11 @@ def test_cli_builder_export_image(docker_available, temp_dir):
         assert False
 
 
-def test_cli_builder_cmd(docker_available, node, temp_dir):
+def test_cli_builder_cmd(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    address = node.rest.address()
+    address = session_node.rest.address()
 
     # define arguments
     args = {
@@ -1458,7 +1488,7 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
     args['password'] = password
 
     # ensure the node knows about this identity
-    node.db.update_identity(keystore.identity)
+    session_node.db.update_identity(keystore.identity)
 
     try:
         cmd = ProcBuilderGithub()
@@ -1468,7 +1498,7 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = node.dor.get_meta(pdi.obj_id)
+        obj = session_node.dor.get_meta(pdi.obj_id)
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'json'
@@ -1477,11 +1507,11 @@ def test_cli_builder_cmd(docker_available, node, temp_dir):
         assert False
 
 
-def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
+def test_cli_builder_cmd_store_image(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    address = node.rest.address()
+    address = session_node.rest.address()
 
     # define arguments
     args = {
@@ -1500,7 +1530,7 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
     args['password'] = password
 
     # ensure the node knows about this identity
-    node.db.update_identity(keystore.identity)
+    session_node.db.update_identity(keystore.identity)
 
     try:
         cmd = ProcBuilderGithub()
@@ -1510,7 +1540,7 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = node.dor.get_meta(pdi.obj_id)
+        obj = session_node.dor.get_meta(pdi.obj_id)
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -1519,11 +1549,11 @@ def test_cli_builder_cmd_store_image(docker_available, node, temp_dir):
         assert False
 
 
-def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir):
+def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    address = node.rest.address()
+    address = session_node.rest.address()
 
     # define arguments
     args = {
@@ -1542,7 +1572,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
     args['password'] = password
 
     # ensure the node knows about this identity
-    node.db.update_identity(keystore.identity)
+    session_node.db.update_identity(keystore.identity)
 
     try:
         cmd = ProcBuilderGithub()
@@ -1552,7 +1582,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = node.dor.get_meta(pdi.obj_id)
+        obj = session_node.dor.get_meta(pdi.obj_id)
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -1683,11 +1713,11 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, node, temp_dir
         assert False
 
 
-def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir):
+def test_cli_rti_job_submit_list_status_cancel(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    address = node.rest.address()
+    address = session_node.rest.address()
 
     # define arguments
     args = {
@@ -1706,7 +1736,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
     args['password'] = password
 
     # ensure the node knows about this identity
-    node.db.update_identity(keystore.identity)
+    session_node.db.update_identity(keystore.identity)
 
     try:
         cmd = ProcBuilderGithub()
@@ -1716,7 +1746,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = node.dor.get_meta(pdi.obj_id)
+        obj = session_node.dor.get_meta(pdi.obj_id)
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -1778,9 +1808,10 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, node, temp_dir)
                     ],
                     output=[
                         Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
-                                    content_encrypted=False, target_node_iid=node.identity.id)
+                                    content_encrypted=False, target_node_iid=session_node.identity.id)
                     ])
-        json.dump(task.dict(), f, indent=2)
+        # noinspection PyTypeChecker
+        json.dump(task.model_dump(), f, indent=2)
 
     # submit job
     try:

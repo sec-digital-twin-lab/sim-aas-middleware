@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 from io import StringIO
@@ -88,7 +89,8 @@ class IdentityShow(CLICommand):
             }
 
         # show the public information
-        content = KeystoreContent.parse_file(keystore_path)
+        with open(keystore_path, 'r') as f:
+            content = KeystoreContent.model_validate(json.load(f))
         print("Keystore details:")
         print(f"- Id: {content.iid}")
         print(f"- Name: {content.profile.name}")

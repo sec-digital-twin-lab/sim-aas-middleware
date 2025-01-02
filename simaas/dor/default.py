@@ -43,9 +43,9 @@ def _generate_gpp_hash(source: str, commit_id: str, proc_path: str, proc_descrip
 
 
 def _generate_missing_provenance(c_hash: str, data_type: str, data_format: str) -> DataObjectProvenance:
-    provenance = DataObjectProvenance.parse_obj({
+    provenance = DataObjectProvenance.model_validate({
         'data_nodes': {
-            c_hash: CObjectNode.parse_obj({
+            c_hash: CObjectNode.model_validate({
                 'c_hash': c_hash,
                 'data_type': data_type,
                 'data_format': data_format,
@@ -60,9 +60,9 @@ def _generate_missing_provenance(c_hash: str, data_type: str, data_format: str) 
 
 
 def _generate_by_value_provenance(c_hash: str, data_type: str, data_format: str, content: dict) -> DataObjectProvenance:
-    provenance = DataObjectProvenance.parse_obj({
+    provenance = DataObjectProvenance.model_validate({
         'data_nodes': {
-            c_hash: CObjectNode.parse_obj({
+            c_hash: CObjectNode.model_validate({
                 'c_hash': c_hash,
                 'data_type': data_type,
                 'data_format': data_format,
@@ -80,7 +80,7 @@ def _extract_data_object(record: DataObjectRecord, custodian: NodeInfo) -> DataO
     # is it a GPP data object?
     details = dict(record.details)
     created = dict(record.created)
-    return DataObject.parse_obj({
+    return DataObject.model_validate({
         'obj_id': record.obj_id,
         'c_hash': record.c_hash,
         'data_type': record.data_type,
@@ -170,7 +170,7 @@ class DefaultDORService(DORService):
                 provenance = dor.get_provenance(c_hash)
                 if provenance is not None:
                     # TODO: change once proxy has been refactored
-                    result.append(DataObjectProvenance.parse_obj(provenance))
+                    result.append(DataObjectProvenance.model_validate(provenance))
         return result
 
     def _generate_provenance_information(self, c_hash: str, recipe: DataObjectRecipe) -> DataObjectProvenance:
@@ -227,7 +227,7 @@ class DefaultDORService(DORService):
                 # when adding a data object to the DOR. let's generate provenance information for this by-value
                 # object on the fly
                 provenance = _generate_by_value_provenance(obj.c_hash, obj.data_type, obj.data_format, obj.content)
-                self._add_provenance_record(obj.c_hash, provenance.dict())
+                self._add_provenance_record(obj.c_hash, provenance.model_dump())
 
                 # add to step
                 step['consumes'][name] = obj.c_hash
@@ -237,8 +237,10 @@ class DefaultDORService(DORService):
                 data_nodes[obj.c_hash] = obj_node
 
         # calculate c_hash for processor and keep the GPP in the dict that keeps all unique processors involved
-        step['processor'] = _generate_gpp_hash(recipe.processor.repository, recipe.processor.commit_id,
-                                               recipe.processor.proc_path, recipe.processor.proc_descriptor.dict())
+        step['processor'] = _generate_gpp_hash(
+            recipe.processor.repository, recipe.processor.commit_id, recipe.processor.proc_path,
+            recipe.processor.proc_descriptor.model_dump()
+        )
         if step['processor'] not in proc_nodes:
             proc_nodes[step['processor']] = recipe.processor
 
@@ -382,7 +384,7 @@ class DefaultDORService(DORService):
             f.close()
 
         # create parameters object
-        p = AddDataObjectParameters.parse_obj(body)
+        p = AddDataObjectParameters.model_validate(body)
 
         # get the owner identity
         owner = self._node.db.get_identity(p.owner_iid, raise_if_unknown=True)
@@ -432,8 +434,8 @@ class DefaultDORService(DORService):
                                              access=[owner.id], tags=p.tags if p.tags else {},
                                              details={
                                                  'content_encrypted': p.content_encrypted,
-                                                 'license': p.license.dict(),
-                                                 'recipe': p.recipe.dict() if p.recipe else None,
+                                                 'license': p.license.model_dump(),
+                                                 'recipe': p.recipe.model_dump() if p.recipe else None,
                                              },
                                              last_accessed=created_t))
                 session.commit()
@@ -443,7 +445,7 @@ class DefaultDORService(DORService):
         # determine the provenance and add to the database
         provenance = self._generate_provenance_information(c_hash, p.recipe) if p.recipe else \
             _generate_missing_provenance(c_hash, p.data_type, p.data_format)
-        self._add_provenance_record(c_hash, provenance.dict())
+        self._add_provenance_record(c_hash, provenance.model_dump())
 
         return self.get_meta(obj_id)
 
@@ -538,7 +540,7 @@ class DefaultDORService(DORService):
             # do we have an object with this id?
             records: list[DataObjectProvenanceRecord] = session.query(DataObjectProvenanceRecord).filter(
                 (DataObjectProvenanceRecord.c_hash == c_hash)).all()
-            return DataObjectProvenance.parse_obj(records[0].provenance) if records else None
+            return DataObjectProvenance.model_validate(records[0].provenance) if records else None
 
     def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
         """

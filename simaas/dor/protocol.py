@@ -70,7 +70,8 @@ class P2PFetchDataObject(P2PProtocol):
         if reply.successful:
             # store the meta information
             with open(meta_path, 'w') as f:
-                json.dump(reply.meta.dict(), f, indent=2)
+                # noinspection PyTypeChecker
+                json.dump(reply.meta.model_dump(), f, indent=2)
 
             return reply.meta
 

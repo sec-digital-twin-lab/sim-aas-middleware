@@ -22,7 +22,7 @@ def get_timestamp_now() -> int:
     Returns the current time (UTC) in milliseconds since the beginning of the epoch
     :return: integer representing time in milliseconds
     """
-    return int(datetime.datetime.utcnow().timestamp() * 1000)
+    return int(datetime.datetime.now(datetime.UTC).timestamp() * 1000)
 
 
 def validate_json(content: dict, schema: dict) -> bool:
@@ -53,6 +53,7 @@ def read_json_from_file(path: str, schema: dict = None) -> Union[list, dict]:
 def write_json_to_file(content: Union[list, dict], path: str, schema: dict = None, indent: int = 4,
                        sort_keys: bool = False):
     with open(path, 'w') as f:
+        # noinspection PyTypeChecker
         json.dump(content, f, indent=indent, sort_keys=sort_keys)
 
         # do we have a schema to validate?

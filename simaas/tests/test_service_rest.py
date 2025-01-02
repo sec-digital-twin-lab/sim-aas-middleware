@@ -119,32 +119,32 @@ class TestProxy(EndpointProxy):
 
     def create(self, value: str) -> TestResponse:
         result = self.post(f"create/{value}")
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
     def read(self, key: str) -> TestResponse:
         result = self.get(f"read/{key}")
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
     def update(self, key: str, value: str) -> TestResponse:
         result = self.put(f"update/{key}/{value}")
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
     def remove(self, key: str) -> TestResponse:
         result = self.delete(f"delete/{key}")
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
     def remove_with_body(self, key: str) -> TestResponse:
         result = self.delete("delete_body", body={'key': key})
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
     def remove_with_auth(self, key: str, authority: Keystore = None) -> TestResponse:
         result = self.delete("delete_auth", body={'key': key}, with_authorisation_by=authority)
-        return TestResponse.parse_obj(result)
+        return TestResponse.model_validate(result)
 
 
 @pytest.fixture(scope='session')
-def rest_node(test_context, keystore) -> Node:
-    _node = test_context.get_node(keystore, enable_rest=True)
+def rest_node(test_context, session_keystore) -> Node:
+    _node = test_context.get_node(session_keystore, enable_rest=True)
     rest_service = TestRESTService()
 
     _node.rest.add(rest_service.endpoints())

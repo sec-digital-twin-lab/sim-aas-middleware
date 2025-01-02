@@ -16,6 +16,7 @@ def read_value(data_object_path: str) -> int:
 
 def write_value(data_object_path: str, v: Any) -> None:
     with open(data_object_path, 'w') as f:
+        # noinspection PyTypeChecker
         json.dump({
             'v': v
         }, f, indent=4, sort_keys=True)

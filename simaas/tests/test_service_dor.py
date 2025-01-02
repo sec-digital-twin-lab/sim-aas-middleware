@@ -59,8 +59,8 @@ def test_statistics(dor_proxy):
     assert (result is not None)
 
 
-def test_add_c_multiple_creators(keystore, known_users, dor_proxy, random_content):
-    owner = keystore.identity
+def test_add_c_multiple_creators(session_keystore, known_users, dor_proxy, random_content):
+    owner = session_keystore.identity
     c0 = known_users[0]
     c1 = known_users[1]
 
@@ -78,8 +78,8 @@ def test_add_c_multiple_creators(keystore, known_users, dor_proxy, random_conten
     assert(owner.id in result.created.creators_iid)
 
 
-def test_add_c_license(keystore, dor_proxy, random_content):
-    owner = keystore.identity
+def test_add_c_license(session_keystore, dor_proxy, random_content):
+    owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', license_by=True)
     assert(result is not None)
@@ -89,8 +89,8 @@ def test_add_c_license(keystore, dor_proxy, random_content):
     assert(not result.license.nd)
 
 
-def test_add_c(keystore, dor_proxy, unknown_user, random_content):
-    owner = keystore.identity
+def test_add_c(session_keystore, dor_proxy, unknown_user, random_content):
+    owner = session_keystore.identity
 
     # unknown owner
     with pytest.raises(UnsuccessfulRequestError) as e:
@@ -106,12 +106,12 @@ def test_add_c(keystore, dor_proxy, unknown_user, random_content):
     assert(result is not None)
 
 
-def test_add_c_large(test_context, keystore, dor_proxy):
+def test_add_c_large(test_context, session_keystore, dor_proxy):
     # this is necessary to avoid getting thousands of 'Calling on_part_data with data' messages...
     mp_logger = logging.getLogger('python_multipart.multipart')
     mp_logger.setLevel(logging.INFO)
 
-    owner = keystore
+    owner = session_keystore
 
     content_path = os.path.join(test_context.testing_dir, 'test.json')
 
@@ -176,8 +176,8 @@ def test_remove(dor_proxy, random_content, known_users):
     assert(result is None)
 
 
-def test_get_meta(keystore, dor_proxy, random_content):
-    owner = keystore.identity
+def test_get_meta(session_keystore, dor_proxy, random_content):
+    owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     valid_obj_id = result.obj_id
@@ -191,8 +191,8 @@ def test_get_meta(keystore, dor_proxy, random_content):
     assert(result.obj_id == valid_obj_id)
 
 
-def test_get_content(test_context, keystore, dor_proxy, random_content, unknown_user, known_users):
-    owner = keystore.identity
+def test_get_content(test_context, session_keystore, dor_proxy, random_content, unknown_user, known_users):
+    owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, True, False, 'JSON', 'json')
     valid_obj_id = result.obj_id
@@ -200,7 +200,7 @@ def test_get_content(test_context, keystore, dor_proxy, random_content, unknown_
 
     download_path = os.path.join(test_context.testing_dir, 'downloaded.json')
 
-    correct_authority = keystore
+    correct_authority = session_keystore
     unknown_authority = unknown_user
     wrong_authority = known_users[0]
 
@@ -220,7 +220,7 @@ def test_get_content(test_context, keystore, dor_proxy, random_content, unknown_
     assert(os.path.isfile(download_path))
 
 
-def test_get_provenance(test_context, keystore, dor_proxy):
+def test_get_provenance(test_context, session_keystore, dor_proxy):
     processor = {
         'repository': 'github.com/source',
         'commit_id': '34534ab',
@@ -247,7 +247,7 @@ def test_get_provenance(test_context, keystore, dor_proxy):
         }
     }
 
-    owner = keystore.identity
+    owner = session_keystore.identity
 
     # create contents
     content_path_a = os.path.join(test_context.testing_dir, 'a.json')
@@ -300,8 +300,8 @@ def test_get_provenance(test_context, keystore, dor_proxy):
     assert(step.produces['c'] == 'b460644a73d5df6998c57c4eaf43ebc3e595bd06930af6e42d0008f84d91c849')
 
 
-def test_grant_revoke_access(keystore, dor_proxy, random_content, known_users):
-    owner = keystore
+def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_users):
+    owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
     obj_id = result.obj_id
@@ -354,8 +354,8 @@ def test_grant_revoke_access(keystore, dor_proxy, random_content, known_users):
     assert (user1.identity.id not in meta.access)
 
 
-def test_transfer_ownership(keystore, dor_proxy, random_content, known_users, unknown_user):
-    owner = keystore
+def test_transfer_ownership(session_keystore, dor_proxy, random_content, known_users, unknown_user):
+    owner = session_keystore
 
     meta = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
     obj_id = meta.obj_id
@@ -382,8 +382,8 @@ def test_transfer_ownership(keystore, dor_proxy, random_content, known_users, un
     assert (user0.identity.id == meta.owner_iid)
 
 
-def test_update_remove_tags(keystore, dor_proxy, random_content, known_users):
-    owner = keystore
+def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_users):
+    owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
     obj_id = result.obj_id

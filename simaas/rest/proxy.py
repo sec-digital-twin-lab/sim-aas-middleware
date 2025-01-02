@@ -39,9 +39,9 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
 
     elif response.status_code == 500:
         try:
-            # try to parse the response as JSON and then the JSON as as ExceptionContent
+            # try to parse the response as JSON and then the JSON as ExceptionContent
             content = response.json()
-            content = ExceptionContent.parse_obj(content)
+            content = ExceptionContent.model_validate(content)
             exception = UnsuccessfulRequestError(content.reason, exception_id=content.id, details=content.details)
 
         # the content is not even JSON...
@@ -143,7 +143,7 @@ class Session:
         try:
             response = requests.post(url, data=data)
             result = extract_response(response)
-            self._token = Token.parse_obj(result)
+            self._token = Token.model_validate(result)
             return self._token
 
         except requests.exceptions.ConnectionError:
@@ -262,7 +262,7 @@ class EndpointProxy:
 
                         # update the body
                         part_info = DORFilePartInfo(id=rnd_id, idx=i, n=n_parts)
-                        body['__part_info'] = part_info.dict()
+                        body['__part_info'] = part_info.model_dump()
 
                         # send the part
                         with open(part_path, 'rb') as f_part:

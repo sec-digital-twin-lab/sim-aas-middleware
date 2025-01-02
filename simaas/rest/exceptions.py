@@ -17,7 +17,7 @@ class UnsupportedRESTMethod(RESTException):
 
 class UnsuccessfulRequestError(RESTException):
     def __init__(self, reason: str, exception_id: str = None, details: dict = None) -> None:
-        super().__init__(f"Unsuccessful request: {reason}", id=exception_id, details=details)
+        super().__init__(f"Unsuccessful request: {reason}", eid=exception_id, details=details)
 
 
 class UnexpectedHTTPError(RESTException):

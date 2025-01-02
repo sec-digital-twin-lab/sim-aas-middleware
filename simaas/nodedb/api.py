@@ -80,21 +80,21 @@ class NodeDBProxy(EndpointProxy):
 
     def get_node(self) -> NodeInfo:
         result = self.get("node")
-        return NodeInfo.parse_obj(result)
+        return NodeInfo.model_validate(result)
 
     def get_network(self) -> List[NodeInfo]:
         results = self.get("network")
-        return [NodeInfo.parse_obj(result) for result in results]
+        return [NodeInfo.model_validate(result) for result in results]
 
     def get_identities(self) -> Dict[str, Identity]:
         return {
-            item['id']: Identity.parse_obj(item) for item in self.get("identity")
+            item['id']: Identity.model_validate(item) for item in self.get("identity")
         }
 
     def get_identity(self, iid: str) -> Optional[Identity]:
         serialised_identity = self.get(f"identity/{iid}")
-        return Identity.parse_obj(serialised_identity) if serialised_identity else None
+        return Identity.model_validate(serialised_identity) if serialised_identity else None
 
     def update_identity(self, identity: Identity) -> Optional[Identity]:
-        serialised_identity = self.post('identity', body=identity.dict())
-        return Identity.parse_obj(serialised_identity) if serialised_identity else None
+        serialised_identity = self.post('identity', body=identity.model_dump())
+        return Identity.model_validate(serialised_identity) if serialised_identity else None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import string
 
@@ -64,7 +65,7 @@ class Keystore:
         self._curve_public: bytes = zmq.curve_public(self._curve_secret)
 
         # check if signature is valid
-        content_hash = hash_json_object(content.dict(), exclusions=['signature'])
+        content_hash = hash_json_object(content.model_dump(), exclusions=['signature'])
         if not self._s_key.verify(content_hash, content.signature):
             raise SaaSRuntimeException(f"Invalid keystore content signature: "
                                        f"content_hash={content_hash}, signature={content.signature}.")
@@ -110,7 +111,7 @@ class Keystore:
         if path is not None:
             path = os.path.join(path, f"{iid}.json")
 
-        keystore = Keystore(KeystoreContent.parse_obj(content), path=path, password=password)
+        keystore = Keystore(KeystoreContent.model_validate(content), path=path, password=password)
         keystore.sync()
 
         logger.info(f"keystore created: id={keystore.identity.id} "
@@ -143,7 +144,8 @@ class Keystore:
 
         # load content and validate
         try:
-            content = KeystoreContent.parse_file(keystore_path)
+            with open(keystore_path, 'r') as f:
+                content = KeystoreContent.model_validate(json.load(f))
         except ValidationError:
             raise SaaSRuntimeException("Keystore content not compliant with json schema.")
 
@@ -274,12 +276,12 @@ class Keystore:
             }
 
             # sign the contents of the keystore
-            content_hash = hash_json_object(self._content.dict(), exclusions=['signature'])
+            content_hash = hash_json_object(self._content.model_dump(), exclusions=['signature'])
             self._content.signature = self._s_key.sign(content_hash)
 
             # write contents to disk
             if self._path is not None:
-                write_json_to_file(self._content.dict(), self._path)
+                write_json_to_file(self._content.model_dump(), self._path)
 
             # update identity
             self._update_identity()

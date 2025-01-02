@@ -1,5 +1,6 @@
 import abc
 import inspect
+import json
 import logging
 import os
 import sys
@@ -123,7 +124,8 @@ class ProcessorBase(abc.ABC):
         """
         self._mutex = threading.Lock()
         self._proc_path = proc_path
-        self._descriptor = ProcessorDescriptor.parse_file(os.path.join(proc_path, 'descriptor.json'))
+        with open(os.path.join(proc_path, 'descriptor.json'), 'r') as f:
+            self._descriptor = ProcessorDescriptor.model_validate(json.load(f))
 
     @property
     def path(self) -> str:
@@ -190,6 +192,7 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
     result = {}
     for root, dirs, files in os.walk(search_path):
         for file in files:
+            print(file)
             if file == "processor.py":
                 module_path = os.path.join(root, file)
                 module_name = os.path.splitext(os.path.basename(module_path))[0]

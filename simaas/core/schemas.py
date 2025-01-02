@@ -7,8 +7,8 @@ class KeystoreProfile(BaseModel):
     """
     Contact information for the keystore.
     """
-    name: str = Field(..., title="Name", description="The contact name.", example="Foo Bar")
-    email: str = Field(..., title="Email", description="The contact email address.", example="foo.bar@somehwere.com")
+    name: str = Field(..., title="Name", description="The contact name.", examples=["Foo Bar"])
+    email: str = Field(..., title="Email", description="The contact email address.", examples=["foo.bar@somehwere.com"])
 
 
 class KeystoreContent(BaseModel):
@@ -17,7 +17,7 @@ class KeystoreContent(BaseModel):
     """
     iid: str = Field(..., title="IId", description="The id of the keystore's identity.")
     profile: KeystoreProfile = Field(..., title="Profile", description="The profile of the keystore.")
-    nonce: int = Field(..., title="Nonce", description="A positive integer value that is increased every time the keystore content is updated.", example=4)
+    nonce: int = Field(..., title="Nonce", description="A positive integer value that is increased every time the keystore content is updated.", examples=[4])
     signature: str = Field(..., title="Signature", description="A signature made with the keystore identity's signing key. This signature is used to verify the integrity of the keystore content.")
     assets: Dict[str, Any] = Field(..., title="Assets", description="Assets contained by this keystore.")
 
@@ -34,7 +34,7 @@ class SSHCredentials(BaseModel):
     """
     SSH credentials.
     """
-    host: str = Field(..., title="Host", description="The host name or IP of the remote machine.", example="35.34.55.2")
+    host: str = Field(..., title="Host", description="The host name or IP of the remote machine.", examples=["35.34.55.2"])
     login: str = Field(..., title="Login", description="The login for the remote machine.")
     key: str = Field(..., title="Key", description="The key content.")
     passphrase: Optional[str] = Field(title="Passphrase", description="An optional passphrase in case the key is protected.")

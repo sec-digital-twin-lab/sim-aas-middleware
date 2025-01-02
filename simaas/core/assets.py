@@ -31,7 +31,7 @@ class MasterKeyPairAsset:
 
     @classmethod
     def load(cls, asset: dict, password: str) -> MasterKeyPairAsset:
-        asset = MasterKeyPairAsset.Content.parse_obj(asset)
+        asset = MasterKeyPairAsset.Content.model_validate(asset)
 
         # create keypair from content
         if asset.info.startswith('RSA'):
@@ -67,7 +67,7 @@ class KeyPairAsset:
 
     @classmethod
     def load(cls, asset: dict, master: KeyPair) -> KeyPairAsset:
-        asset = KeyPairAsset.Content.parse_obj(asset)
+        asset = KeyPairAsset.Content.model_validate(asset)
 
         # create keypair from content
         if asset.info.startswith('RSA'):
@@ -102,7 +102,7 @@ class ContentKeysAsset:
 
     @classmethod
     def load(cls, asset: dict, master: KeyPair) -> ContentKeysAsset:
-        asset = ContentKeysAsset.Content.parse_obj(asset)
+        asset = ContentKeysAsset.Content.model_validate(asset)
 
         keys = json.loads(_decrypt(asset.content_keys, master))
         return ContentKeysAsset(keys)
@@ -130,14 +130,14 @@ class GithubCredentialsAsset:
 
     @classmethod
     def load(cls, asset: dict, master: KeyPair) -> GithubCredentialsAsset:
-        asset = GithubCredentialsAsset.Content.parse_obj(asset)
+        asset = GithubCredentialsAsset.Content.model_validate(asset)
 
         credentials = json.loads(_decrypt(asset.credentials, master))
-        credentials = {key: GithubCredentials.parse_obj(c) for key, c in credentials.items()}
+        credentials = {key: GithubCredentials.model_validate(c) for key, c in credentials.items()}
         return GithubCredentialsAsset(credentials)
 
     def store(self, protection: KeyPair) -> dict:
-        credentials = {key: c.dict() for key, c in self._credentials.items()}
+        credentials = {key: c.model_dump() for key, c in self._credentials.items()}
         return {
             'type': GithubCredentialsAsset.__name__,
             'credentials': _encrypt(json.dumps(credentials), protection)
@@ -166,14 +166,14 @@ class SSHCredentialsAsset:
 
     @classmethod
     def load(cls, asset: dict, master: KeyPair) -> SSHCredentialsAsset:
-        asset = SSHCredentialsAsset.Content.parse_obj(asset)
+        asset = SSHCredentialsAsset.Content.model_validate(asset)
 
         credentials = json.loads(_decrypt(asset.credentials, master))
-        credentials = {key: SSHCredentials.parse_obj(c) for key, c in credentials.items()}
+        credentials = {key: SSHCredentials.model_validate(c) for key, c in credentials.items()}
         return SSHCredentialsAsset(credentials)
 
     def store(self, protection: KeyPair) -> dict:
-        credentials = {key: c.dict() for key, c in self._credentials.items()}
+        credentials = {key: c.model_dump() for key, c in self._credentials.items()}
         return {
             'type': SSHCredentialsAsset.__name__,
             'credentials': _encrypt(json.dumps(credentials), protection)

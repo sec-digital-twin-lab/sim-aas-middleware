@@ -10,6 +10,7 @@ from threading import Lock
 from typing import Optional, List, Tuple, Dict
 
 from fastapi import Request
+
 from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy_json import NestedMutableJson
@@ -212,11 +213,11 @@ class DefaultRTIService(RTIService):
                 logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
 
     def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
-        def is_port_free(host: str, port: int) -> bool:
+        def is_port_free(_host: str, _port: int) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
                 try:
-                    sock.connect((host, port))
+                    sock.connect((_host, _port))
                     return False  # Connection succeeded, port is in use
                 except (socket.timeout, ConnectionRefusedError):
                     return True  # Port is free
@@ -264,7 +265,7 @@ class DefaultRTIService(RTIService):
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name,
-                                 gpp=GitProcessorPointer.parse_obj(record.gpp) if record.gpp else None,
+                                 gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
             else:
                 return None
@@ -290,12 +291,12 @@ class DefaultRTIService(RTIService):
                 if record:
                     record.state = proc.state.value
                     record.image_name = proc.image_name
-                    record.gpp = proc.gpp.dict()
+                    record.gpp = proc.gpp.model_dump()
                     record.error = proc.error
 
                 else:
                     session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                    gpp=proc.gpp.dict() if proc.gpp else None, error=None))
+                                                    gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
                 session.commit()
 
             # start the deployment worker
@@ -317,7 +318,7 @@ class DefaultRTIService(RTIService):
                 # create the processor object
                 proc = Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name,
-                                 gpp=GitProcessorPointer.parse_obj(record.gpp) if record.gpp else None,
+                                 gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
 
                 # is the state failed? -> delete the db record
@@ -379,11 +380,13 @@ class DefaultRTIService(RTIService):
                   proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
         descriptor_path = os.path.join(job_path, 'job.descriptor')
         with open(descriptor_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump(job.model_dump(), f, indent=2)
 
         # write the gpp descriptor
         gpp_path = os.path.join(job_path, 'gpp.descriptor')
         with open(gpp_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump(proc.gpp.model_dump(), f, indent=2)
 
         # create the initial job status and write to file
@@ -391,6 +394,7 @@ class DefaultRTIService(RTIService):
                            errors=[], message=None)
         status_path = os.path.join(job_path, 'job.status')
         with open(status_path, 'w') as f:
+            # noinspection PyTypeChecker
             json.dump(status.model_dump(), f, indent=2)
 
         # determine REST address
@@ -425,11 +429,11 @@ class DefaultRTIService(RTIService):
         # parse the records
         result: List[Job] = []
         for record in records:
-            status = JobStatus.parse_obj(record.status)
+            status = JobStatus.model_validate(record.status)
             if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
                                 JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
                                 JobStatus.State.POSTPROCESSING]:
-                job = Job.parse_obj(record.job)
+                job = Job.model_validate(record.job)
                 result.append(job)
 
         return result
@@ -454,18 +458,18 @@ class DefaultRTIService(RTIService):
             cutoff = get_timestamp_now() - int(request.query_params['period']) * 3600 * 1000
             for record in records:
                 # within time period?
-                job = Job.parse_obj(record.job)
+                job = Job.model_validate(record.job)
                 if job.t_submitted > cutoff:
                     result.append(job)
 
         else:
             # collect ony active jobs
             for record in records:
-                status = JobStatus.parse_obj(record.status)
+                status = JobStatus.model_validate(record.status)
                 if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
                                     JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
                                     JobStatus.State.POSTPROCESSING]:
-                    job = Job.parse_obj(record.job)
+                    job = Job.model_validate(record.job)
                     result.append(job)
 
         return result
@@ -483,14 +487,14 @@ class DefaultRTIService(RTIService):
                     raise RTIException(f"Job {job_id} does not exist.")
 
                 # check the status
-                status = JobStatus.parse_obj(record.status)
+                status = JobStatus.model_validate(record.status)
                 if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
                                         JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
                                         JobStatus.State.POSTPROCESSING, JobStatus.State.CANCELLED]:
                     raise RTIException(f"Job {job_id} is not active -> status cannot be updated.")
 
                 # update the status
-                record.status = job_status.dict()
+                record.status = job_status.model_dump()
                 session.commit()
 
     def get_job_owner_iid(self, job_id: str) -> str:
@@ -513,7 +517,7 @@ class DefaultRTIService(RTIService):
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
-        return JobStatus.parse_obj(record.status)
+        return JobStatus.model_validate(record.status)
 
     def _perform_cancel(self, job_id: str, rest_address: Tuple[str, int], grace_period: int = 30) -> None:
         # attempt to cancel the job

@@ -80,7 +80,7 @@ class RTIProcDeploy(CLICommand):
             result = dor.search(data_type='ProcessorDockerImage')
             for item in result:
                 pdi: DataObject = dor.get_meta(item.obj_id)
-                proc_descriptor = ProcessorDescriptor.parse_obj(pdi.tags['proc_descriptor'])
+                proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
 
                 choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name} <{shorten_id(pdi.obj_id)}> "
                                                   f"{pdi.tags['repository']}:{pdi.tags['commit_id'][:6]}..."))
@@ -391,7 +391,8 @@ class RTIJobSubmit(CLICommand):
 
             # read the job descriptor
             try:
-                task = Task.parse_file(args['task'])
+                with open(args['task'], 'r') as f:
+                    task = Task.model_validate(json.load(f))
             except ValidationError as e:
                 raise CLIRuntimeError(f"Invalid task descriptor: {e.errors()}. Aborting.")
 
@@ -557,7 +558,7 @@ class RTIJobStatus(CLICommand):
         try:
             status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
             result['status'] = status
-            print(f"Job status:\n{json.dumps(status.dict(), indent=4)}")
+            print(f"Job status:\n{json.dumps(status.model_dump(), indent=4)}")
 
         except UnsuccessfulRequestError:
             print(f"No status for job {args['job-id']}.")
@@ -601,10 +602,10 @@ class RTIJobCancel(CLICommand):
         try:
             if args.get('purge'):
                 status = rti.purge_job(args['job-id'], with_authorisation_by=keystore)
-                print(f"Job {args['job-id']} purged. Last status:\n{json.dumps(status.dict(), indent=4)}")
+                print(f"Job {args['job-id']} purged. Last status:\n{json.dumps(status.model_dump(), indent=4)}")
             else:
                 status = rti.cancel_job(args['job-id'], with_authorisation_by=keystore)
-                print(f"Job {args['job-id']} cancelled. Last status:\n{json.dumps(status.dict(), indent=4)}")
+                print(f"Job {args['job-id']} cancelled. Last status:\n{json.dumps(status.model_dump(), indent=4)}")
 
             result['status'] = status
 

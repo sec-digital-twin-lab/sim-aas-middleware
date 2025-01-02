@@ -147,22 +147,22 @@ def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, kn
         assert ('Processor not deployed' in e.reason)
 
 
-def test_rest_submit_list_get_job(docker_available, test_context, node, dor_proxy, rti_proxy, deployed_test_processor,
-                                  known_user):
+def test_rest_submit_list_get_job(docker_available, test_context, session_node, dor_proxy, rti_proxy,
+                                  deployed_test_processor, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     proc_id = deployed_test_processor.obj_id
     wrong_user = known_user
-    owner = node.keystore
+    owner = session_node.keystore
 
     task_input = [
-        Task.InputValue.parse_obj({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-        Task.InputValue.parse_obj({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
     ]
 
     task_output = [
-        Task.Output.parse_obj({'name': 'c', 'owner_iid': owner.identity.id,
+        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
                                'restricted_access': False, 'content_encrypted': False,
                                'target_node_iid': None})
     ]
@@ -203,7 +203,7 @@ def test_rest_submit_list_get_job(docker_available, test_context, node, dor_prox
             status: JobStatus = rti_proxy.get_job_status(job_id, owner)
 
             from pprint import pprint
-            pprint(status.dict())
+            pprint(status.model_dump())
             assert (status is not None)
 
             if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
@@ -228,21 +228,21 @@ def test_rest_submit_list_get_job(docker_available, test_context, node, dor_prox
         assert (content['v'] == 2)
 
 
-def test_rest_submit_cancel_job(docker_available, node, rti_proxy, deployed_test_processor, known_user):
+def test_rest_submit_cancel_job(docker_available, session_node, rti_proxy, deployed_test_processor, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     proc_id = deployed_test_processor.obj_id
     wrong_user = known_user
-    owner = node.keystore
+    owner = session_node.keystore
 
     task_input = [
-        Task.InputValue.parse_obj({'name': 'a', 'type': 'value', 'value': {'v': 100}}),
-        Task.InputValue.parse_obj({'name': 'b', 'type': 'value', 'value': {'v': 100}})
+        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 100}}),
+        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
     ]
 
     task_output = [
-        Task.Output.parse_obj({'name': 'c', 'owner_iid': owner.identity.id,
+        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
                                'restricted_access': False, 'content_encrypted': False,
                                'target_node_iid': None})
     ]
@@ -274,24 +274,24 @@ def test_rest_submit_cancel_job(docker_available, node, rti_proxy, deployed_test
 
     # get information about the job
     status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-    print(json.dumps(status.dict(), indent=4))
+    print(json.dumps(status.model_dump(), indent=4))
     assert (status.state == JobStatus.State.CANCELLED)
 
 
-def test_rest_submit_cancel_kill_job(docker_available, node, rti_proxy, deployed_test_processor, known_user):
+def test_rest_submit_cancel_kill_job(docker_available, session_node, rti_proxy, deployed_test_processor, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     proc_id = deployed_test_processor.obj_id
-    owner = node.keystore
+    owner = session_node.keystore
 
     task_input = [
-        Task.InputValue.parse_obj({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
-        Task.InputValue.parse_obj({'name': 'b', 'type': 'value', 'value': {'v': 100}})
+        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
+        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
     ]
 
     task_output = [
-        Task.Output.parse_obj({'name': 'c', 'owner_iid': owner.identity.id,
+        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
                                'restricted_access': False, 'content_encrypted': False,
                                'target_node_iid': None})
     ]
@@ -353,9 +353,9 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
     task_input = [a, b]
 
     task_output = [
-        Task.Output.parse_obj({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': target_node.identity.id})
+        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                    'restricted_access': False, 'content_encrypted': False,
+                                    'target_node_iid': target_node.identity.id})
     ]
 
     # submit the job
@@ -374,11 +374,11 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
         time.sleep(0.5)
 
 
-def test_provenance(docker_available, test_context, node, dor_proxy, rti_proxy, deployed_test_processor):
+def test_provenance(docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    owner = node.keystore
+    owner = session_node.keystore
 
     def load_value(obj: DataObject) -> int:
         with tempfile.TemporaryDirectory() as tempdir:
@@ -403,7 +403,7 @@ def test_provenance(docker_available, test_context, node, dor_proxy, rti_proxy, 
     # run 3 iterations
     log = []
     for i in range(3):
-        status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, node, a=obj_a, b=obj_b)
+        status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=obj_a, b=obj_b)
 
         obj_c = status.output['c']
         value_c = load_value(obj_c)
@@ -422,12 +422,12 @@ def test_provenance(docker_available, test_context, node, dor_proxy, rti_proxy, 
     print(json.dumps(provenance.dict(), indent=2))
 
 
-def test_job_concurrency(docker_available, test_context, node, dor_proxy, rti_proxy, deployed_test_processor):
+def test_job_concurrency(docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     wd_path = test_context.testing_dir
-    owner = node.keystore
+    owner = session_node.keystore
     results = {}
     failed = {}
     rnd = random.Random()
@@ -441,7 +441,7 @@ def test_job_concurrency(docker_available, test_context, node, dor_proxy, rti_pr
             time.sleep(dt)
 
             print(f"[{idx}] [{time.time()}] submit job")
-            status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, node, a=v0, b=v1)
+            status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=v0, b=v1)
             print(f"[{idx}] proc status: {status}")
 
             obj_id = status.output['c'].obj_id

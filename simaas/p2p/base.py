@@ -48,9 +48,9 @@ class P2PProtocol(abc.ABC):
         try:
             socket = self.connect(peer)
 
-            request: P2PMessage = P2PMessage(protocol=self._protocol, type='request', content=content.dict(),
+            request: P2PMessage = P2PMessage(protocol=self._protocol, type='request', content=content.model_dump(),
                                              has_stream=False)
-            request: dict = request.dict()
+            request: dict = request.model_dump()
             request: str = json.dumps(request)
             request: bytes = request.encode('utf-8')
 
@@ -101,11 +101,11 @@ class P2PProtocol(abc.ABC):
 
             content, path = await self.handle(request)
             content: Optional[BaseModel] = content
-            content: dict = content.dict() if content else {}
+            content: dict = content.model_dump() if content else {}
 
             reply: P2PMessage = P2PMessage(protocol=self._protocol, type='reply', content=content,
                                            has_stream=path is not None)
-            reply: dict = reply.dict()
+            reply: dict = reply.model_dump()
             reply: str = json.dumps(reply)
             reply: bytes = reply.encode('utf-8')
 

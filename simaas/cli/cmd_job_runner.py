@@ -5,7 +5,7 @@ import os
 import threading
 import time
 import traceback
-from typing import Dict, Tuple, Set, Union
+from typing import Dict, Tuple, Set, Union, Optional
 
 import uvicorn
 from fastapi import FastAPI
@@ -103,7 +103,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._pending_output: Set[str] = set()
         self._failed_output: Set[str] = set()
         self._rti_proxy = None
-        self._job_status = None
+        self._job_status: Optional[JobStatus] = None
 
     async def job_status(self) -> JobStatus:
         with self._mutex:
@@ -149,7 +149,8 @@ class JobRunner(CLICommand, ProgressListener):
         # store the job status
         job_status_path = os.path.join(self._wd_path, 'job.status')
         with open(job_status_path, 'w') as f:
-            json.dump(self._job_status.dict(), f, indent=2)
+            # noinspection PyTypeChecker
+            json.dump(self._job_status.model_dump(), f, indent=2)
 
         # try to push the status to the RTI (if any)
         try:
@@ -162,7 +163,8 @@ class JobRunner(CLICommand, ProgressListener):
         with open(exitcode_path, 'w') as f:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             result = JobResult(exitcode=exitcode, trace=trace)
-            json.dump(result.dict(), f, indent=2)
+            # noinspection PyTypeChecker
+            json.dump(result.model_dump(), f, indent=2)
 
     def _setup_logger(self, log_level: str) -> None:
         # do we have a log level?
@@ -204,7 +206,7 @@ class JobRunner(CLICommand, ProgressListener):
             # read the descriptor
             with open(descriptor_path) as f:
                 # try to get the processor by the descriptor name
-                descriptor = ProcessorDescriptor.parse_obj(json.load(f))
+                descriptor = ProcessorDescriptor.model_validate(json.load(f))
                 proc_name = descriptor.name
 
         # do we have the processor we are looking for?
@@ -217,14 +219,14 @@ class JobRunner(CLICommand, ProgressListener):
         job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
         with open(job_descriptor_path, 'r') as f:
             content = json.load(f)
-            self._job = Job.parse_obj(content)
+            self._job = Job.model_validate(content)
         print(f"Created job descriptor at {job_descriptor_path}")
 
         # read the gpp descriptor
         gpp_descriptor_path = os.path.join(self._wd_path, 'gpp.descriptor')
         with open(gpp_descriptor_path, 'r') as f:
             content = json.load(f)
-            self._gpp = GitProcessorPointer.parse_obj(content)
+            self._gpp = GitProcessorPointer.model_validate(content)
         print(f"Created GPP descriptor at {gpp_descriptor_path}")
 
         # prepare input/output interfaces
@@ -284,6 +286,7 @@ class JobRunner(CLICommand, ProgressListener):
             if item.type == 'value':
                 # write the content
                 with open(os.path.join(self._wd_path, item.name), 'w') as f:
+                    # noinspection PyTypeChecker
                     json.dump(item.value, f, indent=2)
 
                 # write the meta information
@@ -325,7 +328,6 @@ class JobRunner(CLICommand, ProgressListener):
                     )
 
                 except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                     continue
 
                 # process the results (if any)
@@ -335,7 +337,8 @@ class JobRunner(CLICommand, ProgressListener):
 
                     # store the meta information
                     with open(meta_path, 'w') as f:
-                        json.dump(meta.dict(), f, indent=2)
+                        # noinspection PyTypeChecker
+                        json.dump(meta.model_dump(), f, indent=2)
 
                     if meta.access_restricted:
                         # does the user have access?
@@ -542,7 +545,7 @@ class JobRunner(CLICommand, ProgressListener):
         if not node.dor_service:
             raise CLIRuntimeError("Target node does not support DOR capabilities", details={
                 'target_address': target_address,
-                'node': node.dict()
+                'node': node.model_dump()
             })
 
         # determine recipe

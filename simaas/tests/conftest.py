@@ -32,6 +32,8 @@ REPOSITORY_COMMIT_ID = '52fa934b9ecdc39d1d77fbf3b22750fb5100cb3b'
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
+logging.getLogger('python_multipart.multipart').setLevel(logging.WARNING)
+
 logger = Logging.get('tests.conftest')
 
 
@@ -49,17 +51,28 @@ def docker_available():
         subprocess.run(['docker', 'info'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Docker not available!")
         return False
 
 
 @pytest.fixture(scope="session")
-def keystore():
+def github_credentials_available():
+    if all(key in os.environ for key in ['GITHUB_USERNAME', 'GITHUB_TOKEN']):
+        return True
+    else:
+        print("GitHub credentials not available!")
+        return False
+
+
+@pytest.fixture(scope="session")
+def session_keystore(github_credentials_available):
     with tempfile.TemporaryDirectory() as tempdir:
         _keystore = Keystore.new("keystore1", "no-email-provided", path=tempdir, password="password")
-        _keystore.github_credentials.update(
-            REPOSITORY_URL,
-            GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-        )
+        if github_credentials_available:
+            _keystore.github_credentials.update(
+                REPOSITORY_URL,
+                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+            )
         yield _keystore
 
 
@@ -70,46 +83,49 @@ def temp_directory():
 
 
 @pytest.fixture(scope="session")
-def dor_proxy(node):
-    proxy = DORProxy(node.rest.address())
+def dor_proxy(session_node):
+    proxy = DORProxy(session_node.rest.address())
     return proxy
 
 
 @pytest.fixture(scope="session")
-def node_db_proxy(node):
-    proxy = NodeDBProxy(node.rest.address())
+def node_db_proxy(session_node):
+    proxy = NodeDBProxy(session_node.rest.address())
     return proxy
 
 
 @pytest.fixture(scope="session")
-def rti_proxy(node):
-    proxy = RTIProxy(node.rest.address())
+def rti_proxy(session_node):
+    proxy = RTIProxy(session_node.rest.address())
     return proxy
 
 
 @pytest.fixture(scope="session")
-def extra_keystores():
+def extra_keystores(github_credentials_available):
     keystores = []
     with tempfile.TemporaryDirectory() as tempdir:
         for i in range(3):
             keystore = Keystore.new(f"keystore-{i}", "no-email-provided", path=tempdir, password="password")
-            keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
+            if github_credentials_available:
+                keystore.github_credentials.update(
+                    REPOSITORY_URL,
+                    GithubCredentials(
+                        login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN']
+                    )
+                )
             keystores.append(keystore)
         yield keystores
 
 
 @pytest.fixture(scope="session")
-def node(keystore):
+def session_node(session_keystore):
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
         rest_address = PortMaster.generate_rest_address(host=local_ip)
         p2p_address = PortMaster.generate_p2p_address(host=local_ip)
 
         _node = DefaultNode.create(
-            keystore=keystore, storage_path=tempdir,
+            keystore=session_keystore, storage_path=tempdir,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, enable_dor=True, enable_rti=True,
             retain_job_history=True, strict_deployment=False, job_concurrency=True
@@ -140,14 +156,16 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
             # read the processor descriptor
             descriptor_path = os.path.join(repo_path, proc_path, 'descriptor.json')
             with open(descriptor_path, 'r') as f:
-                descriptor = ProcessorDescriptor.parse_obj(json.load(f))
+                # noinspection PyTypeChecker
+                descriptor = ProcessorDescriptor.model_validate(json.load(f))
 
             # store the GPP information in a file
             gpp_path = os.path.join(tempdir, 'gpp.json')
             with open(gpp_path, 'w') as f:
                 gpp = GitProcessorPointer(repository=repo_url, commit_id=REPOSITORY_COMMIT_ID, proc_path=proc_path,
                                           proc_descriptor=descriptor)
-                json.dump(gpp.dict(), f)
+                # noinspection PyTypeChecker
+                json.dump(gpp.model_dump(), f)
 
             # upload to DOR
             meta = dor.add_data_object(gpp_path, keystore.identity, False, False, 'ProcessorDockerImage', 'json',
@@ -156,7 +174,7 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
                                            DataObject.Tag(key='commit_id', value=REPOSITORY_COMMIT_ID),
                                            DataObject.Tag(key='commit_timestamp', value=commit_timestamp),
                                            DataObject.Tag(key='proc_path', value=proc_path),
-                                           DataObject.Tag(key='proc_descriptor', value=descriptor.dict()),
+                                           DataObject.Tag(key='proc_descriptor', value=descriptor.model_dump()),
                                            DataObject.Tag(key='image_name', value=image_name)
                                        ])
             os.remove(gpp_path)
@@ -167,9 +185,9 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
 
 
 @pytest.fixture(scope="session")
-def deployed_test_processor(docker_available, rti_proxy, dor_proxy, node) -> DataObject:
+def deployed_test_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
     # add test processor
-    meta = add_test_processor(dor_proxy, node.keystore)
+    meta = add_test_processor(dor_proxy, session_node.keystore)
     proc_id = meta.obj_id
 
     if not docker_available:
@@ -177,7 +195,7 @@ def deployed_test_processor(docker_available, rti_proxy, dor_proxy, node) -> Dat
 
     else:
         # deploy it
-        rti_proxy.deploy(proc_id, node.keystore)
+        rti_proxy.deploy(proc_id, session_node.keystore)
         while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
             logger.info(f"Waiting for processor to be ready: {proc}")
             time.sleep(1)
@@ -188,7 +206,7 @@ def deployed_test_processor(docker_available, rti_proxy, dor_proxy, node) -> Dat
         yield meta
 
         # undeploy it
-        rti_proxy.undeploy(proc_id, node.keystore)
+        rti_proxy.undeploy(proc_id, session_node.keystore)
         try:
             while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
@@ -250,7 +268,7 @@ class TestContext:
             nodes.append(self.get_node(keystore, enable_rest=enable_rest))
 
             if perform_join and i > 0:
-                nodes[i].join_network(nodes[0].p2p.address())
+                nodes[i].join_network(nodes[0].rest.address())
                 time.sleep(2)
 
         return nodes

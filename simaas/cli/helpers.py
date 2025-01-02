@@ -68,20 +68,21 @@ def initialise_storage_folder(path: str, usage: str, is_verbose: bool = False) -
 
 def get_available_keystores(path: str, is_verbose: bool = False) -> List[KeystoreContent]:
     available = []
-    for f in os.listdir(path):
+    for filename in os.listdir(path):
         # eligible filename example: 9rak8e1tmc0xt4v3onwq7cpsydpselrjxqp2cys823alhu8evzkjhusqic740h39.json
-        temp = os.path.basename(f).split(".")
+        temp = os.path.basename(filename).split(".")
         if len(temp) != 2 or temp[1].lower() != 'json' or len(temp[0]) != 64:
             continue
 
         # read content and validate
         try:
-            content = KeystoreContent.parse_file(os.path.join(path, f))
+            with open(os.path.join(path, filename), 'r') as f:
+                content = KeystoreContent.model_validate(json.load(f))
             available.append(content)
         except ValidationError:
-            logger.info(f"error while parsing {f}")
+            logger.info(f"error while parsing {filename}")
             if is_verbose:
-                print(f"Error while parsing {f} -> Ignoring.")
+                print(f"Error while parsing {filename} -> Ignoring.")
             continue
 
     return available
