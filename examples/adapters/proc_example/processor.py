@@ -1,52 +1,79 @@
 import json
 import logging
 import os
-import sys
 import time
+from typing import Any
 
-logger = logging.getLogger('example-processor')
+from simaas.core.helpers import get_timestamp_now
+from simaas.core.processor import ProcessorBase, ProgressListener, Severity
 
 
-def function(working_directory):
-    print("trigger:progress:0")
-    print("trigger:message:info:This is a message at the very beginning of the process.")
-
-    a_path = os.path.join(working_directory, 'a')
-    with open(a_path, 'r') as f:
+def read_value(data_object_path: str) -> int:
+    with open(data_object_path, 'r') as f:
         a = json.load(f)
-        a = a['v']
-    print(f"a={a}")
-    print("trigger:progress:20")
-    time.sleep(a)
-
-    b_path = os.path.join(working_directory, 'b')
-    with open(b_path, 'r') as f:
-        b = json.load(f)
-        b = b['v']
-    print(f"b={b}")
-    print("trigger:progress:40")
-    time.sleep(b)
-
-    c = {
-        'v': a + b
-    }
-    print(f"c={c}")
-    print("trigger:progress:60")
-    print(f"trigger:message:info:a={a}")
-    print(f"trigger:message:info:b={b}")
-    print(f"trigger:message:info:c={c}")
-    time.sleep(0.2)
-
-    c_path = os.path.join(working_directory, 'c')
-    with open(c_path, 'w') as f:
-        json.dump(c, f, indent=4, sort_keys=True)
-    print("trigger:progress:80")
-    print("trigger:output:c")
-    time.sleep(0.2)
-
-    print("trigger:progress:100")
-    print("trigger:message:info:...and we are done!")
+        return int(a['v'])
 
 
-if __name__ == '__main__':
-    function(sys.argv[1])
+def write_value(data_object_path: str, v: Any) -> None:
+    with open(data_object_path, 'w') as f:
+        # noinspection PyTypeChecker
+        json.dump({
+            'v': v
+        }, f, indent=4, sort_keys=True)
+
+
+class ExampleProcessor(ProcessorBase):
+    def __init__(self, proc_path: str) -> None:
+        super().__init__(proc_path)
+        self._is_cancelled = False
+
+    def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
+        def interruptable_sleep(seconds: float) -> None:
+            if seconds >= 0:  # interruptible
+                t_done = get_timestamp_now() + seconds * 1000
+                while get_timestamp_now() < t_done and not self._is_cancelled:
+                    time.sleep(0.1)
+
+            else:  # uninterruptible
+                time.sleep(abs(seconds))
+
+        listener.on_progress_update(0)
+        listener.on_message(Severity.INFO, "This is a message at the very beginning of the process.")
+
+        # read value from data object 'a'
+        a_path = os.path.join(wd_path, 'a')
+        a = read_value(a_path)
+        listener.on_progress_update(30)
+        listener.on_message(Severity.INFO, f"a={a}")
+
+        interruptable_sleep(a)
+        if self._is_cancelled:
+            return
+
+        # read value from data object 'b'
+        b_path = os.path.join(wd_path, 'b')
+        b = read_value(b_path)
+        listener.on_progress_update(60)
+        listener.on_message(Severity.INFO, f"b={b}")
+
+        interruptable_sleep(b)
+        if self._is_cancelled:
+            return
+
+        # write sum of a and b to data object 'c'
+        c_path = os.path.join(wd_path, 'c')
+        c = a + b
+        write_value(c_path, c)
+        listener.on_output_available('c')
+        listener.on_progress_update(90)
+        listener.on_message(Severity.INFO, f"c={c}")
+
+        interruptable_sleep(0.2)
+        if self._is_cancelled:
+            return
+
+        listener.on_progress_update(100)
+        listener.on_message(Severity.INFO, "...and we are done!")
+
+    def interrupt(self) -> None:
+        self._is_cancelled = True

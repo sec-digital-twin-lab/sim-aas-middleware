@@ -31,7 +31,7 @@
       "name": "c",
       "data_type": "JSONObject",
       "data_format": "json",
-      "schema": {
+      "data_schema": {
         "type": "object",
         "properties": {
           "v": {"type": "number"}
@@ -39,9 +39,5 @@
         "required": ["v"]
       }
     }
-  ],
-  "configurations": [
-    "default", 
-    "nscc"
   ]
 }
