@@ -29,25 +29,27 @@ logger = Logging.get(__name__)
 
 
 @pytest.fixture(scope='session')
-def non_strict_node(test_context):
+def non_strict_node(test_context, github_credentials_available):
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("non_strict_node", "no-email-provided", path=tempdir, password="password")
-        keystore.github_credentials.update(
-            REPOSITORY_URL,
-            GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-        )
+        if github_credentials_available:
+            keystore.github_credentials.update(
+                REPOSITORY_URL,
+                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+            )
         _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=False)
         yield _node
 
 
 @pytest.fixture(scope='session')
-def strict_node(test_context, extra_keystores):
+def strict_node(test_context, extra_keystores, github_credentials_available):
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("strict_node", "no-email-provided", path=tempdir, password="password")
-        keystore.github_credentials.update(
-            REPOSITORY_URL,
-            GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-        )
+        if github_credentials_available:
+            keystore.github_credentials.update(
+                REPOSITORY_URL,
+                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+            )
         _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=True)
         yield _node
 
@@ -64,9 +66,14 @@ def test_rest_get_deployed(rti_proxy):
     assert (result is not None)
 
 
-def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, known_user):
+def test_rest_deploy_undeploy(
+        docker_available, github_credentials_available, non_strict_node, strict_node, known_user
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     node0 = non_strict_node
     db0 = NodeDBProxy(node0.rest.address())
@@ -147,10 +154,15 @@ def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, kn
         assert ('Processor not deployed' in e.reason)
 
 
-def test_rest_submit_list_get_job(docker_available, test_context, session_node, dor_proxy, rti_proxy,
-                                  deployed_test_processor, known_user):
+def test_rest_submit_list_get_job(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_test_processor, known_user
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     proc_id = deployed_test_processor.obj_id
     wrong_user = known_user
@@ -228,9 +240,14 @@ def test_rest_submit_list_get_job(docker_available, test_context, session_node, 
         assert (content['v'] == 2)
 
 
-def test_rest_submit_cancel_job(docker_available, session_node, rti_proxy, deployed_test_processor, known_user):
+def test_rest_submit_cancel_job(
+        docker_available, github_credentials_available, session_node, rti_proxy, deployed_test_processor, known_user
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     proc_id = deployed_test_processor.obj_id
     wrong_user = known_user
@@ -278,9 +295,14 @@ def test_rest_submit_cancel_job(docker_available, session_node, rti_proxy, deplo
     assert (status.state == JobStatus.State.CANCELLED)
 
 
-def test_rest_submit_cancel_kill_job(docker_available, session_node, rti_proxy, deployed_test_processor, known_user):
+def test_rest_submit_cancel_kill_job(
+        docker_available, github_credentials_available, session_node, rti_proxy, deployed_test_processor, known_user
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     proc_id = deployed_test_processor.obj_id
     owner = session_node.keystore
@@ -374,9 +396,15 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
         time.sleep(0.5)
 
 
-def test_provenance(docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor):
+def test_provenance(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     owner = session_node.keystore
 
@@ -422,9 +450,14 @@ def test_provenance(docker_available, test_context, session_node, dor_proxy, rti
     print(json.dumps(provenance.dict(), indent=2))
 
 
-def test_job_concurrency(docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor):
+def test_job_concurrency(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor
+):
     if not docker_available:
         pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
 
     wd_path = test_context.testing_dir
     owner = session_node.keystore

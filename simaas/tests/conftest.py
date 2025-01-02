@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import traceback
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 import pytest
 from dotenv import load_dotenv
@@ -187,39 +187,55 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
 @pytest.fixture(scope="session")
 def deployed_test_processor(
         docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> Optional[DataObject]:
+) -> DataObject:
     if not github_credentials_available:
-        return None
-
-    # add test processor
-    meta = add_test_processor(dor_proxy, session_node.keystore)
-    proc_id = meta.obj_id
-
-    if not docker_available:
-        yield meta
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
 
     else:
-        # deploy it
-        rti_proxy.deploy(proc_id, session_node.keystore)
-        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-            logger.info(f"Waiting for processor to be ready: {proc}")
-            time.sleep(1)
+        # add test processor
+        meta = add_test_processor(dor_proxy, session_node.keystore)
+        proc_id = meta.obj_id
 
-        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-        logger.info(f"Processor deployed: {proc}")
+        if not docker_available:
+            yield meta
 
-        yield meta
-
-        # undeploy it
-        rti_proxy.undeploy(proc_id, session_node.keystore)
-        try:
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
-        except Exception as e:
-            print(e)
 
-        logger.info(f"Processor undeployed: {proc}")
+            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            try:
+                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
 
 
 class TestContext:
