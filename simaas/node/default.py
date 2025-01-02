@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import time
 
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging

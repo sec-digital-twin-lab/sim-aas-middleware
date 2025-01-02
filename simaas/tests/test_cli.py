@@ -1432,6 +1432,7 @@ def test_cli_builder_export_image(docker_available, temp_dir):
         assert os.path.isfile(image_path)
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+        print(trace)
         assert False
 
 

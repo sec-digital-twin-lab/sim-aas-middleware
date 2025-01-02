@@ -106,7 +106,7 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 print(e.stderr)
-                raise CLIRuntimeError(f"Creating docker image failed", details={
+                raise CLIRuntimeError("Creating docker image failed", details={
                     'stdout': e.stdout,
                     'stderr': e.stderr,
                     'exception': str(e),

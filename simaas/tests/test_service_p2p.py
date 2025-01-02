@@ -153,7 +153,7 @@ async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
     with tempfile.TemporaryDirectory() as temp_dir:
         # create a fresh client node
         keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
-        client = DefaultNode(keystore, os.path.join(temp_dir, f'client_node'),
+        client = DefaultNode(keystore, os.path.join(temp_dir, 'client_node'),
                              enable_db=True, enable_dor=False, enable_rti=False)
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()

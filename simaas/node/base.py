@@ -62,15 +62,15 @@ class Node(abc.ABC):
 
         endpoints = []
         if self.db:
-            logger.info(f"enabling NodeDB service.")
+            logger.info("enabling NodeDB service.")
             endpoints += self.db.endpoints()
 
         if self.dor:
-            logger.info(f"enabling DOR service.")
+            logger.info("enabling DOR service.")
             endpoints += self.dor.endpoints()
 
         if self.rti:
-            logger.info(f"enabling RTI service.")
+            logger.info("enabling RTI service.")
             endpoints += self.rti.endpoints()
 
         logger.info("starting P2P service.")
@@ -136,7 +136,7 @@ class Node(abc.ABC):
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"Error while connecting to boot node REST interface")
+            logger.error("Error while connecting to boot node REST interface")
             logger.error(trace)
             return
 
@@ -161,7 +161,7 @@ class Node(abc.ABC):
             loop.run_until_complete(protocol.perform(blocking=blocking))
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"Error during P2P network join")
+            logger.error("Error during P2P network join")
             logger.error(trace)
         finally:
             loop.close()
@@ -180,7 +180,7 @@ class Node(abc.ABC):
                     loop.run_until_complete(protocol.broadcast(self.db.get_network()))
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.error(f"Error during P2P identity update")
+                    logger.error("Error during P2P identity update")
                     logger.error(trace)
                 finally:
                     loop.close()
