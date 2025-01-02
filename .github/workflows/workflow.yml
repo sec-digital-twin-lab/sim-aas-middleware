@@ -25,15 +25,6 @@ jobs:
           pip install ".[dev]"
           pip install pytest-timeout
 
-      - name: Create credentials.json
-        run: >
-          echo
-          '{"github-credentials":[
-          {"repository":"https://github.com/sec-digital-twin-lab/duct-fom",
-          "login":"oauth",
-          "personal_access_token":"${{ secrets.TEST_PROCESSOR_KEY }}"}
-          ]}' > ~/.saas-credentials.json
-
       - name: Run tests
         run: pytest -v --timeout=300 ./tests
 
@@ -41,7 +32,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: chartboost/ruff-action@v1
+
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v4
         with:
-          # ignore line too long errors
-          args: --ignore E501
+          python-version: "3.12"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run Ruff Linter
+        run: ruff check .
