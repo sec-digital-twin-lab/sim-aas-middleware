@@ -27,18 +27,20 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
-@pytest.fixture(scope="module")
-def p2p_server(test_context, extra_keystores) -> Node:
-    _node: Node = test_context.get_node(extra_keystores[0], enable_rest=True, use_dor=True, use_rti=False)
+@pytest.fixture(scope="session")
+def p2p_server(test_context) -> Node:
+    keystore: Keystore = Keystore.new('p2p_server')
+    _node: Node = test_context.get_node(keystore, enable_rest=True, use_dor=True, use_rti=False)
 
     yield _node
 
     _node.shutdown(leave_network=False)
 
 
-@pytest.fixture(scope="module")
-def p2p_client(test_context, extra_keystores) -> Node:
-    _node: Node = test_context.get_node(extra_keystores[1], enable_rest=False, use_dor=False, use_rti=False)
+@pytest.fixture(scope="session")
+def p2p_client(test_context) -> Node:
+    keystore: Keystore = Keystore.new('p2p_client')
+    _node: Node = test_context.get_node(keystore, enable_rest=False, use_dor=False, use_rti=False)
 
     yield _node
 
