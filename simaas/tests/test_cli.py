@@ -1459,7 +1459,7 @@ def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
         assert False
 
 
-def test_cli_builder_build_image(docker_available, temp_dir):
+def test_cli_builder_build_image(docker_available, github_credentials_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1493,7 +1493,7 @@ def test_cli_builder_build_image(docker_available, temp_dir):
         assert False
 
 
-def test_cli_builder_export_image(docker_available, temp_dir):
+def test_cli_builder_export_image(docker_available, github_credentials_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
