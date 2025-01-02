@@ -261,10 +261,10 @@ def test_add_credentials(temp_directory):
 
 def test_defaults(logging):
     Logging.initialise()
-    l = Logging.get('test')
+    logger = Logging.get('test')
 
-    l.info("you can see me!")
-    l.debug("you should not be able to see me!")
+    logger.info("you can see me!")
+    logger.debug("you should not be able to see me!")
 
 
 def test_log_to_separate_file(logging, temp_directory):

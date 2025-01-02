@@ -327,7 +327,7 @@ class JobRunner(CLICommand, ProgressListener):
                         lookup.perform(peer, list(pending.keys()))
                     )
 
-                except Exception as e:
+                except Exception:
                     continue
 
                 # process the results (if any)
