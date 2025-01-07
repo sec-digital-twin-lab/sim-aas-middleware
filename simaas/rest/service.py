@@ -17,10 +17,15 @@ from simaas.rest.schemas import EndpointDefinition
 
 logger = Logging.get('rest.service')
 
+DOCS_ENDPOINT_PREFIX = "/api/v1"
+
 
 class RESTApp:
     def __init__(self, origins: list[str] = None) -> None:
-        self.api = FastAPI()
+        self.api = FastAPI(
+            openapi_url=f"{DOCS_ENDPOINT_PREFIX}/openapi.json",
+            docs_url=f"{DOCS_ENDPOINT_PREFIX}/docs"
+        )
         self.api.on_event("shutdown")(self.close)
 
         @self.api.exception_handler(SaaSRuntimeException)
