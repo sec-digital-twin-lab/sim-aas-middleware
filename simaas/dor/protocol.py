@@ -8,7 +8,7 @@ from simaas.core.logging import Logging
 from simaas.dor.exceptions import FetchDataObjectFailedError
 from simaas.dor.schemas import DataObject
 from simaas.nodedb.schemas import NodeInfo
-from simaas.p2p.base import P2PProtocol
+from simaas.p2p.base import P2PProtocol, P2PAttachment, P2PAddress, p2p_request
 
 logger = Logging.get('dor.protocol')
 
@@ -22,15 +22,30 @@ class LookupResponse(BaseModel):
 
 
 class P2PLookupDataObject(P2PProtocol):
+    NAME = 'dor-lookup'
+
     def __init__(self, node) -> None:
-        super().__init__('dor-lookup', node.keystore)
+        super().__init__(P2PLookupDataObject.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
-        reply = await self.send_and_wait(peer, LookupRequest(obj_ids=obj_ids), LookupResponse)
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
+        )
+
+        reply, _ = await p2p_request(
+            peer_address, self.NAME, LookupRequest(obj_ids=obj_ids), reply_type=LookupResponse
+        )
+        reply: LookupResponse = reply  # casting for PyCharm
+
         return reply.records
 
-    async def handle(self, request: LookupRequest) -> Tuple[LookupResponse, Optional[str]]:
+    async def handle(
+            self, request: LookupRequest, _: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
         records: Dict[str, DataObject] = {obj_id: self._node.dor.get_meta(obj_id) for obj_id in request.obj_ids}
         return LookupResponse(records=records), None
 
@@ -56,16 +71,27 @@ class FetchResponse(BaseModel):
 
 
 class P2PFetchDataObject(P2PProtocol):
+    NAME = 'dor-fetch'
+
     def __init__(self, node) -> None:
-        super().__init__('dor-fetch', node.keystore)
+        super().__init__(P2PFetchDataObject.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
                       user_iid: str = None, user_signature: str = None) -> DataObject:
-        reply: FetchResponse = await self.send_and_wait(
-            peer, FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature), FetchResponse,
-            download_path=content_path
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
         )
+
+        message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
+
+        reply, _ = await p2p_request(
+            peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path
+        )
+        reply: FetchResponse = reply  # casting for PyCharm
 
         if reply.successful:
             # store the meta information
@@ -78,7 +104,9 @@ class P2PFetchDataObject(P2PProtocol):
         else:
             raise FetchDataObjectFailedError(details=reply.details)
 
-    async def handle(self, request: FetchRequest) -> Tuple[FetchResponse, Optional[str]]:
+    async def handle(
+            self, request: FetchRequest, _: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
         # check if we have that data object
         meta = self._node.dor.get_meta(request.obj_id)
         if not meta:
@@ -140,7 +168,10 @@ class P2PFetchDataObject(P2PProtocol):
         # touch data object
         self._node.dor.touch_data_object(meta.obj_id)
 
-        return FetchResponse(successful=True, meta=meta, details=None), content_path
+        return (
+            FetchResponse(successful=True, meta=meta, details=None),
+            P2PAttachment(name=request.obj_id, path=content_path)
+        )
 
     @staticmethod
     def request_type():
