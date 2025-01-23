@@ -183,7 +183,7 @@ class OutputObjectHandler(threading.Thread):
 
 class StatusHandler(threading.Thread):
     def __init__(self, logger: logging.Logger, peer_address: P2PAddress, job_id: str, job_status_path: str):
-        super().__init__(daemon=True)
+        super().__init__(daemon=False)
         self._mutex = threading.Lock()
         self._logger = logger
         self._peer_address = peer_address
@@ -803,3 +803,6 @@ class JobRunner(CLICommand, ProgressListener):
             if self._status_handler:
                 self._status_handler.update(state=JobStatus.State.FAILED, error=error)
             self._write_exitcode(ExitCode.ERROR, e)
+
+        finally:
+            self._status_handler.join(5000)
