@@ -758,8 +758,7 @@ class JobRunner(CLICommand, ProgressListener):
             # was the processor interrupted?
             if self._interrupted:
                 # wrap up
-                self._logger.error(f"END processing job {self._job.id if self._job else '?'} "
-                                  "-> INTERRUPTED")
+                self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> INTERRUPTED")
                 self._status_handler.update(state=JobStatus.State.CANCELLED)
                 self._write_exitcode(ExitCode.INTERRUPTED)
 
@@ -773,8 +772,7 @@ class JobRunner(CLICommand, ProgressListener):
                     raise CLIRuntimeError(f"Failed to upload some outputs: {self._failed_output}")
 
                 # wrap up
-                self._logger.error(f"END processing job {self._job.id if self._job else '?'} "
-                                   "-> DONE")
+                self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> DONE")
                 self._status_handler.update(state=JobStatus.State.SUCCESSFUL)
                 self._write_exitcode(ExitCode.DONE)
 

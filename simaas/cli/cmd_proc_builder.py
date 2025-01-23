@@ -233,6 +233,17 @@ class ProcBuilderLocal(CLICommand):
         image_name = f"{user_name}/{descriptor.name}:{content_hash}"
         print(f"Building image '{image_name}'. This may take a while...")
 
+        # create the GPP descriptor
+        gpp: GitProcessorPointer = GitProcessorPointer(
+            repository=repo_name,
+            commit_id=f"content_hash:{content_hash}",
+            proc_path=proc_path,
+            proc_descriptor=descriptor
+        )
+        gpp_path = os.path.join(args['location'], 'gpp.json')
+        with open(gpp_path, 'w') as f:
+            json.dump(gpp.model_dump(), f, indent=2)
+
         # build the image
         image_existed = build_processor_image(args['location'], image_name, credentials=credentials,
                                               force_build=args['force_build'])
@@ -366,6 +377,17 @@ class ProcBuilderGithub(CLICommand):
             commit_id = repo.head.commit.hexsha
             image_name = f"{username}/{repo_name}/{descriptor.name}:{commit_id}"
             print(f"Building image '{image_name}'. This may take a while...")
+
+            # create the GPP descriptor
+            gpp: GitProcessorPointer = GitProcessorPointer(
+                repository=args['repository'],
+                commit_id=args['commit_id'],
+                proc_path=args['proc_path'],
+                proc_descriptor=descriptor
+            )
+            gpp_path = os.path.join(processor_path, 'gpp.json')
+            with open(gpp_path, 'w') as f:
+                json.dump(gpp.model_dump(), f, indent=2)
 
             # build the image
             image_existed = build_processor_image(processor_path, image_name, credentials=credentials,
