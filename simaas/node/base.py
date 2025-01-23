@@ -10,7 +10,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.nodedb.api import NodeDBService, NodeDBProxy
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
@@ -18,6 +18,7 @@ from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
 from simaas.rti.api import RTIService
 from simaas.meta import __version__
+from simaas.rti.protocol import P2PPushJobStatus
 
 logger = Logging.get('node.base')
 
@@ -80,6 +81,8 @@ class Node(abc.ABC):
         self.p2p.add(P2PLeaveNetwork(self))
         self.p2p.add(P2PLookupDataObject(self))
         self.p2p.add(P2PFetchDataObject(self))
+        self.p2p.add(P2PPushDataObject(self))
+        self.p2p.add(P2PPushJobStatus(self))
         self.p2p.start_service()
 
         if rest_address is not None:

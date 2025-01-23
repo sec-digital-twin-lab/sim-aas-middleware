@@ -15,7 +15,6 @@ from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy_json import NestedMutableJson
 
-from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import generate_random_string, get_timestamp_now
@@ -25,8 +24,10 @@ from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
     docker_kill_job_container, docker_container_running
-from simaas.rti.api import RTIService, JobRESTProxy
+from simaas.p2p.base import P2PAddress
+from simaas.rti.api import RTIService
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
+from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Processor, Job, Task, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject
 
@@ -49,24 +50,10 @@ class DBJobInfo(Base):
     id = Column(String(64), primary_key=True)
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
-    rest_address = Column(String(64), nullable=False)
+    p2p_address = Column(String(64), nullable=False)
     status = Column(NestedMutableJson, nullable=False)
     job = Column(NestedMutableJson, nullable=False)
     container_id = Column(String(16), nullable=False)
-
-
-def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str, rti_rest_address: str) -> None:
-    try:
-        cmd = JobRunner()
-        cmd.execute({
-            'job_path': job_path,
-            'proc_path': proc_path,
-            'proc_name': proc_name,
-            'rest_address': rest_address,
-            'rti_rest_address': rti_rest_address
-        })
-    except Exception as e:
-        logger.error(e)
 
 
 class DefaultRTIService(RTIService):
@@ -408,7 +395,7 @@ class DefaultRTIService(RTIService):
         with self._mutex:
             with self._session_maker() as session:
                 record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                                   rest_address=f"{job_address[0]}:{job_address[1]}",
+                                   p2p_address=f"tcp://{job_address[0]}:{job_address[1]}",
                                    status=status.model_dump(), job=job.model_dump(),
                                    container_id=container_id)
                 session.add(record)
@@ -430,9 +417,7 @@ class DefaultRTIService(RTIService):
         result: List[Job] = []
         for record in records:
             status = JobStatus.model_validate(record.status)
-            if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                JobStatus.State.POSTPROCESSING]:
+            if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
                 job = Job.model_validate(record.job)
                 result.append(job)
 
@@ -467,8 +452,7 @@ class DefaultRTIService(RTIService):
             for record in records:
                 status = JobStatus.model_validate(record.status)
                 if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                    JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                    JobStatus.State.POSTPROCESSING]:
+                                    JobStatus.State.RUNNING]:
                     job = Job.model_validate(record.job)
                     result.append(job)
 
@@ -489,9 +473,8 @@ class DefaultRTIService(RTIService):
                 # check the status
                 status = JobStatus.model_validate(record.status)
                 if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                        JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                        JobStatus.State.POSTPROCESSING, JobStatus.State.CANCELLED]:
-                    raise RTIException(f"Job {job_id} is not active -> status cannot be updated.")
+                                        JobStatus.State.RUNNING]:
+                    logger.warning(f"Job {job_id} is not active -> status cannot be updated.")
 
                 # update the status
                 record.status = job_status.model_dump()
@@ -519,11 +502,11 @@ class DefaultRTIService(RTIService):
 
         return JobStatus.model_validate(record.status)
 
-    def _perform_cancel(self, job_id: str, rest_address: Tuple[str, int], grace_period: int = 30) -> None:
+    def _perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job
         try:
-            job_proxy = JobRESTProxy(rest_address)
-            job_proxy.job_cancel()
+            asyncio.run(P2PInterruptJob.perform(peer_address))
+
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
@@ -573,15 +556,18 @@ class DefaultRTIService(RTIService):
 
         # check the status
         status = JobStatus.model_validate(record.status)
-        if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                JobStatus.State.POSTPROCESSING]:
+        if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
             raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
 
         # start the cancellation worker
-        rest_address = record.rest_address.split(':')
-        rest_address = (rest_address[0], int(rest_address[1]))
-        threading.Thread(target=self._perform_cancel, args=(job_id, rest_address, )).start()
+        peer = Identity.model_validate(record.peer)
+        peer_address = P2PAddress(
+            address=record.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.c_public_key
+        )
+        threading.Thread(target=self._perform_cancel, args=(job_id, peer_address, )).start()
 
         return status
 

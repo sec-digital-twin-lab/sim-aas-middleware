@@ -1,6 +1,8 @@
 import json
 import threading
 import asyncio
+import traceback
+
 import zmq
 
 from threading import Lock
@@ -38,7 +40,7 @@ class P2PService:
         """Returns the address (host:port) of the P2P service."""
         return self._address
 
-    def start_service(self, timeout: int = 500) -> None:
+    def start_service(self, encrypt: bool = True, timeout: int = 5000) -> None:
         """Starts the TCP socket server at the specified address."""
         with self._mutex:
             if not self._socket:
@@ -48,9 +50,10 @@ class P2PService:
                     self._socket.setsockopt(zmq.LINGER, 0)
                     self._socket.setsockopt(zmq.RCVTIMEO, timeout)
                     self._socket.setsockopt(zmq.SNDTIMEO, timeout)
-                    self._socket.curve_secretkey = self._keystore.curve_secret_key()
-                    self._socket.curve_publickey = self._keystore.curve_public_key()
-                    self._socket.curve_server = True
+                    if encrypt:
+                        self._socket.curve_secretkey = self._keystore.curve_secret_key()
+                        self._socket.curve_publickey = self._keystore.curve_public_key()
+                        self._socket.curve_server = True
                     self._socket.bind(self._address)
                     logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
                 except Exception as e:
@@ -82,7 +85,8 @@ class P2PService:
                 await asyncio.sleep(0.1)
 
             except Exception as e:
-                logger.warning(f"[{self._keystore.identity.name}] Exception in server loop: {e}")
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                logger.warning(f"[{self._keystore.identity.name}] Exception in server loop: {trace}")
 
         logger.info(f"[{self._keystore.identity.name}] Stopped listening to incoming P2P connections.")
         self._socket.close()
@@ -101,4 +105,5 @@ class P2PService:
 
             await protocol.process_and_reply(self._socket, cid, request)
         except Exception as e:
-            logger.error(f"[{self._keystore.identity.name}] failed to process message: {e}")
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[{self._keystore.identity.name}] failed to process message: {trace}")

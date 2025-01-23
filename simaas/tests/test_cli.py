@@ -1,16 +1,21 @@
+import asyncio
 import json
 import logging
-import multiprocessing
 import os
+import shutil
 import socket
 import tempfile
 import threading
 import time
 import traceback
-from typing import Tuple, List, Union, Any, Optional
+from typing import Tuple, List, Union, Any
 
 import pytest
 from docker.errors import ImageNotFound
+from simaas.nodedb.protocol import P2PJoinNetwork
+
+from simaas.p2p.protocol import P2PLatency
+from simaas.rti.default import DBJobInfo, DefaultRTIService
 
 from examples.adapters.proc_example.processor import write_value
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
@@ -31,14 +36,15 @@ from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPoin
 from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
-from simaas.rti.api import JobRESTProxy
+from simaas.p2p.base import P2PAddress
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
 from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
 
 logger = Logging.get(__name__)
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-examples_path = os.path.join(repo_root_path, 'examples')
+examples_path = os.path.join(repo_root_path, 'examples', 'adapters', 'proc_example')
 
 
 @pytest.fixture(scope="session")
@@ -770,6 +776,24 @@ def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: st
 
     return obj
 
+def prepare_proc_path(proc_path: str):
+    # copy the processor
+    shutil.copytree(examples_path, proc_path)
+
+    # read the processor descriptor
+    descriptor_path = os.path.join(proc_path, 'descriptor.json')
+    with open(descriptor_path, 'r') as f:
+        content = json.load(f)
+        proc_descriptor = ProcessorDescriptor.model_validate(content)
+
+    # create the GPP
+    gpp_path = os.path.join(proc_path, 'gpp.json')
+    with open(gpp_path, 'w') as f:
+        gpp = GitProcessorPointer(
+            repository='local', commit_id='commit_id', proc_path='processor', proc_descriptor=proc_descriptor
+        )
+        json.dump(gpp.model_dump(), f, indent=2)
+
 
 def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: Any = 1) -> str:
     # create the job folder
@@ -783,77 +807,127 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
     return job_path
 
 
-def prepare_full_job_folder(jobs_root_path: str, node: Node, user: Identity, proc: DataObject, job_id: str,
-                            a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
-                            sig_a: str = None, sig_b: str = None, target_node: Node = None) -> str:
-    proc_descriptor = ProcessorDescriptor.model_validate(proc.tags['proc_descriptor'])
+async def execute_job(
+        custodian: Node, job_id: str, a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
+        user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
+) -> JobStatus:
+    user = user if user else custodian.identity
+    rti: DefaultRTIService = custodian.rti
 
-    if a is None:
-        a = {'v': 1}
-    elif isinstance(a, (int, str)):
-        a = {'v': a}
+    with tempfile.TemporaryDirectory() as wd_path:
+        # determine P2P address
+        p2p_address_pub = PortMaster.generate_p2p_address()
+        p2p_address_sec = PortMaster.generate_p2p_address()
 
-    if b is None:
-        b = {'v': 1}
-    elif isinstance(b, (int, str)):
-        b = {'v': b}
+        # prepare proc path
+        proc_path = os.path.join(wd_path, 'processor')
+        prepare_proc_path(proc_path)
 
-    a = Task.InputReference(name='a', type='reference', obj_id=a.obj_id, user_signature=sig_a, c_hash=None) \
-        if isinstance(a, DataObject) else Task.InputValue(name='a', type='value', value=a)
+        # execute the job runner command
+        job_process = threading.Thread(target=run_job_cmd, args=(p2p_address_pub, p2p_address_sec, proc_path, wd_path))
+        job_process.start()
 
-    b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=sig_b, c_hash=None) \
-        if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value=b)
+        # wait until the socket can be reached
+        latency, attempt = await P2PLatency.perform_unsecured(p2p_address_pub)
+        print(f"[1] needed {attempt} attempts to test latency: {latency} msec")
 
-    c = Task.Output(name='c', owner_iid=user.id, restricted_access=False, content_encrypted=False,
-                    target_node_iid=target_node.identity.id if target_node else node.identity.id)
+        # perform the handshake
+        response: Tuple[GitProcessorPointer, Identity] = \
+            await P2PRunnerPerformHandshake.perform(
+                p2p_address_pub, custodian.keystore, custodian.p2p.address()
+            )
+        gpp: GitProcessorPointer = response[0]
+        peer: Identity = response[1]
 
-    task = Task(proc_id=proc.obj_id, user_iid=user.id, input=[a, b], output=[c], name='test', description='')
+        ##########
 
-    # create job
-    job = Job(id=job_id, task=task, retain=False, custodian=node.info, proc_name=proc_descriptor.name, t_submitted=0)
+        if a is None:
+            a = {'v': 1}
+        elif isinstance(a, (int, str)):
+            a = {'v': a}
 
-    # create gpp
-    gpp = GitProcessorPointer(repository=proc.tags['repository'], commit_id=proc.tags['commit_id'],
-                              proc_path=proc.tags['proc_path'], proc_descriptor=proc_descriptor)
+        if b is None:
+            b = {'v': 1}
+        elif isinstance(b, (int, str)):
+            b = {'v': b}
 
-    # create the job folder
-    job_path = os.path.join(jobs_root_path, job.id)
-    os.makedirs(job_path, exist_ok=True)
+        a = Task.InputReference(name='a', type='reference', obj_id=a.obj_id, user_signature=sig_a, c_hash=None) \
+            if isinstance(a, DataObject) else Task.InputValue(name='a', type='value', value=a)
 
-    # write job descriptor
-    job_descriptor_path = os.path.join(job_path, 'job.descriptor')
-    with open(job_descriptor_path, 'w') as f:
-        # noinspection PyTypeChecker
-        json.dump(job.model_dump(), f, indent=2)
+        b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=sig_b, c_hash=None) \
+            if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value=b)
 
-    # write gpp descriptor
-    gpp_descriptor_path = os.path.join(job_path, 'gpp.descriptor')
-    with open(gpp_descriptor_path, 'w') as f:
-        # noinspection PyTypeChecker
-        json.dump(gpp.model_dump(), f, indent=2)
+        c = Task.Output(
+            name='c',
+            owner_iid=user.id,
+            restricted_access=False, content_encrypted=False,
+            target_node_iid=target_node.identity.id if target_node else custodian.identity.id
+        )
 
-    return job_path
+        task = Task(proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='')
+
+        # create job
+        job = Job(
+            id=job_id, task=task, retain=False, custodian=custodian.info, proc_name=gpp.proc_descriptor.name,
+            t_submitted=0
+        )
+        status = JobStatus(
+            state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
+        )
+
+        with rti._session_maker() as session:
+            record = DBJobInfo(id=job.id, proc_id=task.proc_id, user_iid=user.id,
+                               p2p_address=p2p_address_sec,
+                               status=status.model_dump(), job=job.model_dump(),
+                               container_id="0")
+            session.add(record)
+            session.commit()
+
+        ##########
+
+        # create P2P address
+        peer_address = P2PAddress(
+            address=p2p_address_sec,
+            curve_secret_key=custodian.keystore.curve_secret_key(),
+            curve_public_key=custodian.keystore.curve_public_key(),
+            curve_server_key=peer.c_public_key
+        )
+
+        # wait until the socket can be reached
+        latency, attempt = await P2PLatency.perform(peer_address)
+        print(f"[2] needed {attempt} attempts to test latency: {latency} msec")
+
+        # push the job to the runner -> this will trigger execution
+        await P2PPushJob.perform(peer_address, job)
+
+        # cancel if requested
+        if cancel:
+            await asyncio.sleep(1)
+            await P2PInterruptJob.perform(peer_address)
+
+        # wait for job to end...
+        while True:
+            status: JobStatus = rti.get_job_status(job.id)
+
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED , JobStatus.State.FAILED]:
+                return status
+
+            await asyncio.sleep(0.5)
 
 
-def run_job_cmd(job_path: str, host: str, port: int) -> None:
-    cmd = JobRunner()
-    args = {
-        'job_path': job_path,
-        'proc_path': examples_path,
-        'proc_name': 'example-processor',
-        'rest_address': f"{host}:{port}"
-    }
-    cmd.execute(args)
-
-
-def run_job_cmd_noname(job_path: str, host: str, port: int) -> None:
-    cmd = JobRunner()
-    args = {
-        'job_path': job_path,
-        'proc_path': os.path.join(examples_path, 'adapters', 'proc_example'),
-        'rest_address': f"{host}:{port}"
-    }
-    cmd.execute(args)
+def run_job_cmd(p2p_address_pub: str, p2p_address_sec: str, proc_path: str, job_path: str) -> None:
+    try:
+        cmd = JobRunner()
+        args = {
+            'p2p_address_pub': p2p_address_pub,
+            'p2p_address_sec': p2p_address_sec,
+            'proc_path': proc_path,
+            'job_path': job_path
+        }
+        cmd.execute(args)
+    except Exception as e:
+        trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+        print(trace)
 
 
 class ProcessorRunner(threading.Thread, ProgressListener):
@@ -938,33 +1012,6 @@ class ProcessorRunner(threading.Thread, ProgressListener):
             return self._job_status
 
 
-def wait_for_job_runner(job_path: str, rest_address: (str, int)) -> Tuple[Optional[JobResult], Optional[JobStatus]]:
-    job_exitcode_path = os.path.join(job_path, 'job.exitcode')
-    job_status_path = os.path.join(job_path, 'job.status')
-    proxy = JobRESTProxy(rest_address)
-    while True:
-        status: JobStatus = proxy.job_status()
-        if status is None:
-            # is there a job.exitcode and runner.exitcode file?
-            if os.path.isfile(job_exitcode_path):
-                with open(job_exitcode_path, 'r') as f:
-                    job_result = JobResult.model_validate(json.load(f))
-
-                if os.path.isfile(job_status_path):
-                    with open(job_status_path, 'r') as f:
-                        status = JobStatus.model_validate(json.load(f))
-
-                return job_result, status
-
-            else:
-                pass
-
-        else:
-            pass
-
-        time.sleep(0.5)
-
-
 def test_job_worker_done(temp_dir):
     job_id = 'abcd1234_00'
     job_path = os.path.join(temp_dir, job_id)
@@ -1045,335 +1092,128 @@ def test_job_worker_error(temp_dir):
     assert "ValueError: invalid literal for int() with base 10: 'sdf'" in result.trace
 
 
-def test_cli_runner_success_by_value(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare the job folder
+@pytest.mark.asyncio
+async def test_cli_runner_success_by_value(temp_dir, session_node):
+    a: int = 1
+    b: int = 1
     job_id = '398h36g3_00'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=1, b=1
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 100
-    assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_failing_validation(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare the job folder
+@pytest.mark.asyncio
+async def test_cli_runner_failing_validation(temp_dir, session_node):
+    a: int = {'wrong': 55}
+    b: int = 1
     job_id = '398h36g3_01'
-    job_path = prepare_full_job_folder(temp_dir, session_node, session_node.identity, deployed_test_processor, job_id,
-                                       a={'wrong': 55}, b=1)
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'InvalidJSONDataObjectError' in job_result.trace
+    assert 'Data object JSON content does not comply' in status.errors[0].exception.reason
 
 
-def test_cli_runner_success_by_reference(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
+@pytest.mark.asyncio
+async def test_cli_runner_success_by_reference(temp_dir, session_node):
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
-
-    # prepare the job folder
     job_id = '398h36g3_02'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 100
-    assert job_result.exitcode == ExitCode.DONE
 
 
-def test_cli_runner_failing_no_access(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor, extra_keystores
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
+@pytest.mark.asyncio
+async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keystores):
     user = extra_keystores[0]
     session_node.db.update_identity(user.identity)
 
-    # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
-
-    # prepare the job folder
     job_id = '398h36g3_03'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, user.identity, deployed_test_processor, job_id, a=a, b=b
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b, user=user.identity)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'AccessNotPermittedError' in job_result.trace
+    trace = status.errors[0].exception.details['trace']
+    assert 'AccessNotPermittedError' in trace
 
 
-def test_cli_runner_failing_no_signature(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare input data objects
+@pytest.mark.asyncio
+async def test_cli_runner_failing_no_signature(temp_dir, session_node):
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
-
-    # prepare the job folder
     job_id = '398h36g3_04'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'MissingUserSignatureError' in job_result.trace
+    trace = status.errors[0].exception.details['trace']
+    assert 'MissingUserSignatureError' in trace
 
 
-def test_cli_runner_failing_no_data_object(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare input data objects
+@pytest.mark.asyncio
+async def test_cli_runner_failing_no_data_object(temp_dir, session_node):
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
+    job_id = '398h36g3_05'
 
     # delete the object so it can't be found
     proxy = DORProxy(session_node.rest.address())
     proxy.delete_data_object(b.obj_id, session_node.keystore)
 
-    # prepare the job folder
-    job_id = '398h36g3_05'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
-    )
-
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'UnresolvedInputDataObjectsError' in job_result.trace
+    trace = status.errors[0].exception.details['trace']
+    assert 'UnresolvedInputDataObjectsError' in trace
 
 
-def test_cli_runner_failing_wrong_data_type(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare input data objects
+@pytest.mark.asyncio
+async def test_cli_runner_failing_wrong_data_type(temp_dir, session_node):
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='wrong')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
-
-    # prepare the job folder
     job_id = '398h36g3_06'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'MismatchingDataTypeOrFormatError' in job_result.trace
+    trace = status.errors[0].exception.details['trace']
+    assert 'MismatchingDataTypeOrFormatError' in trace
 
 
-def test_cli_runner_failing_wrong_data_format(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare input data objects
-    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_format='wrong')
+@pytest.mark.asyncio
+async def test_cli_runner_failing_wrong_data_format(temp_dir, session_node):
+    a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='data_format')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
-
-    # prepare the job folder
     job_id = '398h36g3_07'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=a, b=b
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b)
     assert status.progress == 0
-    assert job_result.exitcode == ExitCode.ERROR
-    assert 'MismatchingDataTypeOrFormatError' in job_result.trace
+    trace = status.errors[0].exception.details['trace']
+    assert 'MismatchingDataTypeOrFormatError' in trace
 
 
-def test_cli_runner_success_no_name(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare the job folder
+@pytest.mark.asyncio
+async def test_cli_runner_cancelled(temp_dir, session_node):
+    a: int = 5
+    b: int = 6
     job_id = '398h36g3_08'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=1, b=1
-    )
 
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd_noname, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
-    assert status.progress == 100
-    assert job_result.exitcode == ExitCode.DONE
+    # execute the job
+    status = await execute_job(session_node, job_id, a, b, cancel=True)
+    assert len(status.errors) == 0
+    assert status.progress < 100
+    assert status.state == JobStatus.State.CANCELLED
 
 
-def test_cli_runner_cancelled(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # prepare the job folder
-    job_id = '398h36g3_09'
-    job_path = prepare_full_job_folder(
-        temp_dir, session_node, session_node.identity, deployed_test_processor, job_id, a=5, b=6
-    )
-
-    # determine REST address
-    rest_address = PortMaster.generate_rest_address()
-
-    # execute the job runner command
-    job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-    job_process.start()
-
-    # try to cancel the job
-    proxy = JobRESTProxy(rest_address)
-    while proxy.job_cancel() is None:
-       time.sleep(1)
-
-    # wait for the job to be finished
-    job_result, status = wait_for_job_runner(job_path, rest_address)
-    assert job_result.exitcode == ExitCode.INTERRUPTED
-
-
-def test_cli_runner_success_non_dor_target(
-        docker_available, github_credentials_available, temp_dir, session_node, deployed_test_processor
-):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
+@pytest.mark.asyncio
+async def test_cli_runner_success_non_dor_target(temp_dir, session_node):
     # create a new node as DOR target
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
@@ -1387,31 +1227,16 @@ def test_cli_runner_success_non_dor_target(
         )
 
         #  make exec-only node known to node
-        target_node.join_network(session_node.rest.address())
+        await P2PJoinNetwork(target_node).perform(session_node.info)
         time.sleep(1)
 
-        # prepare input data objects
         a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
         b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
+        job_id = '398h36g3_09'
 
-        # prepare the job folder
-        job_id = '398h36g3_10'
-        job_path = prepare_full_job_folder(temp_dir, session_node, session_node.identity, deployed_test_processor,
-                                           job_id, a=a, b=b, target_node=target_node)
-
-        # determine REST address
-        rest_address = PortMaster.generate_rest_address()
-
-        # execute the job runner command
-        job_process = multiprocessing.Process(target=run_job_cmd, args=(job_path, rest_address[0], rest_address[1]))
-        job_process.start()
-
-        # wait for the job to be finished
-        job_result, status = wait_for_job_runner(job_path, rest_address)
-        assert status.state == JobStatus.State.FAILED
-        assert "Pushing output data object 'c' failed." in status.errors[0].message
-        assert status.errors[0].exception.reason == 'Target node does not support DOR capabilities'
-        assert job_result.exitcode == ExitCode.ERROR
+        # execute the job
+        status = await execute_job(session_node, job_id, a, b, target_node=target_node)
+        assert 'Target node does not support DOR capabilities' in status.errors[0].exception.reason
 
         # shutdown the target node
         target_node.shutdown()

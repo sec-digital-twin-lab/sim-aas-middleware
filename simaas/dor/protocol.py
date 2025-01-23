@@ -1,12 +1,17 @@
 import json
 import os
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 
 from pydantic import BaseModel
+from simaas.core.helpers import hash_file_content
+
+from simaas.core.identity import Identity
+
+from simaas.core.keystore import Keystore
 
 from simaas.core.logging import Logging
-from simaas.dor.exceptions import FetchDataObjectFailedError
-from simaas.dor.schemas import DataObject
+from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
+from simaas.dor.schemas import DataObject, DataObjectRecipe
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PProtocol, P2PAttachment, P2PAddress, p2p_request
 
@@ -46,7 +51,13 @@ class P2PLookupDataObject(P2PProtocol):
     async def handle(
             self, request: LookupRequest, _: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
-        records: Dict[str, DataObject] = {obj_id: self._node.dor.get_meta(obj_id) for obj_id in request.obj_ids}
+        # search for the requested data objects and see if we have any of them
+        records: Dict[str, DataObject] = {}
+        for obj_id in request.obj_ids:
+            meta: Optional[DataObject] = self._node.dor.get_meta(obj_id)
+            if meta:
+                records[obj_id] = meta
+
         return LookupResponse(records=records), None
 
     @staticmethod
@@ -180,3 +191,105 @@ class P2PFetchDataObject(P2PProtocol):
     @staticmethod
     def response_type():
         return FetchResponse
+
+
+class PushRequest(BaseModel):
+    owner_iid: str
+    creators_iid: List[str]
+    data_type: str
+    data_format: str
+    access_restricted: bool
+    content_encrypted: bool
+    license: DataObject.License
+    recipe: Optional[DataObjectRecipe]
+    tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]]
+
+
+class PushResponse(BaseModel):
+    successful: bool
+    meta: Optional[DataObject]
+    details: Optional[Dict]
+
+
+class P2PPushDataObject(P2PProtocol):
+    NAME = 'dor-push'
+
+    def __init__(self, node) -> None:
+        super().__init__(P2PPushDataObject.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(
+            cls, p2p_address: str, keystore: Keystore, peer: Identity, content_path: str,
+            data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
+            access_restricted: bool, content_encrypted: bool, license: DataObject.License,
+            recipe: Optional[DataObjectRecipe] = None,
+            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None
+    ) -> DataObject:
+        peer_address = P2PAddress(
+            address=p2p_address,
+            curve_secret_key=keystore.curve_secret_key(),
+            curve_public_key=keystore.curve_public_key(),
+            curve_server_key=peer.c_public_key
+        )
+
+        message = PushRequest(
+            owner_iid=owner_iid,
+            creators_iid=creators_iid,
+            data_type=data_type,
+            data_format=data_format,
+            access_restricted=access_restricted,
+            content_encrypted=content_encrypted,
+            license=license,
+            recipe=recipe,
+            tags=tags
+        )
+
+        attachment = P2PAttachment(
+            name='content',
+            path=content_path
+        )
+
+        reply: Tuple[Optional[BaseModel], Optional[P2PAttachment]] = await p2p_request(
+            peer_address, cls.NAME, message, reply_type=PushResponse, attachment=attachment
+        )
+        reply: PushResponse = reply[0]  # casting for PyCharm
+
+        if reply.successful:
+            return reply.meta
+
+        else:
+            raise PushDataObjectFailedError(details=reply.details)
+
+    async def handle(
+            self, request: PushRequest, content_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+        # does the node have a DOR?
+        if self._node.dor is None:
+            return PushResponse(
+                successful=False, meta=None, details={
+                    'reason': 'node has no DOR',
+                    'user_iid': request.user_iid,
+                    'node_iid': self._node.identity.id
+                }
+            ), None
+
+        # calculate content hash
+        c_hash: str = hash_file_content(content_path).hex()
+
+        # add the data object
+        meta = self._node.dor.add_(
+            content_path, c_hash, request.data_type, request.data_format, request.owner_iid,
+            request.creators_iid, request.access_restricted, request.content_encrypted, request.license,
+            request.recipe, request.tags
+        )
+
+        return PushResponse(successful=True, meta=meta, details=None), None
+
+    @staticmethod
+    def request_type():
+        return PushRequest
+
+    @staticmethod
+    def response_type():
+        return PushResponse

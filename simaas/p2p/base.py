@@ -37,7 +37,7 @@ class P2PAddress(BaseModel):
 
 async def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
-        attachment: Optional[P2PAttachment] = None, download_path: Optional[str] = None, timeout: int = 500
+        attachment: Optional[P2PAttachment] = None, download_path: Optional[str] = None, timeout: int = 5000
 ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
     try:
         # create socket connection
@@ -148,7 +148,7 @@ class P2PProtocol(abc.ABC):
                     with open(request_attachment_path, 'wb') as f:
                         while True:
                             msg: List[bytes] = await socket.recv_multipart()
-                            chunk = msg[0]
+                            chunk = msg[1]
                             if chunk == b'EOF':
                                 break
                             f.write(chunk)
@@ -196,6 +196,7 @@ class P2PProtocol(abc.ABC):
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            print(f"Unexpected P2P error: {trace}")
             raise UnexpectedP2PError(details={
                 'trace': trace
             })
