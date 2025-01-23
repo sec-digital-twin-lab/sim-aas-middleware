@@ -13,7 +13,7 @@ from simaas.core.logging import Logging
 from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
 from simaas.dor.schemas import DataObject, DataObjectRecipe
 from simaas.nodedb.schemas import NodeInfo
-from simaas.p2p.base import P2PProtocol, P2PAttachment, P2PAddress, p2p_request
+from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
 logger = Logging.get('dor.protocol')
 
@@ -30,7 +30,7 @@ class P2PLookupDataObject(P2PProtocol):
     NAME = 'dor-lookup'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PLookupDataObject.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
@@ -49,8 +49,8 @@ class P2PLookupDataObject(P2PProtocol):
         return reply.records
 
     async def handle(
-            self, request: LookupRequest, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: LookupRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # search for the requested data objects and see if we have any of them
         records: Dict[str, DataObject] = {}
         for obj_id in request.obj_ids:
@@ -85,7 +85,7 @@ class P2PFetchDataObject(P2PProtocol):
     NAME = 'dor-fetch'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PFetchDataObject.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
@@ -116,8 +116,8 @@ class P2PFetchDataObject(P2PProtocol):
             raise FetchDataObjectFailedError(details=reply.details)
 
     async def handle(
-            self, request: FetchRequest, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # check if we have that data object
         meta = self._node.dor.get_meta(request.obj_id)
         if not meta:
@@ -181,7 +181,7 @@ class P2PFetchDataObject(P2PProtocol):
 
         return (
             FetchResponse(successful=True, meta=meta, details=None),
-            P2PAttachment(name=request.obj_id, path=content_path)
+            content_path
         )
 
     @staticmethod
@@ -215,7 +215,7 @@ class P2PPushDataObject(P2PProtocol):
     NAME = 'dor-push'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PPushDataObject.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     @classmethod
@@ -245,13 +245,8 @@ class P2PPushDataObject(P2PProtocol):
             tags=tags
         )
 
-        attachment = P2PAttachment(
-            name='content',
-            path=content_path
-        )
-
-        reply: Tuple[Optional[BaseModel], Optional[P2PAttachment]] = await p2p_request(
-            peer_address, cls.NAME, message, reply_type=PushResponse, attachment=attachment
+        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+            peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path
         )
         reply: PushResponse = reply[0]  # casting for PyCharm
 
@@ -262,8 +257,8 @@ class P2PPushDataObject(P2PProtocol):
             raise PushDataObjectFailedError(details=reply.details)
 
     async def handle(
-            self, request: PushRequest, content_path: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: PushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # does the node have a DOR?
         if self._node.dor is None:
             return PushResponse(
@@ -275,11 +270,11 @@ class P2PPushDataObject(P2PProtocol):
             ), None
 
         # calculate content hash
-        c_hash: str = hash_file_content(content_path).hex()
+        c_hash: str = hash_file_content(attachment_path).hex()
 
         # add the data object
         meta = self._node.dor.add_(
-            content_path, c_hash, request.data_type, request.data_format, request.owner_iid,
+            attachment_path, c_hash, request.data_type, request.data_format, request.owner_iid,
             request.creators_iid, request.access_restricted, request.content_encrypted, request.license,
             request.recipe, request.tags
         )

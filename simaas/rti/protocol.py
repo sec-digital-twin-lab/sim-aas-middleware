@@ -13,7 +13,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.dor.schemas import GitProcessorPointer
-from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress, P2PAttachment
+from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 
 logger = Logging.get('rti.protocol')
 
@@ -56,7 +56,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
         for attempt in range(max_attempts):
             try:
                 # send the request and wait for the reply
-                reply: Tuple[Optional[RunnerHandshakeResponse], Optional[P2PAttachment]] = await p2p_request(
+                reply: Tuple[Optional[RunnerHandshakeResponse], Optional[str]] = await p2p_request(
                     peer_address, cls.NAME, message, reply_type=RunnerHandshakeResponse
                 )
                 reply: RunnerHandshakeResponse = reply[0]
@@ -78,7 +78,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
     async def handle(
             self, request: RunnerHandshakeRequest, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # just in case there is multiple requests coming in
         with self._mutex:
             if self._thread is None:
@@ -142,7 +142,7 @@ class P2PPushJob(P2PProtocol):
 
     async def handle(
             self, request: PushJobRequest, download_path: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._runner.on_job_update(request.job)
         return None, None
 
@@ -175,7 +175,7 @@ class P2PPushJobStatus(P2PProtocol):
 
     async def handle(
             self, request: JobStatusRequest, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._rti.update_job_status(request.job_id, request.job_status)
         return None, None
 
@@ -215,7 +215,7 @@ class P2PInterruptJob(P2PProtocol):
 
     async def handle(
             self, request: PushJobRequest, download_path: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._runner.on_job_cancel()
         return None, None
 

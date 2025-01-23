@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
-from simaas.p2p.base import P2PProtocol, P2PAttachment, p2p_request, P2PAddress
+from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 from simaas.p2p.exceptions import PeerUnavailableError
 from simaas.nodedb.schemas import NodeInfo
 
@@ -26,7 +26,7 @@ class P2PUpdateIdentity(P2PProtocol):
     NAME = 'nodedb-update-id'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PUpdateIdentity.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo) -> Identity:
@@ -73,8 +73,9 @@ class P2PUpdateIdentity(P2PProtocol):
         return result
 
     async def handle(
-            self, request: UpdateIdentityMessage, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: UpdateIdentityMessage, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         logger.info(f"Received identity update from node: {request.identity.name} | {request.identity.id}")
         self._node.db.update_identity(request.identity)
         return UpdateIdentityMessage(identity=self._node.identity), None
@@ -97,7 +98,7 @@ class P2PJoinNetwork(P2PProtocol):
     NAME = 'nodedb-join'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PJoinNetwork.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, boot_node: NodeInfo) -> NodeInfo:
@@ -162,8 +163,8 @@ class P2PJoinNetwork(P2PProtocol):
         return boot_node
 
     async def handle(
-            self, request: PeerUpdateMessage, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # update the db information about the originator
         self._node.db.update_identity(request.origin.identity)
         self._node.db.update_network(request.origin)
@@ -200,7 +201,7 @@ class P2PLeaveNetwork(P2PProtocol):
     NAME = 'nodedb-leave'
 
     def __init__(self, node) -> None:
-        super().__init__(P2PLeaveNetwork.NAME)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, blocking: bool = False) -> None:
@@ -220,8 +221,8 @@ class P2PLeaveNetwork(P2PProtocol):
                     asyncio.create_task(p2p_request(peer_address, self.NAME, message))
 
     async def handle(
-            self, request: PeerLeaveMessage, _: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[P2PAttachment]]:
+            self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._node.db.update_identity(request.origin.identity)
         self._node.db.remove_node_by_id(request.origin.identity)
         return None, None
