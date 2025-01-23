@@ -805,4 +805,4 @@ class JobRunner(CLICommand, ProgressListener):
             self._write_exitcode(ExitCode.ERROR, e)
 
         finally:
-            self._status_handler.join(5000)
+            self._status_handler.join(5)
