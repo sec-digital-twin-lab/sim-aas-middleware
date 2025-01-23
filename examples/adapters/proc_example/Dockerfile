@@ -26,6 +26,8 @@ RUN /venv/bin/pip install --upgrade pip setuptools
 RUN /venv/bin/pip install -r ./requirements.txt
 RUN /venv/bin/pip install /sim-aas-middleware
 
+RUN mkdir /job
+
 EXPOSE 6000
 EXPOSE 6001
 
