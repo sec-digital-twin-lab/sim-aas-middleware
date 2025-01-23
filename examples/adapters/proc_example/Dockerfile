@@ -31,4 +31,4 @@ RUN mkdir /job
 EXPOSE 6000
 EXPOSE 6001
 
-ENTRYPOINT ["/venv/bin/simaas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--p2p-address-pub", "tcp://0.0.0.0:6000", "--p2p-address-sec", "tcp://0.0.0.0:6001"]
+ENTRYPOINT ["/venv/bin/simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--p2p-address-pub", "tcp://0.0.0.0:6000", "--p2p-address-sec", "tcp://0.0.0.0:6001"]
