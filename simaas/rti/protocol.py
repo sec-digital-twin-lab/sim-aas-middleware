@@ -77,7 +77,8 @@ class P2PRunnerPerformHandshake(P2PProtocol):
         raise RTIException(f"Handshake failed after {max_attempts} attempts.")
 
     async def handle(
-            self, request: RunnerHandshakeRequest, _: Optional[str] = None
+            self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # just in case there is multiple requests coming in
         with self._mutex:
@@ -141,7 +142,7 @@ class P2PPushJob(P2PProtocol):
         raise RTIException(f"Uploading job input failed after {max_attempts} attempts.")
 
     async def handle(
-            self, request: PushJobRequest, download_path: Optional[str] = None
+            self, request: PushJobRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._runner.on_job_update(request.job)
         return None, None
@@ -174,7 +175,7 @@ class P2PPushJobStatus(P2PProtocol):
         )
 
     async def handle(
-            self, request: JobStatusRequest, _: Optional[str] = None
+            self, request: JobStatusRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._rti.update_job_status(request.job_id, request.job_status)
         return None, None
@@ -214,7 +215,7 @@ class P2PInterruptJob(P2PProtocol):
         raise RTIException(f"Uploading job input failed after {max_attempts} attempts.")
 
     async def handle(
-            self, request: PushJobRequest, download_path: Optional[str] = None
+            self, request: PushJobRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._runner.on_job_cancel()
         return None, None

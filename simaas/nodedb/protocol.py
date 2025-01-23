@@ -209,7 +209,7 @@ class P2PLeaveNetwork(P2PProtocol):
         for peer in self._node.db.get_network():
             if peer.identity.id != message.origin.identity.id:
                 peer_address = P2PAddress(
-                    address=peer.p2p_address,
+                    address=peer.p2p_address_sec,
                     curve_secret_key=self._node.keystore.curve_secret_key(),
                     curve_public_key=self._node.keystore.curve_public_key(),
                     curve_server_key=peer.identity.c_public_key
