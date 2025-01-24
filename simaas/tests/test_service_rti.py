@@ -428,7 +428,7 @@ def test_provenance(
 
         # wait until the job is done
         status: JobStatus = rti.get_job_status(job.id)
-        while not status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+        while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             status: JobStatus = rti.get_job_status(job.id)
             time.sleep(0.5)
 
