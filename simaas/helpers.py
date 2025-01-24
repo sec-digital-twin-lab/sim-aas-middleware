@@ -174,6 +174,10 @@ def docker_kill_job_container(container_id: str) -> None:
     container = client.containers.get(container_id)
     container.kill()
 
+def docker_delete_container(container_id: str) -> None:
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    container.remove()
 
 def docker_container_running(container_id: str) -> bool:
     client = docker.from_env()

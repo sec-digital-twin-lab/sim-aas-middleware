@@ -808,112 +808,113 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 
 
 async def execute_job(
-        custodian: Node, job_id: str, a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
+        wd_parent_path: str, custodian: Node, job_id: str, a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
         user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
 ) -> JobStatus:
+    wd_path = os.path.join(wd_parent_path, job_id)
+    os.makedirs(wd_path)
+
     user = user if user else custodian.identity
     rti: DefaultRTIService = custodian.rti
 
-    with tempfile.TemporaryDirectory() as wd_path:
-        # determine P2P address
-        p2p_address_pub = PortMaster.generate_p2p_address()
-        p2p_address_sec = PortMaster.generate_p2p_address()
+    # determine P2P address
+    p2p_address_pub = PortMaster.generate_p2p_address()
+    p2p_address_sec = PortMaster.generate_p2p_address()
 
-        # prepare proc path
-        proc_path = os.path.join(wd_path, 'processor')
-        prepare_proc_path(proc_path)
+    # prepare proc path
+    proc_path = os.path.join(wd_path, 'processor')
+    prepare_proc_path(proc_path)
 
-        # execute the job runner command
-        job_process = threading.Thread(target=run_job_cmd, args=(p2p_address_pub, p2p_address_sec, proc_path, wd_path))
-        job_process.start()
+    # execute the job runner command
+    thread = threading.Thread(target=run_job_cmd, args=(p2p_address_pub, p2p_address_sec, proc_path, wd_path))
+    thread.start()
 
-        # wait until the socket can be reached
-        latency, attempt = await P2PLatency.perform_unsecured(p2p_address_pub)
-        print(f"[1] needed {attempt} attempts to test latency: {latency} msec")
+    # wait until the socket can be reached
+    latency, attempt = await P2PLatency.perform_unsecured(p2p_address_pub)
+    print(f"[1] needed {attempt} attempts to test latency: {latency} msec")
 
-        # perform the handshake
-        response: Tuple[GitProcessorPointer, Identity] = \
-            await P2PRunnerPerformHandshake.perform(
-                p2p_address_pub, custodian.keystore, custodian.p2p.address()
-            )
-        gpp: GitProcessorPointer = response[0]
-        peer: Identity = response[1]
-
-        ##########
-
-        if a is None:
-            a = {'v': 1}
-        elif isinstance(a, (int, str)):
-            a = {'v': a}
-
-        if b is None:
-            b = {'v': 1}
-        elif isinstance(b, (int, str)):
-            b = {'v': b}
-
-        a = Task.InputReference(name='a', type='reference', obj_id=a.obj_id, user_signature=sig_a, c_hash=None) \
-            if isinstance(a, DataObject) else Task.InputValue(name='a', type='value', value=a)
-
-        b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=sig_b, c_hash=None) \
-            if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value=b)
-
-        c = Task.Output(
-            name='c',
-            owner_iid=user.id,
-            restricted_access=False, content_encrypted=False,
-            target_node_iid=target_node.identity.id if target_node else custodian.identity.id
+    # perform the handshake
+    response: Tuple[GitProcessorPointer, Identity] = \
+        await P2PRunnerPerformHandshake.perform(
+            p2p_address_pub, custodian.keystore, custodian.p2p.address()
         )
+    gpp: GitProcessorPointer = response[0]
+    peer: Identity = response[1]
 
-        task = Task(proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='')
+    ##########
 
-        # create job
-        job = Job(
-            id=job_id, task=task, retain=False, custodian=custodian.info, proc_name=gpp.proc_descriptor.name,
-            t_submitted=0
-        )
-        status = JobStatus(
-            state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
-        )
+    if a is None:
+        a = {'v': 1}
+    elif isinstance(a, (int, str)):
+        a = {'v': a}
 
-        with rti._session_maker() as session:
-            record = DBJobInfo(id=job.id, proc_id=task.proc_id, user_iid=user.id,
-                               p2p_address_pub=p2p_address_pub, p2p_address_sec=p2p_address_sec,
-                               status=status.model_dump(), job=job.model_dump(),
-                               container_id="0")
-            session.add(record)
-            session.commit()
+    if b is None:
+        b = {'v': 1}
+    elif isinstance(b, (int, str)):
+        b = {'v': b}
 
-        ##########
+    a = Task.InputReference(name='a', type='reference', obj_id=a.obj_id, user_signature=sig_a, c_hash=None) \
+        if isinstance(a, DataObject) else Task.InputValue(name='a', type='value', value=a)
 
-        # create P2P address
-        peer_address = P2PAddress(
-            address=p2p_address_sec,
-            curve_secret_key=custodian.keystore.curve_secret_key(),
-            curve_public_key=custodian.keystore.curve_public_key(),
-            curve_server_key=peer.c_public_key
-        )
+    b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=sig_b, c_hash=None) \
+        if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value=b)
 
-        # wait until the socket can be reached
-        latency, attempt = await P2PLatency.perform(peer_address)
-        print(f"[2] needed {attempt} attempts to test latency: {latency} msec")
+    c = Task.Output(
+        name='c',
+        owner_iid=user.id,
+        restricted_access=False, content_encrypted=False,
+        target_node_iid=target_node.identity.id if target_node else custodian.identity.id
+    )
 
-        # push the job to the runner -> this will trigger execution
-        await P2PPushJob.perform(peer_address, job)
+    task = Task(proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='')
 
-        # cancel if requested
-        if cancel:
-            await asyncio.sleep(1)
-            await P2PInterruptJob.perform(peer_address)
+    # create job
+    job = Job(
+        id=job_id, task=task, retain=False, custodian=custodian.info, proc_name=gpp.proc_descriptor.name,
+        t_submitted=0
+    )
+    status = JobStatus(
+        state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
+    )
 
-        # wait for job to end...
-        while True:
-            status: JobStatus = rti.get_job_status(job.id)
+    with rti._session_maker() as session:
+        record = DBJobInfo(id=job.id, proc_id=task.proc_id, user_iid=user.id,
+                           p2p_address_pub=p2p_address_pub, p2p_address_sec=p2p_address_sec,
+                           status=status.model_dump(), job=job.model_dump(),
+                           container_id="0", peer=peer.model_dump())
+        session.add(record)
+        session.commit()
 
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED , JobStatus.State.FAILED]:
-                return status
+    ##########
 
-            await asyncio.sleep(0.5)
+    # create P2P address
+    peer_address = P2PAddress(
+        address=p2p_address_sec,
+        curve_secret_key=custodian.keystore.curve_secret_key(),
+        curve_public_key=custodian.keystore.curve_public_key(),
+        curve_server_key=peer.c_public_key
+    )
 
+    # wait until the socket can be reached
+    latency, attempt = await P2PLatency.perform(peer_address)
+    print(f"[2] needed {attempt} attempts to test latency: {latency} msec")
+
+    # push the job to the runner -> this will trigger execution
+    await P2PPushJob.perform(peer_address, job)
+
+    # cancel if requested
+    if cancel:
+        await asyncio.sleep(1)
+        await P2PInterruptJob.perform(peer_address)
+
+    # wait for job to end...
+    while True:
+        status: JobStatus = rti.get_job_status(job.id)
+
+        if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED , JobStatus.State.FAILED]:
+            return status
+
+        await asyncio.sleep(0.5)
 
 def run_job_cmd(p2p_address_pub: str, p2p_address_sec: str, proc_path: str, job_path: str) -> None:
     try:
@@ -1099,7 +1100,7 @@ async def test_cli_runner_success_by_value(temp_dir, session_node):
     job_id = '398h36g3_00'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 100
 
 
@@ -1110,7 +1111,7 @@ async def test_cli_runner_failing_validation(temp_dir, session_node):
     job_id = '398h36g3_01'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     assert 'Data object JSON content does not comply' in status.errors[0].exception.reason
 
@@ -1123,7 +1124,7 @@ async def test_cli_runner_success_by_reference(temp_dir, session_node):
     job_id = '398h36g3_02'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 100
 
 
@@ -1137,7 +1138,7 @@ async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keysto
     job_id = '398h36g3_03'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b, user=user.identity)
+    status = await execute_job(temp_dir, session_node, job_id, a, b, user=user.identity)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'AccessNotPermittedError' in trace
@@ -1150,7 +1151,7 @@ async def test_cli_runner_failing_no_signature(temp_dir, session_node):
     job_id = '398h36g3_04'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'MissingUserSignatureError' in trace
@@ -1167,7 +1168,7 @@ async def test_cli_runner_failing_no_data_object(temp_dir, session_node):
     proxy.delete_data_object(b.obj_id, session_node.keystore)
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'UnresolvedInputDataObjectsError' in trace
@@ -1180,7 +1181,7 @@ async def test_cli_runner_failing_wrong_data_type(temp_dir, session_node):
     job_id = '398h36g3_06'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'MismatchingDataTypeOrFormatError' in trace
@@ -1193,7 +1194,7 @@ async def test_cli_runner_failing_wrong_data_format(temp_dir, session_node):
     job_id = '398h36g3_07'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b)
+    status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'MismatchingDataTypeOrFormatError' in trace
@@ -1206,22 +1207,22 @@ async def test_cli_runner_cancelled(temp_dir, session_node):
     job_id = '398h36g3_08'
 
     # execute the job
-    status = await execute_job(session_node, job_id, a, b, cancel=True)
+    status = await execute_job(temp_dir, session_node, job_id, a, b, cancel=True)
     assert len(status.errors) == 0
     assert status.progress < 100
     assert status.state == JobStatus.State.CANCELLED
 
 
 @pytest.mark.asyncio
-async def test_cli_runner_success_non_dor_target(temp_dir, session_node):
+async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
     # create a new node as DOR target
-    with tempfile.TemporaryDirectory() as tempdir:
+    with tempfile.TemporaryDirectory() as target_node_storage_path:
         local_ip = determine_local_ip()
         rest_address = PortMaster.generate_rest_address(host=local_ip)
         p2p_address = PortMaster.generate_p2p_address(host=local_ip)
         target_node = DefaultNode.create(
-            keystore=Keystore.new('dor-target'), storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=p2p_address,
+            keystore=Keystore.new('dor-target'), storage_path=target_node_storage_path,
+            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, enable_dor=False, enable_rti=True,
             retain_job_history=True, strict_deployment=False, job_concurrency=True
         )
@@ -1235,7 +1236,7 @@ async def test_cli_runner_success_non_dor_target(temp_dir, session_node):
         job_id = '398h36g3_09'
 
         # execute the job
-        status = await execute_job(session_node, job_id, a, b, target_node=target_node)
+        status = await execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
         assert 'Target node does not support DOR capabilities' in status.errors[0].exception.reason
 
         # shutdown the target node
