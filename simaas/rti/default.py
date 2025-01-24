@@ -25,11 +25,12 @@ from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
     docker_kill_job_container, docker_container_running
 from simaas.p2p.base import P2PAddress
+from simaas.p2p.protocol import P2PLatency
 from simaas.rti.api import RTIService
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
-from simaas.rti.protocol import P2PInterruptJob
+from simaas.rti.protocol import P2PInterruptJob, P2PRunnerPerformHandshake, P2PPushJob
 from simaas.rti.schemas import Processor, Job, Task, JobStatus
-from simaas.dor.schemas import GitProcessorPointer, DataObject
+from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
 
@@ -50,10 +51,12 @@ class DBJobInfo(Base):
     id = Column(String(64), primary_key=True)
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
-    p2p_address = Column(String(64), nullable=False)
+    p2p_address_pub = Column(String(64), nullable=False)
+    p2p_address_sec = Column(String(64), nullable=False)
     status = Column(NestedMutableJson, nullable=False)
     job = Column(NestedMutableJson, nullable=False)
     container_id = Column(String(16), nullable=False)
+    peer = Column(NestedMutableJson, nullable=True)
 
 
 class DefaultRTIService(RTIService):
@@ -77,16 +80,10 @@ class DefaultRTIService(RTIService):
         os.makedirs(self._procs_path, exist_ok=True)
 
         # initialise database things
-        logger.info(f"[init] using DB file at {db_path}")
+        logger.info(f"[init] using database at {db_path}")
         self._engine = create_engine(db_path)
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
-
-    def job_descriptor_path(self, job_id: str) -> str:
-        return os.path.join(self._jobs_path, job_id, 'job_descriptor.json')
-
-    def job_status_path(self, job_id: str) -> str:
-        return os.path.join(self._jobs_path, job_id, 'job_status.json')
 
     def _perform_deployment(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
@@ -140,9 +137,21 @@ class DefaultRTIService(RTIService):
                     commit_id = proc_obj.tags['commit_id']
                     clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
-                    # build the image
                     proc_path = proc_obj.tags['proc_path']
                     proc_path = os.path.join(repo_path, proc_path)
+
+                    # create the GPP descriptor
+                    gpp: GitProcessorPointer = GitProcessorPointer(
+                        repository=proc_obj.tags['repository'],
+                        commit_id=proc_obj.tags['commit_id'],
+                        proc_path=proc_obj.tags['proc_path'],
+                        proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
+                    )
+                    gpp_path = os.path.join(proc_path, 'gpp.json')
+                    with open(gpp_path, 'w') as f:
+                        json.dump(gpp.model_dump(), f, indent=2)
+
+                    # build the image
                     build_processor_image(proc_path, image_name, credentials=credentials)
 
             # update processor object
@@ -199,27 +208,85 @@ class DefaultRTIService(RTIService):
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
 
-    def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
-        def is_port_free(_host: str, _port: int) -> bool:
+    def _perform_job_initialise(self, p2p_address_pub: str, p2p_address_sec: str, job: Job, container_id: str) -> None:
+        try:
+            custodian = self._node
+
+            logger.info(f"[job:{job.id}] BEGIN initialising job...")
+
+            # wait until the socket can be reached
+            latency, attempt = asyncio.run(P2PLatency.perform_unsecured(p2p_address_pub))
+            logger.info(f"[job:{job.id}] needed {attempt} attempts to test latency: {latency} msec")
+
+            # perform the handshake
+            response: Tuple[GitProcessorPointer, Identity] = asyncio.run(P2PRunnerPerformHandshake.perform(
+                p2p_address_pub, custodian.keystore, custodian.p2p.address()
+            ))
+            peer: Identity = response[1]
+
+            # update the peer information in the database
+            with self._session_maker() as session:
+                record = session.query(DBJobInfo).get(job.id)
+                record.peer = peer.model_dump()
+                session.commit()
+
+            # create P2P address
+            peer_address = P2PAddress(
+                address=p2p_address_sec,
+                curve_secret_key=custodian.keystore.curve_secret_key(),
+                curve_public_key=custodian.keystore.curve_public_key(),
+                curve_server_key=peer.c_public_key
+            )
+
+            # wait until the socket can be reached
+            latency, attempt = asyncio.run(P2PLatency.perform(peer_address))
+            logger.info(f"[job:{job.id}] needed {attempt} attempts to test latency: {latency} msec")
+
+            # push the job to the runner -> this will trigger execution
+            asyncio.run(P2PPushJob.perform(peer_address, job))
+
+            logger.info(f"[job:{job.id}] END initialising job -> OK")
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.info(f"[job:{job.id}] END initialising job -> FAILED: {trace}")
+
+            # something went wrong, kill the container to avoid zombies
+            docker_kill_job_container(container_id)
+
+
+    def _find_available_addresses(self, n: int = 2, max_attempts: int = 100) -> List[Tuple[str, int]]:
+        def is_port_free(_address: Tuple[str, int]) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
                 try:
-                    sock.connect((_host, _port))
+                    sock.connect(_address)
                     return False  # Connection succeeded, port is in use
                 except (socket.timeout, ConnectionRefusedError):
                     return True  # Port is free
 
-        host = self._node.info.rest_address[0]
+        host: str = self._node.info.rest_address[0]
+        addresses: List[Tuple[str, int]] = []
         for i in range(max_attempts):
             # update the most recent port
             with self._mutex:
-                self._most_recent_port = self._most_recent_port + 1 if self._most_recent_port else self._port_range[0]
+                self._most_recent_port = self._most_recent_port + n if self._most_recent_port else self._port_range[0]
                 if self._most_recent_port >= self._port_range[1]:
                     self._most_recent_port = self._port_range[0]
-                port = self._most_recent_port
 
-            if is_port_free(host, port):
-                return host, port
+                # create the addresses
+                for j in range(n):
+                    addresses.append((host, self._most_recent_port + j))
+
+            # test if all addresses are available
+            all_available = True
+            for address in addresses:
+                if not is_port_free(address):
+                    all_available = False
+                    break
+
+            if all_available:
+                return addresses
 
         raise RuntimeError("No free ports found in the specified range.")
 
@@ -370,13 +437,12 @@ class DefaultRTIService(RTIService):
             # noinspection PyTypeChecker
             json.dump(job.model_dump(), f, indent=2)
 
-        # write the gpp descriptor
-        gpp_path = os.path.join(job_path, 'gpp.descriptor')
-        with open(gpp_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(proc.gpp.model_dump(), f, indent=2)
+        # determine P2P addresses
+        p2p_addresses = self._find_available_addresses(n=2)
+        p2p_address_pub: Tuple[str, int] = p2p_addresses[0]
+        p2p_address_sec: Tuple[str, int] = p2p_addresses[1]
 
-        # create the initial job status and write to file
+        # create initial job status and write to file
         status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
                            errors=[], message=None)
         status_path = os.path.join(job_path, 'job.status')
@@ -384,22 +450,28 @@ class DefaultRTIService(RTIService):
             # noinspection PyTypeChecker
             json.dump(status.model_dump(), f, indent=2)
 
-        # determine REST address
-        job_address = self._find_available_job_address()
-
         # start the job container and keep the container id
         logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
-        container_id = docker_run_job_container(proc.image_name, job_path, job_address)
+        container_id = docker_run_job_container(proc.image_name, p2p_address_pub, p2p_address_sec)
 
-        # write the initial job info database record
-        with self._mutex:
-            with self._session_maker() as session:
-                record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                                   p2p_address=f"tcp://{job_address[0]}:{job_address[1]}",
-                                   status=status.model_dump(), job=job.model_dump(),
-                                   container_id=container_id)
-                session.add(record)
-                session.commit()
+        p2p_address_pub: str = f"tcp://{p2p_address_pub[0]}:{p2p_address_pub[1]}"
+        p2p_address_sec: str = f"tcp://{p2p_address_sec[0]}:{p2p_address_sec[1]}"
+
+        with self._session_maker() as session:
+            # create initial job info record and write to database
+            record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
+                               p2p_address_pub=p2p_address_pub,
+                               p2p_address_sec=p2p_address_sec,
+                               status=status.model_dump(), job=job.model_dump(),
+                               container_id=container_id, peer=None)
+            session.add(record)
+            session.commit()
+
+        # start the worker
+        threading.Thread(
+            target=self._perform_job_initialise,
+            args=(p2p_address_pub, p2p_address_sec, job, container_id)
+        ).start()
 
         return job
 
@@ -470,15 +542,25 @@ class DefaultRTIService(RTIService):
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
-                # check the status
-                status = JobStatus.model_validate(record.status)
-                if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                        JobStatus.State.RUNNING]:
-                    logger.warning(f"Job {job_id} is not active -> status cannot be updated.")
+                # TODO: might need to think about restricting status updates from jobs that are marked as finished.
+                # # check the status
+                # status = JobStatus.model_validate(record.status)
+                # if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
+                #                         JobStatus.State.RUNNING]:
+                #     logger.warning(f"Job {job_id} is not active -> status cannot be updated.")
 
                 # update the status
                 record.status = job_status.model_dump()
                 session.commit()
+
+                # update the local status file
+                try:
+                    status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                    with open(status_path, 'w') as f:
+                        # noinspection PyTypeChecker
+                        json.dump(job_status.model_dump(), f, indent=2)
+                except Exception:
+                    logger.warning(f"Could not write job status to {status_path}")
 
     def get_job_owner_iid(self, job_id: str) -> str:
         with self._mutex:
@@ -562,12 +644,12 @@ class DefaultRTIService(RTIService):
         # start the cancellation worker
         peer = Identity.model_validate(record.peer)
         peer_address = P2PAddress(
-            address=record.p2p_address,
+            address=record.p2p_address_sec,
             curve_secret_key=self._node.keystore.curve_secret_key(),
             curve_public_key=self._node.keystore.curve_public_key(),
             curve_server_key=peer.c_public_key
         )
-        threading.Thread(target=self._perform_cancel, args=(job_id, peer_address, )).start()
+        threading.Thread(target=self._perform_cancel, args=(job_id, peer_address)).start()
 
         return status
 
