@@ -877,7 +877,7 @@ async def execute_job(
 
         with rti._session_maker() as session:
             record = DBJobInfo(id=job.id, proc_id=task.proc_id, user_iid=user.id,
-                               p2p_address=p2p_address_sec,
+                               p2p_address_pub=p2p_address_pub, p2p_address_sec=p2p_address_sec,
                                status=status.model_dump(), job=job.model_dump(),
                                container_id="0")
             session.add(record)

@@ -131,7 +131,7 @@ class OutputObjectHandler(threading.Thread):
                     content=item.value
                 )
             else:
-                recipe['consumes'][item.name] = CObjectNode(
+                recipe.consumes[item.name] = CObjectNode(
                     c_hash=item.c_hash,
                     data_type=spec.data_type,
                     data_format=spec.data_format,
@@ -805,4 +805,5 @@ class JobRunner(CLICommand, ProgressListener):
             self._write_exitcode(ExitCode.ERROR, e)
 
         finally:
-            self._status_handler.join(5)
+            if self._status_handler:
+                self._status_handler.join(5)

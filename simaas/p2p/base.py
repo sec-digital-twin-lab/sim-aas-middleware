@@ -223,4 +223,5 @@ async def p2p_respond(
 
     finally:
         if attachment_path:
-            os.remove(attachment_path)
+            if os.path.isfile(attachment_path):
+                os.remove(attachment_path)
