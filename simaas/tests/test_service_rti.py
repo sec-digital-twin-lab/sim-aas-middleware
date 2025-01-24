@@ -489,7 +489,7 @@ def test_job_concurrency(
 
             # wait until the job is done
             status: JobStatus = rti.get_job_status(job.id)
-            while not status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+            while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
                 status: JobStatus = rti.get_job_status(job.id)
                 time.sleep(1.0)
 
@@ -550,10 +550,10 @@ def test_job_concurrency(
 
     for i in range(n):
         print(f"### {i} ###")
-        l = logs[i]
-        for msg in l:
+        log = logs[i]
+        for msg in log:
             print(msg)
-        print(f"###")
+        print("###")
 
     for i, e in failed.items():
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

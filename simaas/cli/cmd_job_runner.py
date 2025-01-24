@@ -258,7 +258,7 @@ class StatusHandler(threading.Thread):
             self._logger.error(f"Pushing job status {last_update} -> FAILED: {e}\n{trace}")
 
     def run(self) -> None:
-        self._logger.info(f"BEGIN status handler...")
+        self._logger.info("BEGIN status handler...")
 
         while self._job_status.state not in [
             JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED
@@ -277,7 +277,7 @@ class StatusHandler(threading.Thread):
         # before ending the thread. send a final update.
         self._handle(get_timestamp_now())
 
-        self._logger.info(f"END status handler.")
+        self._logger.info("END status handler.")
 
 
 class JobRunner(CLICommand, ProgressListener):
@@ -486,11 +486,11 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p_pub.add(P2PLatency())
         self._p2p_pub.add(P2PRunnerPerformHandshake(self))
         self._p2p_pub.start_service(encrypt=False)
-        self._logger.info(f"Insecure P2P service up -> waiting for handshake.")
+        self._logger.info("Insecure P2P service up -> waiting for handshake.")
 
         while self._custodian is None:
             time.sleep(0.5)
-        self._logger.info(f"Handshake done!")
+        self._logger.info("Handshake done!")
 
         # start the secured P2P service
         self._p2p_sec = P2PService(self._keystore, p2p_address_sec)
@@ -498,10 +498,10 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p_sec.add(P2PPushJob(self))
         self._p2p_sec.add(P2PInterruptJob(self))
         self._p2p_sec.start_service(encrypt=True)
-        self._logger.info(f"Secure P2P service up.")
+        self._logger.info("Secure P2P service up.")
 
         self._p2p_pub.stop_service()
-        self._logger.info(f"Insecure P2P service down.")
+        self._logger.info("Insecure P2P service down.")
 
     def _store_value_input_data_objects(self) -> None:
         for item in self._job.task.input:
@@ -716,14 +716,14 @@ class JobRunner(CLICommand, ProgressListener):
 
         try:
             # initialise processor
-            self._logger.info(f"BEGIN initialising job runner...")
+            self._logger.info("BEGIN initialising job runner...")
             self._initialise_processor(args['proc_path'])
 
             # initialise P2P services
             self._initialise_p2p(args['p2p_address_pub'], args['p2p_address_sec'])
 
             # wait for runner to be primed
-            self._logger.info(f"END initialising job runner -> WAITING for job...")
+            self._logger.info("END initialising job runner -> WAITING for job...")
             while self._job is None:
                 time.sleep(0.5)
 
