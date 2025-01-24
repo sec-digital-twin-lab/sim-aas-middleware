@@ -150,15 +150,16 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
         return found
 
 
-def docker_run_job_container(image_name: str, job_path: str, job_address: Tuple[str, int]) -> str:
+def docker_run_job_container(image_name: str, p2p_address_pub: Tuple[str, int], p2p_address_sec: Tuple[str, int]) -> str:
     client = docker.from_env()
     container = client.containers.run(
         image=image_name,
         volumes={
-            job_path: {'bind': '/job', 'mode': 'rw'}
+            # job_path: {'bind': '/job', 'mode': 'rw'}
         },
         ports={
-            '5000/tcp': job_address,
+            '6000/tcp': p2p_address_pub,
+            '6001/tcp': p2p_address_sec,
         },
         detach=True,
         stderr=True, stdout=True,
@@ -173,6 +174,10 @@ def docker_kill_job_container(container_id: str) -> None:
     container = client.containers.get(container_id)
     container.kill()
 
+def docker_delete_container(container_id: str) -> None:
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    container.remove()
 
 def docker_container_running(container_id: str) -> bool:
     client = docker.from_env()

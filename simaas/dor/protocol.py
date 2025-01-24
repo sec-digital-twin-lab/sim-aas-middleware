@@ -1,14 +1,19 @@
 import json
 import os
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 
 from pydantic import BaseModel
+from simaas.core.helpers import hash_file_content
+
+from simaas.core.identity import Identity
+
+from simaas.core.keystore import Keystore
 
 from simaas.core.logging import Logging
-from simaas.dor.exceptions import FetchDataObjectFailedError
-from simaas.dor.schemas import DataObject
+from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
+from simaas.dor.schemas import DataObject, DataObjectRecipe
 from simaas.nodedb.schemas import NodeInfo
-from simaas.p2p.base import P2PProtocol
+from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
 logger = Logging.get('dor.protocol')
 
@@ -22,16 +27,37 @@ class LookupResponse(BaseModel):
 
 
 class P2PLookupDataObject(P2PProtocol):
+    NAME = 'dor-lookup'
+
     def __init__(self, node) -> None:
-        super().__init__('dor-lookup', node.keystore)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
-        reply = await self.send_and_wait(peer, LookupRequest(obj_ids=obj_ids), LookupResponse)
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
+        )
+
+        reply, _ = await p2p_request(
+            peer_address, self.NAME, LookupRequest(obj_ids=obj_ids), reply_type=LookupResponse
+        )
+        reply: LookupResponse = reply  # casting for PyCharm
+
         return reply.records
 
-    async def handle(self, request: LookupRequest) -> Tuple[LookupResponse, Optional[str]]:
-        records: Dict[str, DataObject] = {obj_id: self._node.dor.get_meta(obj_id) for obj_id in request.obj_ids}
+    async def handle(
+            self, request: LookupRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        # search for the requested data objects and see if we have any of them
+        records: Dict[str, DataObject] = {}
+        for obj_id in request.obj_ids:
+            meta: Optional[DataObject] = self._node.dor.get_meta(obj_id)
+            if meta:
+                records[obj_id] = meta
+
         return LookupResponse(records=records), None
 
     @staticmethod
@@ -56,16 +82,27 @@ class FetchResponse(BaseModel):
 
 
 class P2PFetchDataObject(P2PProtocol):
+    NAME = 'dor-fetch'
+
     def __init__(self, node) -> None:
-        super().__init__('dor-fetch', node.keystore)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
                       user_iid: str = None, user_signature: str = None) -> DataObject:
-        reply: FetchResponse = await self.send_and_wait(
-            peer, FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature), FetchResponse,
-            download_path=content_path
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
         )
+
+        message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
+
+        reply, _ = await p2p_request(
+            peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path
+        )
+        reply: FetchResponse = reply  # casting for PyCharm
 
         if reply.successful:
             # store the meta information
@@ -78,7 +115,9 @@ class P2PFetchDataObject(P2PProtocol):
         else:
             raise FetchDataObjectFailedError(details=reply.details)
 
-    async def handle(self, request: FetchRequest) -> Tuple[FetchResponse, Optional[str]]:
+    async def handle(
+            self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # check if we have that data object
         meta = self._node.dor.get_meta(request.obj_id)
         if not meta:
@@ -140,7 +179,10 @@ class P2PFetchDataObject(P2PProtocol):
         # touch data object
         self._node.dor.touch_data_object(meta.obj_id)
 
-        return FetchResponse(successful=True, meta=meta, details=None), content_path
+        return (
+            FetchResponse(successful=True, meta=meta, details=None),
+            content_path
+        )
 
     @staticmethod
     def request_type():
@@ -149,3 +191,100 @@ class P2PFetchDataObject(P2PProtocol):
     @staticmethod
     def response_type():
         return FetchResponse
+
+
+class PushRequest(BaseModel):
+    owner_iid: str
+    creators_iid: List[str]
+    data_type: str
+    data_format: str
+    access_restricted: bool
+    content_encrypted: bool
+    license: DataObject.License
+    recipe: Optional[DataObjectRecipe]
+    tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]]
+
+
+class PushResponse(BaseModel):
+    successful: bool
+    meta: Optional[DataObject]
+    details: Optional[Dict]
+
+
+class P2PPushDataObject(P2PProtocol):
+    NAME = 'dor-push'
+
+    def __init__(self, node) -> None:
+        super().__init__(self.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(
+            cls, p2p_address: str, keystore: Keystore, peer: Identity, content_path: str,
+            data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
+            access_restricted: bool, content_encrypted: bool, license: DataObject.License,
+            recipe: Optional[DataObjectRecipe] = None,
+            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None
+    ) -> DataObject:
+        peer_address = P2PAddress(
+            address=p2p_address,
+            curve_secret_key=keystore.curve_secret_key(),
+            curve_public_key=keystore.curve_public_key(),
+            curve_server_key=peer.c_public_key
+        )
+
+        message = PushRequest(
+            owner_iid=owner_iid,
+            creators_iid=creators_iid,
+            data_type=data_type,
+            data_format=data_format,
+            access_restricted=access_restricted,
+            content_encrypted=content_encrypted,
+            license=license,
+            recipe=recipe,
+            tags=tags
+        )
+
+        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+            peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path
+        )
+        reply: PushResponse = reply[0]  # casting for PyCharm
+
+        if reply.successful:
+            return reply.meta
+
+        else:
+            raise PushDataObjectFailedError(details=reply.details)
+
+    async def handle(
+            self, request: PushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        # does the node have a DOR?
+        if self._node.dor is None:
+            return PushResponse(
+                successful=False, meta=None, details={
+                    'reason': 'node has no DOR',
+                    'user_iid': request.user_iid,
+                    'node_iid': self._node.identity.id
+                }
+            ), None
+
+        # calculate content hash
+        c_hash: str = hash_file_content(attachment_path).hex()
+
+        # add the data object
+        meta = self._node.dor.add_(
+            attachment_path, c_hash, request.data_type, request.data_format, request.owner_iid,
+            request.creators_iid, request.access_restricted, request.content_encrypted, request.license,
+            request.recipe, request.tags
+        )
+
+        return PushResponse(successful=True, meta=meta, details=None), None
+
+    @staticmethod
+    def request_type():
+        return PushRequest
+
+    @staticmethod
+    def response_type():
+        return PushResponse

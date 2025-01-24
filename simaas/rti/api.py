@@ -6,7 +6,6 @@ from typing import List, Tuple, Optional, Union
 from fastapi import Request
 
 from simaas.rest.schemas import EndpointDefinition
-from simaas.rest.exceptions import UnsuccessfulConnectionError
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 from simaas.rest.auth import VerifyProcessorDeployed, VerifyUserIsNodeOwner, VerifyProcessorNotBusy, \
     VerifyAuthorisation, VerifyUserIsJobOwnerOrNodeOwner
@@ -65,9 +64,6 @@ class RTIService(abc.ABC):
 
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status',
                                self.get_job_status, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-
-            EndpointDefinition('PUT', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status',
-                               self.update_job_status, None, None),
 
             EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel',
                                self.job_cancel, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
@@ -209,9 +205,6 @@ class RTIProxy(EndpointProxy):
         result = self.get(f"job/{job_id}/status", with_authorisation_by=with_authorisation_by)
         return JobStatus.model_validate(result)
 
-    def update_job_status(self, job_id: str, status: JobStatus) -> None:
-        self.put(f"job/{job_id}/status", body=status.model_dump())
-
     def cancel_job(self, job_id: str, with_authorisation_by: Keystore) -> JobStatus:
         result = self.delete(f"job/{job_id}/cancel", with_authorisation_by=with_authorisation_by)
         return JobStatus.model_validate(result)
@@ -219,29 +212,3 @@ class RTIProxy(EndpointProxy):
     def purge_job(self, job_id: str, with_authorisation_by: Keystore) -> JobStatus:
         result = self.delete(f"job/{job_id}/purge", with_authorisation_by=with_authorisation_by)
         return JobStatus.model_validate(result)
-
-
-class JobRESTProxy(EndpointProxy):
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
-                 endpoint_prefix: Tuple[str, str] = get_proxy_prefix(JOB_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
-
-    def job_status(self) -> Optional[JobStatus]:
-        try:
-            result = self.get("status")
-            return JobStatus.model_validate(result)
-        except UnsuccessfulConnectionError:
-            # the server might be down already (e.g., if job is done or failed) or not yet up (in case the job has
-            # not been started yet).
-            return None
-
-    def job_cancel(self) -> Optional[JobStatus]:
-        try:
-            result = self.put("cancel")
-            return JobStatus.model_validate(result)
-        except UnsuccessfulConnectionError:
-            # the server might be down already (e.g., if job is done or failed) or not yet up (in case the job has
-            # not been started yet).
-            return None
-        except Exception as e:
-            print(e)

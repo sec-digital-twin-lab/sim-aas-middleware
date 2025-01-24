@@ -21,7 +21,9 @@ from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
+from simaas.p2p.base import P2PAddress
 from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.p2p.protocol import P2PLatency, P2PThroughput
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -31,6 +33,8 @@ logger = Logging.get(__name__)
 def p2p_server(test_context) -> Node:
     keystore: Keystore = Keystore.new('p2p_server')
     _node: Node = test_context.get_node(keystore, enable_rest=True, use_dor=True, use_rti=False)
+    _node.p2p.add(P2PLatency())
+    _node.p2p.add(P2PThroughput())
 
     yield _node
 
@@ -45,6 +49,43 @@ def p2p_client(test_context) -> Node:
     yield _node
 
     _node.shutdown(leave_network=False)
+
+
+@pytest.mark.asyncio
+async def test_p2p_latency(p2p_server, p2p_client):
+    try:
+        peer_address = P2PAddress(
+            address=p2p_server.p2p.address(),
+            curve_secret_key=p2p_client.keystore.curve_secret_key(),
+            curve_public_key=p2p_client.keystore.curve_public_key(),
+            curve_server_key=p2p_server.identity.c_public_key
+        )
+
+        latency, attempt = await P2PLatency.perform(peer_address)
+        print(f"latency: {latency} msec")
+        print(f"attempt: {attempt}")
+
+    except Exception:
+        assert False
+
+
+@pytest.mark.asyncio
+async def test_p2p_throughput(p2p_server, p2p_client):
+    try:
+        peer_address = P2PAddress(
+            address=p2p_server.p2p.address(),
+            curve_secret_key=p2p_client.keystore.curve_secret_key(),
+            curve_public_key=p2p_client.keystore.curve_public_key(),
+            curve_server_key=p2p_server.identity.c_public_key
+        )
+
+        upload, download, attempt = await P2PThroughput.perform(peer_address, 100*1024*1024)
+        print(f"upload: {upload:.2f} kB/s")
+        print(f"download: {download:.2f} kB/s")
+        print(f"attempt: {attempt}")
+
+    except Exception:
+        assert False
 
 
 @pytest.mark.asyncio

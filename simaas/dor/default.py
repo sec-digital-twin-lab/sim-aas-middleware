@@ -4,7 +4,7 @@ import json
 import os
 from stat import S_IREAD, S_IRGRP
 from threading import Lock
-from typing import Optional, List
+from typing import Optional, List, Dict, Union
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -311,6 +311,72 @@ class DefaultDORService(DORService):
                 data_formats=[value[0] for value in session.query(DataObjectRecord.data_format).distinct()]
             )
 
+    def add_(
+            self, content_path: str, c_hash: str, data_type: str, data_format: str, owner_iid: str,
+            creators_iid: List[str], access_restricted: bool, content_encrypted: bool, license: DataObject.License,
+            recipe: Optional[DataObjectRecipe] = None,
+            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None
+    ) -> DataObject:
+        # get the owner identity
+        owner = self._node.db.get_identity(owner_iid, raise_if_unknown=True)
+
+        # check if we know the creator identities
+        # TODO: decide whether or not to remove this check. removing it allows to use creator ids that the
+        #  node isn't aware of.
+        for creator_iid in creators_iid:
+            self._node.db.get_identity(creator_iid, raise_if_unknown=True)
+
+        # fix the c_hash in the recipe (if any)
+        if recipe:
+            recipe.product.c_hash = c_hash
+
+        # determine the object id
+        created_t = get_timestamp_now()
+        obj_id = hash_string_object(f"{c_hash}{data_type}{data_format}{''.join(creators_iid)}{created_t}").hex()
+
+        with self._db_mutex:
+            with self._Session() as session:
+                # check if there are already data objects with the same content (i.e., referencing the same c_hash).
+                # it is possible for cases like this to happen. despite the exact same content, this may well be
+                # a legitimate different data object. for example, different provenance has led to the exact same
+                # outcome. we thus create a new data object.
+                records = session.query(DataObjectRecord).filter_by(c_hash=c_hash).all()
+                if len(records) > 0:
+                    # delete the temporary content as it is not needed
+                    os.remove(content_path)
+
+                else:
+                    # move the temporary content to its destination and make it read-only
+                    destination_path = self.obj_content_path(c_hash)
+                    os.rename(content_path, destination_path)
+                    os.chmod(destination_path, S_IREAD | S_IRGRP)
+
+                # create a new data object record
+                session.add(DataObjectRecord(obj_id=obj_id, c_hash=c_hash,
+                                             data_type=data_type, data_format=data_format,
+                                             created={
+                                                 'timestamp': created_t,
+                                                 'creators_iid': creators_iid
+                                             },
+                                             owner_iid=owner.id, access_restricted=access_restricted,
+                                             access=[owner.id], tags=tags if tags else {},
+                                             details={
+                                                 'content_encrypted': content_encrypted,
+                                                 'license': license.model_dump(),
+                                                 'recipe': recipe.model_dump() if recipe else None,
+                                             },
+                                             last_accessed=created_t))
+                session.commit()
+                logger.info(f"data object '{obj_id}' with content '{c_hash}' added to DOR. the content is "
+                            f"referenced by {len(records)} other data objects).")
+
+        # determine the provenance and add to the database
+        provenance = self._generate_provenance_information(c_hash, recipe) if recipe else \
+            _generate_missing_provenance(c_hash, data_type, data_format)
+        self._add_provenance_record(c_hash, provenance.model_dump())
+
+        return self.get_meta(obj_id)
+
     def add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
@@ -319,7 +385,7 @@ class DefaultDORService(DORService):
         """
         body = json.loads(body)
 
-        # is this request part of a multi-part add?
+        # is this request part of a multipart add?
         if '__part_info' in body:
             # read the part information
             part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
@@ -383,71 +449,16 @@ class DefaultDORService(DORService):
         else:
             f.close()
 
-        # create parameters object
-        p = AddDataObjectParameters.model_validate(body)
-
-        # get the owner identity
-        owner = self._node.db.get_identity(p.owner_iid, raise_if_unknown=True)
-
-        # check if we know the creator identities
-        # TODO: decide whether or not to remove this check. removing it allows to use creator ids that the
-        #  node isn't aware of.
-        for creator_iid in p.creators_iid:
-            self._node.db.get_identity(creator_iid, raise_if_unknown=True)
-
         # calculate the hash for the data object content
         c_hash = digest.finalize().hex()
 
-        # fix the c_hash in the recipe (if any)
-        if p.recipe:
-            p.recipe.product.c_hash = c_hash
+        # create parameters object
+        p = AddDataObjectParameters.model_validate(body)
 
-        # determine the object id
-        created_t = get_timestamp_now()
-        obj_id = hash_string_object(f"{c_hash}{p.data_type}{p.data_format}{''.join(p.creators_iid)}{created_t}").hex()
-
-        with self._db_mutex:
-            with self._Session() as session:
-                # check if there are already data objects with the same content (i.e., referencing the same c_hash).
-                # it is possible for cases like this to happen. despite the exact same content, this may well be
-                # a legitimate different data object. for example, different provenance has led to the exact same
-                # outcome. we thus create a new data object.
-                records = session.query(DataObjectRecord).filter_by(c_hash=c_hash).all()
-                if len(records) > 0:
-                    # delete the temporary content as it is not needed
-                    os.remove(attachment_path)
-
-                else:
-                    # move the temporary content to its destination and make it read-only
-                    destination_path = self.obj_content_path(c_hash)
-                    os.rename(attachment_path, destination_path)
-                    os.chmod(destination_path, S_IREAD | S_IRGRP)
-
-                # create a new data object record
-                session.add(DataObjectRecord(obj_id=obj_id, c_hash=c_hash,
-                                             data_type=p.data_type, data_format=p.data_format,
-                                             created={
-                                                 'timestamp': created_t,
-                                                 'creators_iid': p.creators_iid
-                                             },
-                                             owner_iid=owner.id, access_restricted=p.access_restricted,
-                                             access=[owner.id], tags=p.tags if p.tags else {},
-                                             details={
-                                                 'content_encrypted': p.content_encrypted,
-                                                 'license': p.license.model_dump(),
-                                                 'recipe': p.recipe.model_dump() if p.recipe else None,
-                                             },
-                                             last_accessed=created_t))
-                session.commit()
-                logger.info(f"data object '{obj_id}' with content '{c_hash}' added to DOR. the content is "
-                            f"referenced by {len(records)} other data objects).")
-
-        # determine the provenance and add to the database
-        provenance = self._generate_provenance_information(c_hash, p.recipe) if p.recipe else \
-            _generate_missing_provenance(c_hash, p.data_type, p.data_format)
-        self._add_provenance_record(c_hash, provenance.model_dump())
-
-        return self.get_meta(obj_id)
+        return self.add_(
+            attachment_path, c_hash, p.data_type, p.data_format, p.owner_iid, p.creators_iid,
+            p.access_restricted, p.content_encrypted, p.license, p.recipe, p.tags
+        )
 
     def remove(self, obj_id: str) -> Optional[DataObject]:
         """

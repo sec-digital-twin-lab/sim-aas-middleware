@@ -5,62 +5,166 @@ import os
 import threading
 import time
 import traceback
-from typing import Dict, Tuple, Set, Union, Optional
+from typing import Dict, Union, Optional, Tuple, Set
 
-import uvicorn
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.p2p.base import P2PAddress
+from simaas.p2p.protocol import P2PLatency
+
+from simaas.p2p.service import P2PService
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
 from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
-from simaas.core.helpers import validate_json, hash_json_object
+from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.dor.api import DORProxy
-from simaas.dor.protocol import P2PFetchDataObject, P2PLookupDataObject
-from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
+from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
 from simaas.nodedb.api import NodeDBProxy
-from simaas.rest.exceptions import UnsuccessfulRequestError
-from simaas.rti.api import RTIProxy, JOB_ENDPOINT_PREFIX
-from simaas.rti.exceptions import UnresolvedInputDataObjectsError, AccessNotPermittedError, MissingUserSignatureError, \
-    InputDataObjectMissing, MismatchingDataTypeOrFormatError, InvalidJSONDataObjectError, \
-    DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException
-from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Task, Job
-from simaas.core.processor import find_processors, ProcessorBase, ProgressListener
+from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
+    InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
+    AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PPushJobStatus, P2PInterruptJob
+from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
+from simaas.core.processor import ProgressListener, ProcessorBase, find_processors
 
 
 class OutputObjectHandler(threading.Thread):
-    def __init__(self, logger: logging.Logger, owner, obj_name: str, max_attempts: int = 10, retry_delay: int = 10):
+    def __init__(self, logger: logging.Logger, owner, obj_name: str):
         super().__init__()
         self._logger = logger
         self._owner: JobRunner = owner
         self._obj_name: str = obj_name
-        self._max_attempts = max_attempts
-        self._retry_delay = retry_delay
+
+    async def push_data_object(self, obj_name: str) -> DataObject:
+        # convenience variables
+        task_out_items = {item.name: item for item in self._owner.job.task.output}
+        task_out = task_out_items.get(obj_name)
+        output_spec = self._owner.output_interface.get(obj_name)
+        if task_out is None or output_spec is None:
+            raise RTIException(f"Unexpected output '{obj_name}'", details={
+                'task_out_items': list(task_out_items.keys()),
+                'output_interface': list(self._owner.output_interface.keys())
+            })
+
+        # check if the output data object exists
+        output_content_path = os.path.join(self._owner.wd_path, obj_name)
+        if not os.path.isfile(output_content_path):
+            raise DataObjectContentNotFoundError({
+                'output_name': obj_name,
+                'content_path': output_content_path
+            })
+
+        # get the owner
+        db_proxy = NodeDBProxy(self._owner.job.custodian.rest_address)
+        owner = db_proxy.get_identity(task_out.owner_iid)
+        if owner is None:
+            raise DataObjectOwnerNotFoundError({
+                'output_name': obj_name,
+                'owner_iid': task_out.owner_iid
+            })
+
+        # is the output a JSONObject? validate if we have a schema
+        if output_spec.data_format == 'json' and output_spec.data_schema is not None:
+            with open(output_content_path, 'r') as f:
+                content = json.load(f)
+                if not validate_json(content, output_spec.data_schema):
+                    raise InvalidJSONDataObjectError({
+                        'obj_name': obj_name,
+                        'content': content,
+                        'schema': output_spec.data_schema
+                    })
+
+        restricted_access = task_out.restricted_access
+        content_encrypted = task_out.content_encrypted
+
+        # TODO: figure out what is supposed to happen with the content key here
+        # if content_encrypted:
+        #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
+
+        # do we have a target node specified for storing the data object?
+        target_address = self._owner.job.custodian.rest_address
+        if task_out.target_node_iid:
+            # check with the node db to see if we know about this node
+            network = {item.identity.id: item for item in db_proxy.get_network()}
+            if task_out.target_node_iid not in network:
+                raise CLIRuntimeError("Target node not found in network", details={
+                    'target_node_iid': task_out.target_node_iid,
+                    'network': network
+                })
+
+            # extract the rest address from that node record
+            node = network[task_out.target_node_iid]
+            target_address = node.rest_address
+
+        # check if the target node has DOR capabilities
+        db_proxy = NodeDBProxy(target_address)
+        node = db_proxy.get_node()
+        if not node.dor_service:
+            raise CLIRuntimeError("Target node does not support DOR capabilities", details={
+                'target_address': target_address,
+                'node': node.model_dump()
+            })
+
+        # determine recipe
+        recipe = DataObjectRecipe(
+            name=obj_name,
+            processor=self._owner.gpp,
+            consumes={},
+            product=CObjectNode(
+                c_hash='',  # valid content hash will be set by the DOR
+                data_type=output_spec.data_type,
+                data_format=output_spec.data_format,
+                content=None
+            )
+        )
+
+        # update recipe inputs
+        for item in self._owner.job.task.input:
+            spec = self._owner.input_interface[item.name]
+            if item.type == 'value':
+                recipe.consumes[item.name] = CObjectNode(
+                    c_hash=hash_json_object(item.value).hex(),
+                    data_type=spec.data_type,
+                    data_format=spec.data_format,
+                    content=item.value
+                )
+            else:
+                recipe.consumes[item.name] = CObjectNode(
+                    c_hash=item.c_hash,
+                    data_type=spec.data_type,
+                    data_format=spec.data_format,
+                    content=None
+                )
+
+        # creator(s) is assumed to be the user on whose behalf the job is executed
+        creator_iids = [self._owner.user.id]
+
+        # license is least-permissive by default
+        license = DataObject.License(by=True, sa=True, nc=True, nd=True)
+
+        # push the data object to the DOR
+        obj = await P2PPushDataObject.perform(
+            node.p2p_address, self._owner.keystore, node.identity,
+            output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+            restricted_access, content_encrypted, license, recipe,
+            tags={
+                'name': obj_name,
+                'job_id': self._owner.job.id
+            }
+        )
+
+        return obj
 
     def run(self) -> None:
         try:
-            for i in range(self._max_attempts):
-                try:
-                    # upload the data object to the target DOR
-                    obj = self._owner.push_data_object(self._obj_name)
+            # upload the data object to the target DOR
+            obj = asyncio.run(self.push_data_object(self._obj_name))
 
-                    # remove the output from the pending set
-                    self._logger.info(f"pushing output data object '{self._obj_name}' SUCCESSFUL.")
-                    self._owner.remove_pending_output(self._obj_name, obj)
-
-                    return
-
-                except UnsuccessfulRequestError as e:
-                    self._logger.warning(
-                        f"[attempt={i + 1}/{self._max_attempts}] pushing output data object '{self._obj_name}' "
-                        f"FAILED: {e.reason} {e.details} -> trying again in {self._retry_delay * (i + 1)} second(s)."
-                    )
-
-            # if we reach here it didn't work
-            raise CLIRuntimeError("Number of attempts to push output data object exceeded limit.")
+            # remove the output from the pending set
+            self._logger.info(f"pushing output data object '{self._obj_name}' SUCCESSFUL.")
+            self._owner.remove_pending_output(self._obj_name, obj)
 
         except SaaSRuntimeException as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
@@ -77,86 +181,246 @@ class OutputObjectHandler(threading.Thread):
             self._owner.remove_pending_output(self._obj_name, error)
 
 
+class StatusHandler(threading.Thread):
+    def __init__(self, logger: logging.Logger, peer_address: P2PAddress, job_id: str, job_status_path: str):
+        super().__init__(daemon=False)
+        self._mutex = threading.Lock()
+        self._logger = logger
+        self._peer_address = peer_address
+        self._job_id = job_id
+        self._job_status_path = job_status_path
+        self._job_status = JobStatus(
+            state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
+        )
+        self._last_update = None
+        self._last_push = None
+
+    def has_output(self, output_name: str) -> bool:
+        return output_name in self._job_status.output
+
+    def update(
+            self, state: Optional[JobStatus.State] = None, progress: Optional[int] = None,
+            message: Optional[JobStatus.Message] = None, output: Optional[Dict[str, DataObject]] = None,
+            error: Optional[JobStatus.Error] = None
+    ) -> None:
+        with self._mutex:
+            is_dirty = False
+
+            if state and state != self._job_status.state:
+                self._job_status.state = state
+                is_dirty = True
+
+            if progress and progress != self._job_status.progress:
+                self._job_status.progress = progress
+                is_dirty = True
+
+            if message and (self._job_status.message is None or
+                            message.severity != self._job_status.message.severity or
+                            message.content != self._job_status.message.content):
+                self._job_status.message = message
+                is_dirty = True
+
+            if output:
+                for output_name, obj in output.items():
+                    if output_name not in self._job_status.output:
+                        self._job_status.output[output_name] = obj
+                        is_dirty = True
+
+            if error:
+                self._job_status.errors.append(error)
+                is_dirty = True
+
+            # has there been any actual update?
+            if is_dirty:
+                self._last_update = get_timestamp_now()
+
+    def _handle(self, last_update: int) -> None:
+        # update the last push timestamp to reflect the timestamp of the update that has been
+        # attempted to pushed.
+        self._last_push = last_update
+
+        try:
+            # update the file
+            with open(self._job_status_path, 'w') as f:
+                # noinspection PyTypeChecker
+                json.dump(self._job_status.model_dump(), f, indent=2)
+
+            # push the job status to the custodian
+            asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
+            self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
+
+        except SaaSRuntimeException as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            self._logger.error(f"Pushing job status {last_update} -> FAILED: {e.reason}\n{trace}")
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            self._logger.error(f"Pushing job status {last_update} -> FAILED: {e}\n{trace}")
+
+    def run(self) -> None:
+        self._logger.info("BEGIN status handler...")
+
+        while self._job_status.state not in [
+            JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED
+        ]:
+            time.sleep(0.5)
+
+            # has there been any change since we pushed it the last time?
+            with self._mutex:
+                last_update = self._last_update
+                dirty = last_update != self._last_push
+
+            # push only if dirty
+            if dirty:
+                self._handle(last_update)
+
+        # before ending the thread. send a final update.
+        self._handle(get_timestamp_now())
+
+        self._logger.info("END status handler.")
+
+
 class JobRunner(CLICommand, ProgressListener):
     def __init__(self):
         super().__init__('run', 'runs a job with a processor', arguments=[
             Argument('--job-path', dest='job_path', action='store', help="path to the job"),
             Argument('--proc-path', dest='proc_path', action='store', help="path to the processor"),
-            Argument('--proc-name', dest='proc_name', action='store', help="name of the processor"),
             Argument('--log-level', dest='log_level', action='store', help="log level: debug, info, warning, error"),
-            Argument('--rest-address', dest='rest_address', action='store',
-                     help="address used by the REST job interface")
+            Argument('--p2p-address-pub', dest='p2p_address_pub', action='store',
+                     help="address used by P2P service for unsecured communication (handshakes)"),
+            Argument('--p2p-address-sec', dest='p2p_address_sec', action='store',
+                     help="address used by P2P service for secure communication")
         ])
 
         self._mutex = threading.Lock()
-        self._logger = None
         self._interrupted = False
-        self._wd_path = None
-        self._address_mapping: Dict[str, int] = {}
-        self._proc = None
-        self._job = None
-        self._gpp = None
-        self._keystore = None
-        self._user = None
+        self._wd_path: Optional[str] = None
+        self._logger: Optional[logging.Logger] = None
+
+        # set during initialise_processor
+        self._gpp: Optional[GitProcessorPointer] = None
+        self._proc: Optional[ProcessorBase] = None
+
+        # set during initialise_p2p
+        self._keystore: Optional[Keystore] = None
+        self._custodian: Optional[Identity] = None
+        self._custodian_address: Optional[P2PAddress] = None
+        self._p2p_pub: Optional[P2PService] = None
+        self._p2p_sec: Optional[P2PService] = None
+
+        # set upon job update
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
+        self._job: Optional[Job] = None
+        self._status_handler: Optional[StatusHandler] = None
+        self._user: Optional[Identity] = None
+
         self._pending_output: Set[str] = set()
         self._failed_output: Set[str] = set()
-        self._rti_proxy = None
-        self._job_status: Optional[JobStatus] = None
 
-    async def job_status(self) -> JobStatus:
-        with self._mutex:
-            return self._job_status
+    @property
+    def wd_path(self) -> str:
+        return self._wd_path
 
-    async def job_cancel(self) -> JobStatus:
+    @property
+    def keystore(self) -> Keystore:
+        return self._keystore
+
+    @property
+    def identity(self) -> Identity:
+        return self._keystore.identity
+
+    @property
+    def gpp(self) -> GitProcessorPointer:
+        return self._gpp
+
+    @property
+    def job(self) -> Optional[Job]:
+        return self._job
+
+    @property
+    def input_interface(self) -> Dict[str, ProcessorDescriptor.IODataObject]:
+        return self._input_interface
+
+    @property
+    def output_interface(self) -> Dict[str, ProcessorDescriptor.IODataObject]:
+        return self._output_interface
+
+    @property
+    def user(self) -> Optional[Identity]:
+        return self._user
+
+    def on_job_cancel(self) -> None:
         # interrupt the processor. note: whether this request is honored or even implemented depends on the
         # actual processor.
         with self._mutex:
-            self._logger.info("received request to cancel job...")
-            self._interrupted = True
-            self._proc.interrupt()
+            try:
+                self._interrupted = True
+                self._proc.interrupt()
+                self._logger.info("Received job cancellation notification")
 
-            # update state
-            self._job_status.state = JobStatus.State.CANCELLED
-            self._store_job_status()
-            return self._job_status
+            except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+                self._logger.error(f"Received job cancellation notification -> INTERRUPT FAILED: {e}\n{trace}")
+
+    def on_custodian_update(self, custodian: Identity, custodian_address: str) -> None:
+        self._custodian = custodian
+        self._custodian_address = P2PAddress(
+            address=custodian_address,
+            curve_secret_key=self._keystore.curve_secret_key(),
+            curve_public_key=self._keystore.curve_public_key(),
+            curve_server_key=custodian.c_public_key
+        )
+        self._logger.info(f"Using custodian at {custodian_address} with id={self._custodian.id}")
+
+    def on_job_update(self, job: Job) -> None:
+        self._logger.info(f"Received job with id={job.id}")
+
+        # write the job descriptor
+        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
+        with open(job_descriptor_path, 'w') as f:
+            json.dump(job.model_dump(), f, indent=2)
+
+        # prepare input/output interfaces
+        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.input}
+        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.output}
+
+        # update job and set up status handler
+        job_status_path = os.path.join(self._wd_path, 'job.status')
+        self._status_handler = StatusHandler(self._logger, self._custodian_address, job.id, job_status_path)
+        self._status_handler.start()
+        self._job = job
 
     def on_progress_update(self, progress: int) -> None:
-        with self._mutex:
-            self._logger.info(f"on_progress_update: progress={progress}")
-            if progress != self._job_status.progress:
-                self._job_status.progress = progress
-                self._store_job_status()
+        self._logger.info(f"Received progress update notification: {progress}")
+        self._status_handler.update(progress=progress)
 
     def on_output_available(self, output_name: str) -> None:
         with self._mutex:
-            if output_name not in self._job_status.output and output_name not in self._failed_output:
-                self._logger.info(f"on_output_available: output_name={output_name}")
-                self._pending_output.add(output_name)
-                handler = OutputObjectHandler(self._logger, self, output_name)
-                handler.start()
+            # do we already have this output?
+            has_output = self._status_handler.has_output(output_name)
+            if has_output:
+                self._logger.warning(f"Received output available notification: {output_name} -> already handled.")
+                return
+
+            # has it failed previously?
+            has_failed = output_name in self._failed_output
+            if has_failed:
+                self._logger.warning(f"Received output available notification: {output_name} -> previously failed.")
+                return
+
+            # handle it but starting a dedicated output object handler instance
+            self._logger.info(f"Received output available notification: {output_name}")
+            self._pending_output.add(output_name)
+            handler = OutputObjectHandler(self._logger, self, output_name)
+            handler.start()
 
     def on_message(self, severity: Severity, message: str) -> None:
         with self._mutex:
-            self._logger.info(f"on_message: severity={severity} message={message}")
-            if self._job_status.message is None or severity != self._job_status.message.severity \
-                    or message != self._job_status.message.content:
-                self._job_status.message = JobStatus.Message(severity=severity, content=message)
-                self._store_job_status()
-
-    def _store_job_status(self) -> None:
-        # store the job status
-        job_status_path = os.path.join(self._wd_path, 'job.status')
-        with open(job_status_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(self._job_status.model_dump(), f, indent=2)
-
-        # try to push the status to the RTI (if any)
-        try:
-            self._rti_proxy.update_job_status(self._job.id, self._job_status)
-        except Exception as e:
-            self._logger.warning(f"pushing job status failed: {e}")
+            self._logger.info(f"Received message notification: [{severity}] {message}")
+            self._status_handler.update(message=JobStatus.Message(severity=severity, content=message))
 
     def _write_exitcode(self, exitcode: ExitCode, e: Exception = None) -> None:
         exitcode_path = os.path.join(self._wd_path, 'job.exitcode')
@@ -186,99 +450,58 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Using logger with: level={log_level} path={log_path}")
         self._logger = Logging.get('cli.job_runner', level=log_level_mapping[log_level], custom_log_path=log_path)
 
-    def _initialise_job(self, proc_path: str, proc_name: str = None) -> None:
-        # does the processor path exist?
-        if not os.path.isdir(proc_path):
-            raise CLIRuntimeError(f"Processor path '{proc_path}' does not exist.")
-        print(f"Using processor path at {proc_path}")
+    def _initialise_processor(self, proc_path: str) -> None:
+        # do we have a GPP?
+        gpp_path = os.path.join(proc_path, 'gpp.json')
+        if not os.path.isfile(gpp_path):
+            raise CLIRuntimeError(f"No GPP descriptor found at '{gpp_path}'.")
+
+        # read the GPP
+        try:
+            with open(gpp_path, 'r') as f:
+                content = json.load(f)
+            self._gpp = GitProcessorPointer.model_validate(content)
+            self._logger.info(f"Read GPP at {gpp_path}")
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise CLIRuntimeError(f"Reading GPP failed: {trace}")
 
         # find processors at the given location
         procs_by_name = find_processors(proc_path)
         print(f"Found the following processors: {list(procs_by_name.keys())}")
 
-        # do we have a processor name?
-        if proc_name is None:
-            # try to read the descriptor in the proc path
-            descriptor_path = os.path.join(proc_path, 'descriptor.json')
-            if not os.path.isfile(descriptor_path):
-                raise CLIRuntimeError(f"No processor descriptor found at '{proc_path}'.")
-
-            # read the descriptor
-            with open(descriptor_path) as f:
-                # try to get the processor by the descriptor name
-                descriptor = ProcessorDescriptor.model_validate(json.load(f))
-                proc_name = descriptor.name
-
         # do we have the processor we are looking for?
+        proc_name = self._gpp.proc_descriptor.name
         self._proc: ProcessorBase = procs_by_name.get(proc_name, None)
         if self._proc is None:
-            raise CLIRuntimeError(f"No processor '{proc_name}' found at '{proc_path}'.")
-        print(f"Found processor '{proc_name}' at '{proc_path}'")
+            raise CLIRuntimeError(f"Processor '{proc_name}' not found at '{proc_path}'.")
 
-        # read the job descriptor
-        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
-        with open(job_descriptor_path, 'r') as f:
-            content = json.load(f)
-            self._job = Job.model_validate(content)
-        print(f"Created job descriptor at {job_descriptor_path}")
-
-        # read the gpp descriptor
-        gpp_descriptor_path = os.path.join(self._wd_path, 'gpp.descriptor')
-        with open(gpp_descriptor_path, 'r') as f:
-            content = json.load(f)
-            self._gpp = GitProcessorPointer.model_validate(content)
-        print(f"Created GPP descriptor at {gpp_descriptor_path}")
-
-        # prepare input/output interfaces
-        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.input}
-        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.output}
-
-        # fetch the user identity
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        self._user: Identity = db_proxy.get_identity(self._job.task.user_iid)
-        if self._user is None:
-            raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
-        print(f"Using user identity with id={self._user.id}")
-
-        # setup the custodian RTI proxy
-        self._rti_proxy = RTIProxy(self._job.custodian.rest_address)
-        print(f"Using {self._job.custodian.rest_address} to update custodian about job status changes.")
-
-        # update the job status
-        self._job_status = JobStatus(state=JobStatus.State.INITIALISED, progress=0, output={}, notes={},
-                                     errors=[], message=None)
-        self._store_job_status()
-
-    def _create_ephemeral_keystore(self) -> None:
+    def _initialise_p2p(self, p2p_address_pub: str, p2p_address_sec: str) -> None:
         # create the ephemeral job keystore
-        self._keystore = Keystore.new(f"job:{self._job.id}")
-        print(f"Created ephemeral job keystore with id={self._keystore.identity.id}")
+        self._keystore = Keystore.new('runner')
+        self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
 
-    def _setup_rest_server(self, rest_address: str) -> None:
-        app = FastAPI(openapi_url='/openapi.json', docs_url='/docs')
+        # start the unsecured P2P service
+        self._p2p_pub = P2PService(self._keystore, p2p_address_pub)
+        self._p2p_pub.add(P2PLatency())
+        self._p2p_pub.add(P2PRunnerPerformHandshake(self))
+        self._p2p_pub.start_service(encrypt=False)
+        self._logger.info("Insecure P2P service up -> waiting for handshake.")
 
-        # setup CORS
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=['*'],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+        while self._custodian is None:
+            time.sleep(0.5)
+        self._logger.info("Handshake done!")
 
-        # register endpoints
-        app.get(JOB_ENDPOINT_PREFIX + '/status', response_model=JobStatus,
-                description=self.job_status.__doc__)(self.job_status)
-        app.put(JOB_ENDPOINT_PREFIX + '/cancel', response_model=JobStatus,
-                description=self.job_cancel.__doc__)(self.job_cancel)
+        # start the secured P2P service
+        self._p2p_sec = P2PService(self._keystore, p2p_address_sec)
+        self._p2p_sec.add(P2PLatency())
+        self._p2p_sec.add(P2PPushJob(self))
+        self._p2p_sec.add(P2PInterruptJob(self))
+        self._p2p_sec.start_service(encrypt=True)
+        self._logger.info("Secure P2P service up.")
 
-        # create and start the REST server
-        address = rest_address.split(":")
-        server_thread = threading.Thread(target=uvicorn.run, args=(app,), daemon=True,
-                                         kwargs={"host": address[0], "port": int(address[1]), "log_level": "info"})
-        server_thread.start()
+        self._p2p_pub.stop_service()
+        self._logger.info("Insecure P2P service down.")
 
     def _store_value_input_data_objects(self) -> None:
         for item in self._job.task.input:
@@ -322,13 +545,9 @@ class JobRunner(CLICommand, ProgressListener):
             found: Dict[str, str] = {}
             for peer in network:
                 # does the remote DOR have any of the pending data objects?
-                try:
-                    result: Dict[str, DataObject] = loop.run_until_complete(
-                        lookup.perform(peer, list(pending.keys()))
-                    )
-
-                except Exception:
-                    continue
+                result: Dict[str, DataObject] = loop.run_until_complete(
+                    lookup.perform(peer, list(pending.keys()))
+                )
 
                 # process the results (if any)
                 for obj_id, meta in result.items():
@@ -467,158 +686,59 @@ class JobRunner(CLICommand, ProgressListener):
             self._pending_output.remove(obj_name)
 
             if isinstance(result, DataObject):
-                self._job_status.output[obj_name] = result
-                self._store_job_status()
+                self._status_handler.update(output={
+                    obj_name: result
+                })
 
             else:
-                self._job_status.errors.append(result)
+                self._status_handler.update(error=result)
                 self._failed_output.add(obj_name)
 
     def has_pending_output(self) -> bool:
         with self._mutex:
             return len(self._pending_output) > 0
 
-    def push_data_object(self, obj_name: str) -> DataObject:
-        # convenience variables
-        task_out_items = {item.name: item for item in self._job.task.output}
-        task_out = task_out_items.get(obj_name)
-        output_spec = self._output_interface.get(obj_name)
-        if task_out is None or output_spec is None:
-            raise RTIException(f"Unexpected output '{obj_name}'", details={
-                'task_out_items': list(task_out_items.keys()),
-                'output_interface': list(self._output_interface.keys())
-            })
-
-        # check if the output data object exists
-        output_content_path = os.path.join(self._wd_path, obj_name)
-        if not os.path.isfile(output_content_path):
-            raise DataObjectContentNotFoundError({
-                'output_name': obj_name,
-                'content_path': output_content_path
-            })
-
-        # get the owner
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        owner = db_proxy.get_identity(task_out.owner_iid)
-        if owner is None:
-            raise DataObjectOwnerNotFoundError({
-                'output_name': obj_name,
-                'owner_iid': task_out.owner_iid
-            })
-
-        # is the output a JSONObject? validate if we have a schema
-        if output_spec.data_format == 'json' and output_spec.data_schema is not None:
-            with open(output_content_path, 'r') as f:
-                content = json.load(f)
-                if not validate_json(content, output_spec.data_schema):
-                    raise InvalidJSONDataObjectError({
-                        'obj_name': obj_name,
-                        'content': content,
-                        'schema': output_spec.data_schema
-                    })
-
-        restricted_access = task_out.restricted_access
-        content_encrypted = task_out.content_encrypted
-
-        # TODO: figure out what is supposed to happen with the content key here
-        # if content_encrypted:
-        #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
-
-        # do we have a target node specified for storing the data object?
-        target_address = self._job.custodian.rest_address
-        if task_out.target_node_iid:
-            # check with the node db to see if we know about this node
-            network = {item.identity.id: item for item in db_proxy.get_network()}
-            if task_out.target_node_iid not in network:
-                raise CLIRuntimeError("Target node not found in network", details={
-                    'target_node_iid': task_out.target_node_iid,
-                    'network': network
-                })
-
-            # extract the rest address from that node record
-            node = network[task_out.target_node_iid]
-            target_address = node.rest_address
-
-        # check if the target node has DOR capabilities
-        dor_proxy = NodeDBProxy(target_address)
-        node = dor_proxy.get_node()
-        if not node.dor_service:
-            raise CLIRuntimeError("Target node does not support DOR capabilities", details={
-                'target_address': target_address,
-                'node': node.model_dump()
-            })
-
-        # determine recipe
-        recipe = {
-            'name': obj_name,
-            'processor': self._gpp.dict(),
-            'consumes': {},
-            'product': {
-                'c_hash': '',  # valid content hash will be set by the DOR
-                'data_type': output_spec.data_type,
-                'data_format': output_spec.data_format,
-                'content': None
-            }
-        }
-
-        # update recipe inputs
-        for item0 in self._job.task.input:
-            spec = self._input_interface[item0.name]
-            if item0.type == 'value':
-                recipe['consumes'][item0.name] = {
-                    'c_hash': hash_json_object(item0.value).hex(),
-                    'data_type': spec.data_type,
-                    'data_format': spec.data_format,
-                    'content': item0.value
-                }
-            else:
-                recipe['consumes'][item0.name] = {
-                    'c_hash': item0.c_hash,
-                    'data_type': spec.data_type,
-                    'data_format': spec.data_format,
-                    'content': None
-                }
-
-        # upload the data object to the DOR
-        dor_proxy = DORProxy(target_address)
-        obj = dor_proxy.add_data_object(output_content_path, owner, restricted_access, content_encrypted,
-                                        output_spec.data_type, output_spec.data_format, recipe=recipe,
-                                        tags=[
-                                            DataObject.Tag(key='name', value=obj_name),
-                                            DataObject.Tag(key='job_id', value=self._job.id)
-                                        ])
-
-        return obj
-
     def execute(self, args: dict) -> None:
-        prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job:")
-        prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor:")
-        prompt_if_missing(args, 'rest_address', prompt_for_string, message="Enter address for REST service:")
+        prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job working directory:")
+        prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
+        prompt_if_missing(args, 'p2p_address_pub', prompt_for_string, message="Enter address for unsecured P2P service:")
+        prompt_if_missing(args, 'p2p_address_sec', prompt_for_string, message="Enter address for secured P2P service:")
 
-        # does the job path exist?
-        if not os.path.isdir(args['job_path']):
-            raise CLIRuntimeError(f"Job path '{args['job_path']}' does not exist.")
+        # determine working directory
         self._wd_path = args['job_path']
-        print(f"Using job path at {self._wd_path}")
+        if os.path.isdir(self._wd_path):
+            print(f"Using existing job path at {self._wd_path}")
+        else:
+            print(f"Creating job path at {self._wd_path}")
 
         # setup logger
         self._setup_logger(args.get('log_level'))
 
         try:
-            self._logger.info(f"begin processing job at {self._wd_path}")
+            # initialise processor
+            self._logger.info("BEGIN initialising job runner...")
+            self._initialise_processor(args['proc_path'])
 
-            # initialise job
-            self._initialise_job(args['proc_path'], args.get('proc_name'))
+            # initialise P2P services
+            self._initialise_p2p(args['p2p_address_pub'], args['p2p_address_sec'])
 
-            # create ephemeral keystore
-            self._create_ephemeral_keystore()
-
-            # setup REST server
-            self._setup_rest_server(args['rest_address'])
+            # wait for runner to be primed
+            self._logger.info("END initialising job runner -> WAITING for job...")
+            while self._job is None:
+                time.sleep(0.5)
 
             # update state
-            self._job_status.state = JobStatus.State.PREPROCESSING
-            self._store_job_status()
+            self._status_handler.update(state=JobStatus.State.INITIALISED)
+
+            self._job: Job = self._job  # for PyCharm...
+            self._logger.info(f"BEGIN processing job {self._job.id}...")
+
+            # fetch the user identity
+            db_proxy = NodeDBProxy(self._job.custodian.rest_address)
+            self._user: Identity = db_proxy.get_identity(self._job.task.user_iid)
+            if self._user is None:
+                raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
+            self._logger.info(f"Using user identity with id={self._user.id}")
 
             # store by-value input data objects (if any)
             self._store_value_input_data_objects()
@@ -630,64 +750,60 @@ class JobRunner(CLICommand, ProgressListener):
             self._verify_inputs_and_outputs()
 
             # update state
-            self._job_status.state = JobStatus.State.RUNNING
-            self._store_job_status()
+            self._status_handler.update(state=JobStatus.State.RUNNING)
 
             # run the processor
             self._proc.run(self._wd_path, self, self._logger)
 
-            # wait until pending output data objects are taken care of
-            while self.has_pending_output():
-                time.sleep(0.5)
-
-            # write exit code
+            # was the processor interrupted?
             if self._interrupted:
-                self._logger.info(f"end processing job at {self._wd_path} -> INTERRUPTED")
+                # wrap up
+                self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> INTERRUPTED")
+                self._status_handler.update(state=JobStatus.State.CANCELLED)
                 self._write_exitcode(ExitCode.INTERRUPTED)
 
-            elif len(self._failed_output) > 0:
-                raise CLIRuntimeError(f"Failed to upload some outputs: {self._failed_output}")
-
             else:
-                # update state
-                self._job_status.state = JobStatus.State.SUCCESSFUL
-                self._store_job_status()
+                # wait until pending output data objects are taken care of
+                while self.has_pending_output():
+                    time.sleep(0.25)
 
-                msg = f"end processing job at {self._wd_path} -> DONE"
-                print(msg)
-                self._logger.info(msg)
+                # do we have failed outputs?
+                if len(self._failed_output) > 0:
+                    raise CLIRuntimeError(f"Failed to upload some outputs: {self._failed_output}")
+
+                # wrap up
+                self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> DONE")
+                self._status_handler.update(state=JobStatus.State.SUCCESSFUL)
                 self._write_exitcode(ExitCode.DONE)
 
         except SaaSRuntimeException as e:
+            # create error information
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            exception = e.content
+            exception.details = exception.details if exception.details else {}
+            exception.details['trace'] = trace
+            error = JobStatus.Error(message="Job failed", exception=exception)
 
-            # update state
-            if self._job_status:
-                exception = e.content
-                exception.details = exception.details if exception.details else {}
-                exception.details['trace'] = trace
-
-                self._job_status.state = JobStatus.State.FAILED
-                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
-                self._store_job_status()
-
-            msg = f"end processing job at {self._wd_path} -> FAILED: {e.reason}"
-            print(f"{msg}\n{trace}")
-            self._logger.error(msg)
+            # wrap up
+            self._logger.error(f"END processing job {self._job.id if self._job else '?'} "
+                               f"-> FAILED: {e.reason}\n{trace}")
+            if self._status_handler:
+                self._status_handler.update(state=JobStatus.State.FAILED, error=error)
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
+            # create error information
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
+            error = JobStatus.Error(message="Job failed", exception=exception)
 
-            # update state
-            if self._job_status:
-                exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
-
-                self._job_status.state = JobStatus.State.FAILED
-                self._job_status.errors.append(JobStatus.Error(message="Job failed", exception=exception))
-                self._store_job_status()
-
-            msg = f"end processing job at {self._wd_path} -> FAILED: {e}"
-            print(f"{msg}\n{trace}")
-            self._logger.error(msg)
+            # wrap up
+            self._logger.error(f"END processing job {self._job.id if self._job else '?'} "
+                               f"-> FAILED: {e}\n{trace}")
+            if self._status_handler:
+                self._status_handler.update(state=JobStatus.State.FAILED, error=error)
             self._write_exitcode(ExitCode.ERROR, e)
+
+        finally:
+            if self._status_handler:
+                self._status_handler.join(5)

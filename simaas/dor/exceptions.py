@@ -22,3 +22,8 @@ class DataObjectContentNotFoundError(DORException):
 class FetchDataObjectFailedError(DORException):
     def __init__(self, details: dict) -> None:
         super().__init__('Data object could not be fetched', details=details)
+
+
+class PushDataObjectFailedError(DORException):
+    def __init__(self, details: dict) -> None:
+        super().__init__('Data object could not be pushed', details=details)

@@ -9,6 +9,7 @@ import traceback
 from typing import Union
 
 import pytest
+from simaas.rti.default import DefaultRTIService, DBJobInfo
 
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
@@ -16,7 +17,7 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
-from simaas.helpers import docker_container_list
+from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
@@ -358,7 +359,7 @@ def test_rest_submit_cancel_kill_job(
 
 
 def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node: NodeInfo,
-                a: Union[int, DataObject] = None, b: Union[int, DataObject] = None) -> JobStatus:
+                a: Union[int, DataObject] = None, b: Union[int, DataObject] = None) -> Job:
 
     if a is None:
         a = 1
@@ -382,24 +383,15 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
 
     # submit the job
     job = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
-
-    # wait until the job is done
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job.id, owner)
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                return status
-
-        except Exception:
-            pass
-
-        time.sleep(0.5)
+    return job
 
 
 def test_provenance(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_test_processor
 ):
+    rti: DefaultRTIService = session_node.rti
+
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -418,9 +410,10 @@ def test_provenance(
                 return value
 
     # add test data object
-    obj = dor_proxy.add_data_object(test_context.create_file_with_content(f"{generate_random_string(4)}.json",
-                                                                          json.dumps({'v': 1})),
-                                    owner.identity, False, False, 'JSONObject', 'json')
+    obj = dor_proxy.add_data_object(
+        test_context.create_file_with_content(f"{generate_random_string(4)}.json", json.dumps({'v': 1})),
+        owner.identity, False, False, 'JSONObject', 'json'
+    )
 
     # beginning
     obj_a = obj
@@ -431,7 +424,13 @@ def test_provenance(
     # run 3 iterations
     log = []
     for i in range(3):
-        status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=obj_a, b=obj_b)
+        job: Job = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=obj_a, b=obj_b)
+
+        # wait until the job is done
+        status: JobStatus = rti.get_job_status(job.id)
+        while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+            status: JobStatus = rti.get_job_status(job.id)
+            time.sleep(0.5)
 
         obj_c = status.output['c']
         value_c = load_value(obj_c)
@@ -463,36 +462,79 @@ def test_job_concurrency(
     owner = session_node.keystore
     results = {}
     failed = {}
+    logs = {}
+    mutex = threading.Lock()
     rnd = random.Random()
+    rti: DefaultRTIService = session_node.rti
+
+    def logprint(idx: int, m: str) -> None:
+        print(m)
+        with mutex:
+            logs[idx].append(m)
 
     def do_a_job(idx: int) -> None:
         try:
+            with mutex:
+                logs[idx] = []
+
             dt = rnd.randint(0, 1000) / 1000.0
             v0 = rnd.randint(2, 6)
             v1 = rnd.randint(2, 6)
 
             time.sleep(dt)
 
-            print(f"[{idx}] [{time.time()}] submit job")
-            status = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=v0, b=v1)
-            print(f"[{idx}] proc status: {status}")
+            logprint(idx, f"[{idx}] [{time.time()}] submit job")
+            job = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=v0, b=v1)
+            logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
+
+            # wait until the job is done
+            status: JobStatus = rti.get_job_status(job.id)
+            while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                status: JobStatus = rti.get_job_status(job.id)
+                time.sleep(1.0)
+
+            # status = wait_for_job(job, owner, rti_proxy)
+            logprint(idx, f"[{idx}] [{time.time()}] job {job.id} finished: {status.state}")
+
+            if status.state != JobStatus.State.SUCCESSFUL:
+                raise RuntimeError(f"[{idx}] failed: {status.state}")
 
             obj_id = status.output['c'].obj_id
+            logprint(idx, f"[{idx}] obj_id: {obj_id}")
+
             download_path = os.path.join(wd_path, f"{obj_id}.json")
             while True:
                 try:
+                    logprint(idx, f"[{idx}] do fetch {obj_id}")
                     dor_proxy.get_content(obj_id, owner, download_path)
+                    logprint(idx, f"[{idx}] fetch returned {obj_id}")
                     break
                 except UnsuccessfulRequestError as e:
-                    print(e)
+                    logprint(idx, f"[{idx}] error while get content: {e}")
                     time.sleep(0.5)
 
             with open(download_path, 'r') as f:
                 content = json.load(f)
-                results[idx] = content['v']
+                with mutex:
+                    results[idx] = content['v']
+
+            logprint(idx, f"[{idx}] done")
+
+            with rti._session_maker() as session:
+                record: DBJobInfo = session.query(DBJobInfo).get(job.id)
+
+                # wait for docker container to be shutdown
+                while docker_container_running(record.container_id):
+                    time.sleep(1)
+
+                # delete the container
+                docker_delete_container(record.container_id)
 
         except Exception as e:
-            failed[idx] = e
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            with mutex:
+                failed[idx] = e
+            logprint(idx, f"[{idx}] failed: {trace}")
 
     # submit jobs
     n = 50
@@ -504,13 +546,20 @@ def test_job_concurrency(
 
     # wait for all the threads
     for thread in threads:
-        thread.join()
+        thread.join(60)
 
-    for idx, e in failed.items():
+    for i in range(n):
+        print(f"### {i} ###")
+        log = logs[i]
+        for msg in log:
+            print(msg)
+        print("###")
+
+    for i, e in failed.items():
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        logger.error(f"[{idx}] failed: {trace}")
+        print(f"[{i}] failed: {trace}")
 
-    # print(results)
     logger.info(failed)
     assert (len(failed) == 0)
     assert (len(results) == n)
+

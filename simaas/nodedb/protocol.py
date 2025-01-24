@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
-from simaas.p2p.base import P2PProtocol
+from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 from simaas.p2p.exceptions import PeerUnavailableError
 from simaas.nodedb.schemas import NodeInfo
 
@@ -23,23 +23,47 @@ class UpdateIdentityMessage(BaseModel):
 
 
 class P2PUpdateIdentity(P2PProtocol):
+    NAME = 'nodedb-update-id'
+
     def __init__(self, node) -> None:
-        super().__init__('nodedb-update-id', node.keystore)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, peer: NodeInfo) -> Identity:
-        reply: UpdateIdentityMessage = await self.send_and_wait(
-            peer, UpdateIdentityMessage(identity=self._keystore.identity), UpdateIdentityMessage
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=self._node.keystore.curve_secret_key(),
+            curve_public_key=self._node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
         )
+
+        message = UpdateIdentityMessage(identity=self._node.identity)
+
+        reply, _ = await p2p_request(
+            peer_address, self.NAME, message, reply_type=UpdateIdentityMessage
+        )
+        reply: UpdateIdentityMessage = reply  # casting for PyCharm
+
         return reply.identity
 
     async def broadcast(self, peers: List[NodeInfo]) -> List[Identity]:
         result: List[Identity] = []
         for peer in peers:
             try:
-                reply: UpdateIdentityMessage = await self.send_and_wait(
-                    peer, UpdateIdentityMessage(identity=self._keystore.identity), UpdateIdentityMessage
+                peer_address = P2PAddress(
+                    address=peer.p2p_address,
+                    curve_secret_key=self._node.keystore.curve_secret_key(),
+                    curve_public_key=self._node.keystore.curve_public_key(),
+                    curve_server_key=peer.identity.c_public_key
                 )
+
+                message = UpdateIdentityMessage(identity=self._node.identity)
+
+                reply, _ = await p2p_request(
+                    peer_address, self.NAME, message, reply_type=UpdateIdentityMessage
+                )
+                reply: UpdateIdentityMessage = reply  # casting for PyCharm
+
                 result.append(reply.identity)
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
@@ -48,10 +72,13 @@ class P2PUpdateIdentity(P2PProtocol):
 
         return result
 
-    async def handle(self, request: UpdateIdentityMessage) -> Tuple[UpdateIdentityMessage, Optional[str]]:
+    async def handle(
+            self, request: UpdateIdentityMessage, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         logger.info(f"Received identity update from node: {request.identity.name} | {request.identity.id}")
         self._node.db.update_identity(request.identity)
-        return UpdateIdentityMessage(identity=self._keystore.identity), None
+        return UpdateIdentityMessage(identity=self._node.identity), None
 
     @staticmethod
     def request_type():
@@ -68,8 +95,10 @@ class PeerUpdateMessage(BaseModel):
 
 
 class P2PJoinNetwork(P2PProtocol):
+    NAME = 'nodedb-join'
+
     def __init__(self, node) -> None:
-        super().__init__('nodedb-join', node.keystore)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, boot_node: NodeInfo) -> NodeInfo:
@@ -87,6 +116,13 @@ class P2PJoinNetwork(P2PProtocol):
             # send the peer what we know about the network and the peer will reciprocate to update us on its
             # knowledge about the network.
             try:
+                peer_address = P2PAddress(
+                    address=peer.p2p_address,
+                    curve_secret_key=self._node.keystore.curve_secret_key(),
+                    curve_public_key=self._node.keystore.curve_public_key(),
+                    curve_server_key=peer.identity.c_public_key
+                )
+
                 # create update message with a snapshot of the network, excluding nodes we already know about
                 message = PeerUpdateMessage(
                     origin=self._node.db.get_node(),
@@ -94,7 +130,10 @@ class P2PJoinNetwork(P2PProtocol):
                 )
 
                 # send update and wait for reply
-                reply: PeerUpdateMessage = await self.send_and_wait(peer, message, PeerUpdateMessage)
+                reply, _ = await p2p_request(
+                    peer_address, self.NAME, message, reply_type=PeerUpdateMessage
+                )
+                reply: PeerUpdateMessage = reply  # casing for PyCharm
 
                 # update the db information about the originator
                 self._node.db.update_identity(reply.origin.identity)
@@ -123,7 +162,9 @@ class P2PJoinNetwork(P2PProtocol):
 
         return boot_node
 
-    async def handle(self, request: PeerUpdateMessage) -> Tuple[PeerUpdateMessage, Optional[str]]:
+    async def handle(
+            self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # update the db information about the originator
         self._node.db.update_identity(request.origin.identity)
         self._node.db.update_network(request.origin)
@@ -157,23 +198,33 @@ class PeerLeaveMessage(BaseModel):
 
 
 class P2PLeaveNetwork(P2PProtocol):
+    NAME = 'nodedb-leave'
+
     def __init__(self, node) -> None:
-        super().__init__('nodedb-leave', node.keystore)
+        super().__init__(self.NAME)
         self._node = node
 
     async def perform(self, blocking: bool = False) -> None:
         message = PeerLeaveMessage(origin=self._node.db.get_node())
         for peer in self._node.db.get_network():
             if peer.identity.id != message.origin.identity.id:
-                if blocking:
-                    await self.send_and_wait(peer, message, None)
-                else:
-                    asyncio.create_task(self.send_and_wait(peer, message, None))  # noqa: asyncio
+                peer_address = P2PAddress(
+                    address=peer.p2p_address,
+                    curve_secret_key=self._node.keystore.curve_secret_key(),
+                    curve_public_key=self._node.keystore.curve_public_key(),
+                    curve_server_key=peer.identity.c_public_key
+                )
 
-    async def handle(self, request: PeerLeaveMessage) -> Tuple[None, Optional[str]]:
+                if blocking:
+                    await p2p_request(peer_address, self.NAME, message)
+                else:
+                    asyncio.create_task(p2p_request(peer_address, self.NAME, message))
+
+    async def handle(
+            self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._node.db.update_identity(request.origin.identity)
         self._node.db.remove_node_by_id(request.origin.identity)
-
         return None, None
 
     @staticmethod
