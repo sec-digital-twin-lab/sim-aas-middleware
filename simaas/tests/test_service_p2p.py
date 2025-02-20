@@ -17,7 +17,7 @@ from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode
+from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
@@ -32,7 +32,7 @@ logger = Logging.get(__name__)
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
     keystore: Keystore = Keystore.new('p2p_server')
-    _node: Node = test_context.get_node(keystore, enable_rest=True, use_dor=True, use_rti=False)
+    _node: Node = test_context.get_node(keystore, enable_rest=True, dor_type=DORType.BASIC, rti_type=RTIType.NONE)
     _node.p2p.add(P2PLatency())
     _node.p2p.add(P2PThroughput())
 
@@ -44,7 +44,7 @@ def p2p_server(test_context) -> Node:
 @pytest.fixture(scope="session")
 def p2p_client(test_context) -> Node:
     keystore: Keystore = Keystore.new('p2p_client')
-    _node: Node = test_context.get_node(keystore, enable_rest=False, use_dor=False, use_rti=False)
+    _node: Node = test_context.get_node(keystore, enable_rest=False, dor_type=DORType.NONE, rti_type=RTIType.NONE)
 
     yield _node
 
@@ -197,8 +197,10 @@ async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
     with tempfile.TemporaryDirectory() as temp_dir:
         # create a fresh client node
         keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
-        client = DefaultNode(keystore, os.path.join(temp_dir, 'client_node'),
-                             enable_db=True, enable_dor=False, enable_rti=False)
+        client = DefaultNode(
+            keystore, os.path.join(temp_dir, 'client_node'), enable_db=True,
+            dor_type=DORType.BASIC, rti_type=RTIType.NONE
+        )
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()
         client.startup(p2p_address, rest_address=rest_address)

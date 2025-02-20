@@ -51,8 +51,7 @@ class Node(abc.ABC):
             p2p_address=self.p2p.address(),
             rest_address=self.rest.address() if self.rest else None,
             retain_job_history=self.rti.retain_job_history if self.rti else None,
-            strict_deployment=self.rti.strict_deployment if self.rti else None,
-            job_concurrency=self.rti.job_concurrency if self.rti else None
+            strict_deployment=self.rti.strict_deployment if self.rti else None
         )
 
     def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
@@ -107,8 +106,7 @@ class Node(abc.ABC):
             p2p_address=self.p2p.address(),
             rest_address=self.rest.address() if self.rest else None,
             retain_job_history=self.rti.retain_job_history if self.rti else None,
-            strict_deployment=self.rti.strict_deployment if self.rti else None,
-            job_concurrency=self.rti.job_concurrency if self.rti else None
+            strict_deployment=self.rti.strict_deployment if self.rti else None
         ))
 
         # join an existing network of nodes?

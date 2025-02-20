@@ -20,9 +20,10 @@ from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject
 from simaas.helpers import determine_local_ip, PortMaster
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode
+from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy
+from simaas.rti.aws import get_default_ecr_config
 from simaas.rti.schemas import Processor
 
 load_dotenv()
@@ -51,8 +52,12 @@ def docker_available():
         subprocess.run(['docker', 'info'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Docker not available!")
         return False
+
+
+@pytest.fixture(scope="session")
+def aws_available():
+    return get_default_ecr_config() is not None
 
 
 @pytest.fixture(scope="session")
@@ -127,8 +132,8 @@ def session_node(session_keystore):
         _node = DefaultNode.create(
             keystore=session_keystore, storage_path=tempdir,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-            enable_db=True, enable_dor=True, enable_rti=True,
-            retain_job_history=True, strict_deployment=False, job_concurrency=True
+            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
+            retain_job_history=True, strict_deployment=False
         )
 
         yield _node
@@ -283,27 +288,10 @@ class TestContext:
 
         return keystores
 
-    def create_nodes(self, keystores: List[Keystore], perform_join: bool = True, enable_rest: bool = False) -> List[Node]:
-        nodes = []
-        for i, keystore in enumerate(keystores):
-            nodes.append(self.get_node(keystore, enable_rest=enable_rest))
-
-            if perform_join and i > 0:
-                nodes[i].join_network(nodes[0].rest.address())
-                time.sleep(2)
-
-        return nodes
-
     def generate_random_file(self, filename: str, size: int) -> str:
         path = os.path.join(self.testing_dir, filename)
         with open(path, 'wb') as f:
             f.write(os.urandom(int(size)))
-        return path
-
-    def generate_zero_file(self, filename: str, size: int) -> str:
-        path = os.path.join(self.testing_dir, filename)
-        with open(path, 'wb') as f:
-            f.write(b"\0" * int(size))
         return path
 
     def create_file_with_content(self, filename: str, content: str) -> str:
@@ -312,8 +300,8 @@ class TestContext:
             f.write(content)
         return path
 
-    def get_node(self, keystore: Keystore, enable_rest: bool = False, use_dor: bool = True, use_rti: bool = True,
-                 retain_job_history: bool = True, strict_deployment: bool = False, job_concurrency: bool = False,
+    def get_node(self, keystore: Keystore, enable_rest: bool = False, dor_type: DORType = DORType.BASIC,
+                 rti_type: RTIType = RTIType.DOCKER, retain_job_history: bool = True, strict_deployment: bool = False,
                  wd_path: str = None) -> Node:
         name = keystore.identity.id
         if name in self.nodes:
@@ -326,46 +314,15 @@ class TestContext:
         os.makedirs(storage_path, exist_ok=True)
 
         # create node and startup services
-        node = DefaultNode(keystore, storage_path, enable_db=True, enable_dor=use_dor, enable_rti=use_rti,
-                           retain_job_history=retain_job_history if use_rti else None,
-                           strict_deployment=strict_deployment if use_rti else None,
-                           job_concurrency=job_concurrency if use_rti else None)
+        node = DefaultNode(keystore, storage_path, enable_db=True, dor_type=dor_type, rti_type=rti_type,
+                           retain_job_history=retain_job_history if rti_type != RTIType.NONE else None,
+                           strict_deployment=strict_deployment if rti_type != RTIType.NONE else None)
         node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
         time.sleep(2)
 
         self.nodes[name] = node
 
         return node
-
-    def resume_node(self, name: str, enable_rest: bool = False, use_dor: bool = True, use_rti: bool = True,
-                    retain_job_history: bool = True, strict_deployment: bool = False) -> Node:
-        if name in self.nodes:
-            return self.nodes[name]
-
-        else:
-            p2p_address = PortMaster.generate_p2p_address(self.host)
-            rest_address = PortMaster.generate_rest_address(self.host)
-
-            storage_path = os.path.join(self.testing_dir, name)
-            if not os.path.isdir(storage_path):
-                raise RuntimeError(f"no storage path found to resume node at {storage_path}")
-
-            # infer the keystore id
-            keystore = None
-            for filename in os.listdir(storage_path):
-                if filename.endswith('.json') and len(filename) == 69:
-                    keystore = Keystore.from_file(os.path.join(storage_path, filename), 'password')
-                    break
-
-            # create node and startup services
-            node = DefaultNode(keystore, storage_path, enable_db=True, enable_dor=use_dor, enable_rti=use_rti,
-                               retain_job_history=retain_job_history if use_rti else None,
-                               strict_deployment=strict_deployment if use_rti else None,
-                               job_concurrency=False)
-            node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
-
-            self.nodes[name] = node
-            return node
 
 
 def generate_random_file(path: str, size: int) -> str:

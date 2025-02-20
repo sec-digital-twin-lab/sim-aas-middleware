@@ -18,10 +18,9 @@ JOB_ENDPOINT_PREFIX = "/api/v1/job"
 
 
 class RTIService(abc.ABC):
-    def __init__(self, retain_job_history: bool, strict_deployment: bool, job_concurrency: bool):
+    def __init__(self, retain_job_history: bool, strict_deployment: bool):
         self._retain_job_history = retain_job_history
         self._strict_deployment = strict_deployment
-        self._job_concurrency = job_concurrency
 
     @property
     def retain_job_history(self) -> bool:
@@ -30,10 +29,6 @@ class RTIService(abc.ABC):
     @property
     def strict_deployment(self) -> bool:
         return self._strict_deployment
-
-    @property
-    def job_concurrency(self) -> bool:
-        return self._job_concurrency
 
     def endpoints(self) -> List[EndpointDefinition]:
         return [

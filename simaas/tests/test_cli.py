@@ -35,7 +35,7 @@ from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
 from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode
+from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.p2p.base import P2PAddress
 from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
@@ -1223,8 +1223,8 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
         target_node = DefaultNode.create(
             keystore=Keystore.new('dor-target'), storage_path=target_node_storage_path,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-            enable_db=True, enable_dor=False, enable_rti=True,
-            retain_job_history=True, strict_deployment=False, job_concurrency=True
+            enable_db=True, dor_type=DORType.NONE, rti_type=RTIType.DOCKER,
+            retain_job_history=True, strict_deployment=False
         )
 
         #  make exec-only node known to node

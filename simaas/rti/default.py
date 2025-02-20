@@ -60,10 +60,8 @@ class DBJobInfo(Base):
 
 
 class DefaultRTIService(RTIService):
-    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True,
-                 job_concurrency: bool = True):
-        super().__init__(retain_job_history=retain_job_history, strict_deployment=strict_deployment,
-                         job_concurrency=job_concurrency)
+    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
+        super().__init__(retain_job_history=retain_job_history, strict_deployment=strict_deployment)
 
         # initialise properties
         self._mutex = Lock()
