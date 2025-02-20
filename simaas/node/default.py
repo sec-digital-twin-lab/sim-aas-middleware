@@ -8,7 +8,6 @@ from simaas.core.logging import Logging
 from simaas.dor.default import DefaultDORService
 from simaas.node.base import Node
 from simaas.nodedb.default import DefaultNodeDBService
-from simaas.rti.aws import AWSRTIService
 from simaas.rti.default import DefaultRTIService
 
 logger = Logging.get('node.default')
