@@ -7,16 +7,14 @@ import time
 import traceback
 from typing import Optional, List, Tuple, Dict
 
-import docker
-from docker.models.containers import Container
-
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
-from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image
+from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
+    docker_kill_job_container, docker_container_running
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
 from simaas.rti.exceptions import RTIException
@@ -25,55 +23,6 @@ from simaas.rti.schemas import Processor, Job
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
-
-
-def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
-                             custodian_address: str, custodian_pubkey: str, job_id: str) -> str:
-    client = docker.from_env()
-    container = client.containers.run(
-        image=image_name,
-        volumes={
-            # job_path: {'bind': '/job', 'mode': 'rw'}
-        },
-        ports={
-            '6000/tcp': p2p_address,
-        },
-        detach=True,
-        stderr=True, stdout=True,
-        auto_remove=False,
-        environment={
-            'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
-            'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
-            'JOB_ID': job_id
-        }
-    )
-
-    return container.id
-
-
-def docker_kill_job_container(container_id: str) -> None:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    container.kill()
-
-
-def docker_delete_container(container_id: str) -> None:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    container.remove()
-
-
-def docker_container_running(container_id: str) -> bool:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    return container.status == "running"
-
-
-def docker_container_list() -> Dict[str, Container]:
-    client = docker.from_env()
-    return {
-        container.id: container for container in client.containers.list()
-    }
 
 
 class DefaultRTIService(RTIServiceBase):

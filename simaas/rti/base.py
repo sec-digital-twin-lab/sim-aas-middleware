@@ -46,11 +46,6 @@ class DBJobInfo(Base):
     job = Column(NestedMutableJson, nullable=False)
     runner = Column(NestedMutableJson, nullable=False)
 
-    # details = Column(NestedMutableJson, nullable=True)
-    # p2p_address_pub = Column(String(64), nullable=False)
-    # p2p_address_sec = Column(String(64), nullable=False)
-    # container_id = Column(String(16), nullable=False)
-
 
 class RTIServiceBase(RTIService):
     def __init__(self, node, db_path: str, retain_job_history: bool, strict_deployment: bool):
@@ -263,8 +258,7 @@ class RTIServiceBase(RTIService):
         with self._session_maker() as session:
             # create initial job info record and write to database
             record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                               status=status.model_dump(), job=job.model_dump(),
-                               peer=None, details=None)
+                               status=status.model_dump(), job=job.model_dump(), runner={})
             session.add(record)
             session.commit()
 

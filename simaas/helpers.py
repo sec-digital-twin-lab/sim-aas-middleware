@@ -150,7 +150,8 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
         return found
 
 
-def docker_run_job_container(image_name: str, p2p_address_pub: Tuple[str, int], p2p_address_sec: Tuple[str, int]) -> str:
+def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
+                             custodian_address: str, custodian_pubkey: str, job_id: str) -> str:
     client = docker.from_env()
     container = client.containers.run(
         image=image_name,
@@ -158,12 +159,16 @@ def docker_run_job_container(image_name: str, p2p_address_pub: Tuple[str, int], 
             # job_path: {'bind': '/job', 'mode': 'rw'}
         },
         ports={
-            '6000/tcp': p2p_address_pub,
-            '6001/tcp': p2p_address_sec,
+            '6000/tcp': p2p_address,
         },
         detach=True,
         stderr=True, stdout=True,
-        auto_remove=False
+        auto_remove=False,
+        environment={
+            'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
+            'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
+            'JOB_ID': job_id
+        }
     )
 
     return container.id
@@ -174,10 +179,12 @@ def docker_kill_job_container(container_id: str) -> None:
     container = client.containers.get(container_id)
     container.kill()
 
+
 def docker_delete_container(container_id: str) -> None:
     client = docker.from_env()
     container = client.containers.get(container_id)
     container.remove()
+
 
 def docker_container_running(container_id: str) -> bool:
     client = docker.from_env()
