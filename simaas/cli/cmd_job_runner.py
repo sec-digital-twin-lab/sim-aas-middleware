@@ -29,7 +29,6 @@ from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2P
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
 from simaas.core.processor import ProgressListener, ProcessorBase, find_processors
 
-
 class OutputObjectHandler(threading.Thread):
     def __init__(self, logger: logging.Logger, owner, obj_name: str):
         super().__init__()
@@ -471,9 +470,12 @@ class JobRunner(CLICommand, ProgressListener):
             curve_server_key=custodian_pub_key
         )
 
+        # determine runner address
+        external_address = os.environ.get('EXTERNAL_P2P_ADDRESS', service_address)
+
         # perform handshake with custodian
         self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(
-            self._custodian_address, self._keystore.identity, service_address, job_id, self._gpp
+            self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
         ))
         self._logger.info(f"P2P handshake complete: custodian at {self._custodian_address} has id={self._custodian.id}")
 
