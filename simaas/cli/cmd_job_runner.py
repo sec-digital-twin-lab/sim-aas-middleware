@@ -14,7 +14,7 @@ from simaas.p2p.protocol import P2PLatency
 from simaas.p2p.service import P2PService
 
 from simaas.cli.exceptions import CLIRuntimeError
-from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, use_env_or_prompt_if_missing
+from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
 from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
@@ -693,17 +693,15 @@ class JobRunner(CLICommand, ProgressListener):
         prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job working directory:")
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
         prompt_if_missing(args, 'service_address', prompt_for_string, message="Enter address for the P2P service:")
-        use_env_or_prompt_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS', prompt_for_string,
-                                     message="Enter the P2P address of the custodian:")
-        use_env_or_prompt_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY', prompt_for_string,
-                                     message="Enter the public curve key of the custodian:")
-        use_env_or_prompt_if_missing(args, 'job_id', 'JOB_ID', prompt_for_string,
-                                     message="Enter the id of the job:")
+        env_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS')
+        env_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY')
+        env_if_missing(args, 'job_id', 'JOB_ID')
 
         # check if required args are defined
         print(f"Environment: {os.environ}")
+        print(f"Arguments: {args}")
         if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            raise CLIRuntimeError(f"Required custodian and job information missing")
+            raise CLIRuntimeError(f"Required custodian and job arguments missing")
 
         # determine working directory
         self._wd_path = args['job_path']

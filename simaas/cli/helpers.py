@@ -287,6 +287,12 @@ def default_if_missing(args: dict, key: str, default: Any) -> Any:
     return args[key]
 
 
+def env_if_missing(args: dict, key: str, env_var: str) -> Any:
+    if args.get(key, None) is None:
+        args[key] = os.environ.get(env_var, None)
+    return args[key]
+
+
 def use_env_or_prompt_if_missing(args: dict, key: str, env_var: str, function, **func_args) -> Any:
     if args.get(key, None) is None:
         args[key] = os.environ.get(env_var, None)

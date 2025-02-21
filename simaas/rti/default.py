@@ -223,7 +223,8 @@ class DefaultRTIService(RTIServiceBase):
     def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)
         try:
-            docker_kill_job_container(record.container_id)
+            container_id = record.runner['container_id']
+            docker_kill_job_container(container_id)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
