@@ -700,6 +700,10 @@ class JobRunner(CLICommand, ProgressListener):
         use_env_or_prompt_if_missing(args, 'job_id', 'JOB_ID', prompt_for_string,
                                      message="Enter the id of the job:")
 
+        # check if required args are defined
+        if not all(key in os.environ for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
+            raise CLIRuntimeError(f"Required custodian and job information missing")
+
         # determine working directory
         self._wd_path = args['job_path']
         if os.path.isdir(self._wd_path):
