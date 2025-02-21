@@ -37,7 +37,7 @@ from simaas.helpers import find_available_port, docker_export_image, PortMaster,
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.p2p.base import P2PAddress
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PInterruptJob
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
 from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
@@ -776,7 +776,8 @@ def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: st
 
     return obj
 
-def prepare_proc_path(proc_path: str):
+
+def prepare_proc_path(proc_path: str) -> GitProcessorPointer:
     # copy the processor
     shutil.copytree(examples_path, proc_path)
 
@@ -793,6 +794,8 @@ def prepare_proc_path(proc_path: str):
             repository='local', commit_id='commit_id', proc_path='processor', proc_descriptor=proc_descriptor
         )
         json.dump(gpp.model_dump(), f, indent=2)
+
+        return gpp
 
 
 def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: Any = 1) -> str:
@@ -811,35 +814,17 @@ async def execute_job(
         wd_parent_path: str, custodian: Node, job_id: str, a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
         user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
 ) -> JobStatus:
+    # convenience variable
+    rti: DefaultRTIService = custodian.rti
+    user = user if user else custodian.identity
+
+    # prepare working directory
     wd_path = os.path.join(wd_parent_path, job_id)
     os.makedirs(wd_path)
 
-    user = user if user else custodian.identity
-    rti: DefaultRTIService = custodian.rti
-
-    # determine P2P address
-    p2p_address_pub = PortMaster.generate_p2p_address()
-    p2p_address_sec = PortMaster.generate_p2p_address()
-
-    # prepare proc path
+    # prepare proc path and get GPP
     proc_path = os.path.join(wd_path, 'processor')
-    prepare_proc_path(proc_path)
-
-    # execute the job runner command
-    thread = threading.Thread(target=run_job_cmd, args=(p2p_address_pub, p2p_address_sec, proc_path, wd_path))
-    thread.start()
-
-    # wait until the socket can be reached
-    latency, attempt = await P2PLatency.perform_unsecured(p2p_address_pub)
-    print(f"[1] needed {attempt} attempts to test latency: {latency} msec")
-
-    # perform the handshake
-    response: Tuple[GitProcessorPointer, Identity] = \
-        await P2PRunnerPerformHandshake.perform(
-            p2p_address_pub, custodian.keystore, custodian.p2p.address()
-        )
-    gpp: GitProcessorPointer = response[0]
-    peer: Identity = response[1]
+    gpp: GitProcessorPointer = prepare_proc_path(proc_path)
 
     ##########
 
@@ -877,35 +862,43 @@ async def execute_job(
         state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
     )
 
+    # manually create a DB entry for that job
     with rti._session_maker() as session:
-        record = DBJobInfo(id=job.id, proc_id=task.proc_id, user_iid=user.id,
-                           p2p_address_pub=p2p_address_pub, p2p_address_sec=p2p_address_sec,
-                           status=status.model_dump(), job=job.model_dump(),
-                           container_id="0", peer=peer.model_dump())
+        record = DBJobInfo(
+            id=job.id, proc_id=task.proc_id, user_iid=user.id, status=status.model_dump(),
+            job=job.model_dump(), runner={}
+        )
         session.add(record)
         session.commit()
 
     ##########
 
-    # create P2P address
-    peer_address = P2PAddress(
-        address=p2p_address_sec,
-        curve_secret_key=custodian.keystore.curve_secret_key(),
-        curve_public_key=custodian.keystore.curve_public_key(),
-        curve_server_key=peer.c_public_key
-    )
+    # determine P2P address
+    service_address = PortMaster.generate_p2p_address()
 
-    # wait until the socket can be reached
-    latency, attempt = await P2PLatency.perform(peer_address)
-    print(f"[2] needed {attempt} attempts to test latency: {latency} msec")
-
-    # push the job to the runner -> this will trigger execution
-    await P2PPushJob.perform(peer_address, job)
+    # execute the job runner command
+    threading.Thread(
+        target=run_job_cmd,
+        args=(wd_path, proc_path, service_address, custodian.p2p.address(), custodian.identity.c_public_key, job_id)
+    ).start()
 
     # cancel if requested
     if cancel:
-        await asyncio.sleep(1)
-        await P2PInterruptJob.perform(peer_address)
+        await asyncio.sleep(2)
+
+        # get the runner information
+        with rti._session_maker() as session:
+            record = session.query(DBJobInfo).get(job_id)
+            runner_identity: Identity = Identity.model_validate(record.runner['identity'])
+            runner_address: str = record.runner['address']
+
+        # perform the interrupt request
+        await P2PInterruptJob.perform(P2PAddress(
+            address=runner_address,
+            curve_secret_key=custodian.keystore.curve_secret_key(),
+            curve_public_key=custodian.keystore.curve_public_key(),
+            curve_server_key=runner_identity.c_public_key
+        ))
 
     # wait for job to end...
     while True:
@@ -916,14 +909,18 @@ async def execute_job(
 
         await asyncio.sleep(0.5)
 
-def run_job_cmd(p2p_address_pub: str, p2p_address_sec: str, proc_path: str, job_path: str) -> None:
+def run_job_cmd(
+        job_path: str, proc_path: str, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+) -> None:
     try:
         cmd = JobRunner()
         args = {
-            'p2p_address_pub': p2p_address_pub,
-            'p2p_address_sec': p2p_address_sec,
+            'job_path': job_path,
             'proc_path': proc_path,
-            'job_path': job_path
+            'service_address': service_address,
+            'custodian_address': custodian_address,
+            'custodian_pub_key': custodian_pub_key,
+            'job_id': job_id
         }
         cmd.execute(args)
     except Exception as e:

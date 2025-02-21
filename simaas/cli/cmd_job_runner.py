@@ -14,7 +14,7 @@ from simaas.p2p.protocol import P2PLatency
 from simaas.p2p.service import P2PService
 
 from simaas.cli.exceptions import CLIRuntimeError
-from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
+from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, use_env_or_prompt_if_missing
 from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
@@ -25,7 +25,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
     InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
     AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PPushJobStatus, P2PInterruptJob
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
 from simaas.core.processor import ProgressListener, ProcessorBase, find_processors
 
@@ -286,10 +286,14 @@ class JobRunner(CLICommand, ProgressListener):
             Argument('--job-path', dest='job_path', action='store', help="path to the job"),
             Argument('--proc-path', dest='proc_path', action='store', help="path to the processor"),
             Argument('--log-level', dest='log_level', action='store', help="log level: debug, info, warning, error"),
-            Argument('--p2p-address-pub', dest='p2p_address_pub', action='store',
-                     help="address used by P2P service for unsecured communication (handshakes)"),
-            Argument('--p2p-address-sec', dest='p2p_address_sec', action='store',
-                     help="address used by P2P service for secure communication")
+            Argument('--service-address', dest='service_address', action='store',
+                     help="address used by P2P service for secure communication"),
+            Argument('--custodian-address', dest='custodian_address', action='store',
+                     help="P2P address of the custodian"),
+            Argument('--custodian-pub-key', dest='custodian_pub_key', action='store',
+                     help="Public curve key of custodian"),
+            Argument('--job-id', dest='job_id', action='store',
+                     help="Id of the job (will be used by the runner to retrieve job information from the custodian)")
         ])
 
         self._mutex = threading.Lock()
@@ -303,15 +307,14 @@ class JobRunner(CLICommand, ProgressListener):
 
         # set during initialise_p2p
         self._keystore: Optional[Keystore] = None
-        self._custodian: Optional[Identity] = None
+        self._p2p: Optional[P2PService] = None
         self._custodian_address: Optional[P2PAddress] = None
-        self._p2p_pub: Optional[P2PService] = None
-        self._p2p_sec: Optional[P2PService] = None
+        self._custodian: Optional[Identity] = None
+        self._job: Optional[Job] = None
 
         # set upon job update
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
-        self._job: Optional[Job] = None
         self._status_handler: Optional[StatusHandler] = None
         self._user: Optional[Identity] = None
 
@@ -362,36 +365,6 @@ class JobRunner(CLICommand, ProgressListener):
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
                 self._logger.error(f"Received job cancellation notification -> INTERRUPT FAILED: {e}\n{trace}")
-
-    def on_custodian_update(self, custodian: Identity, custodian_address: str) -> None:
-        self._custodian = custodian
-        self._custodian_address = P2PAddress(
-            address=custodian_address,
-            curve_secret_key=self._keystore.curve_secret_key(),
-            curve_public_key=self._keystore.curve_public_key(),
-            curve_server_key=custodian.c_public_key
-        )
-        self._logger.info(f"Using custodian at {custodian_address} with id={self._custodian.id}")
-
-    def on_job_update(self, job: Job) -> None:
-        self._logger.info(f"Received job with id={job.id}")
-
-        # write the job descriptor
-        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
-        with open(job_descriptor_path, 'w') as f:
-            json.dump(job.model_dump(), f, indent=2)
-
-        # prepare input/output interfaces
-        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.input}
-        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.output}
-
-        # update job and set up status handler
-        job_status_path = os.path.join(self._wd_path, 'job.status')
-        self._status_handler = StatusHandler(self._logger, self._custodian_address, job.id, job_status_path)
-        self._status_handler.start()
-        self._job = job
 
     def on_progress_update(self, progress: int) -> None:
         self._logger.info(f"Received progress update notification: {progress}")
@@ -468,7 +441,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # find processors at the given location
         procs_by_name = find_processors(proc_path)
-        print(f"Found the following processors: {list(procs_by_name.keys())}")
+        self._logger.info(f"Found the following processors: {list(procs_by_name.keys())}")
 
         # do we have the processor we are looking for?
         proc_name = self._gpp.proc_descriptor.name
@@ -476,32 +449,50 @@ class JobRunner(CLICommand, ProgressListener):
         if self._proc is None:
             raise CLIRuntimeError(f"Processor '{proc_name}' not found at '{proc_path}'.")
 
-    def _initialise_p2p(self, p2p_address_pub: str, p2p_address_sec: str) -> None:
+    def _initialise_p2p(
+            self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+    ) -> None:
         # create the ephemeral job keystore
         self._keystore = Keystore.new('runner')
         self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
 
-        # start the unsecured P2P service
-        self._p2p_pub = P2PService(self._keystore, p2p_address_pub)
-        self._p2p_pub.add(P2PLatency())
-        self._p2p_pub.add(P2PRunnerPerformHandshake(self))
-        self._p2p_pub.start_service(encrypt=False)
-        self._logger.info("Insecure P2P service up -> waiting for handshake.")
-
-        while self._custodian is None:
-            time.sleep(0.5)
-        self._logger.info("Handshake done!")
-
         # start the secured P2P service
-        self._p2p_sec = P2PService(self._keystore, p2p_address_sec)
-        self._p2p_sec.add(P2PLatency())
-        self._p2p_sec.add(P2PPushJob(self))
-        self._p2p_sec.add(P2PInterruptJob(self))
-        self._p2p_sec.start_service(encrypt=True)
-        self._logger.info("Secure P2P service up.")
+        self._p2p = P2PService(self._keystore, service_address)
+        self._p2p.add(P2PLatency())
+        self._p2p.add(P2PInterruptJob(self))
+        self._p2p.start_service(encrypt=True)
+        self._logger.info("P2P service interface is up.")
 
-        self._p2p_pub.stop_service()
-        self._logger.info("Insecure P2P service down.")
+        # determine the full P2P address of the custodian
+        self._custodian_address = P2PAddress(
+            address=custodian_address,
+            curve_secret_key=self._keystore.curve_secret_key(),
+            curve_public_key=self._keystore.curve_public_key(),
+            curve_server_key=custodian_pub_key
+        )
+
+        # perform handshake with custodian
+        self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(
+            self._custodian_address, self._keystore.identity, service_address, job_id, self._gpp
+        ))
+        self._logger.info(f"P2P handshake complete: custodian at {self._custodian_address} has id={self._custodian.id}")
+
+    def _initialise_job(self) -> None:
+        # write the job descriptor
+        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
+        with open(job_descriptor_path, 'w') as f:
+            json.dump(self._job.model_dump(), f, indent=2)
+
+        # prepare input/output interfaces
+        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.input}
+        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.output}
+
+        # update job and set up status handler
+        job_status_path = os.path.join(self._wd_path, 'job.status')
+        self._status_handler = StatusHandler(self._logger, self._custodian_address, self._job.id, job_status_path)
+        self._status_handler.start()
 
     def _store_value_input_data_objects(self) -> None:
         for item in self._job.task.input:
@@ -701,8 +692,13 @@ class JobRunner(CLICommand, ProgressListener):
     def execute(self, args: dict) -> None:
         prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job working directory:")
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
-        prompt_if_missing(args, 'p2p_address_pub', prompt_for_string, message="Enter address for unsecured P2P service:")
-        prompt_if_missing(args, 'p2p_address_sec', prompt_for_string, message="Enter address for secured P2P service:")
+        prompt_if_missing(args, 'service_address', prompt_for_string, message="Enter address for the P2P service:")
+        use_env_or_prompt_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS', prompt_for_string,
+                                     message="Enter the P2P address of the custodian:")
+        use_env_or_prompt_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY', prompt_for_string,
+                                     message="Enter the public curve key of the custodian:")
+        use_env_or_prompt_if_missing(args, 'job_id', 'JOB_ID', prompt_for_string,
+                                     message="Enter the id of the job:")
 
         # determine working directory
         self._wd_path = args['job_path']
@@ -720,17 +716,20 @@ class JobRunner(CLICommand, ProgressListener):
             self._initialise_processor(args['proc_path'])
 
             # initialise P2P services
-            self._initialise_p2p(args['p2p_address_pub'], args['p2p_address_sec'])
+            self._initialise_p2p(
+                args['service_address'], args['custodian_address'], args['custodian_pub_key'], args['job_id']
+            )
 
-            # wait for runner to be primed
-            self._logger.info("END initialising job runner -> WAITING for job...")
-            while self._job is None:
-                time.sleep(0.5)
+            # if, for some reason, we have not received a job, then we can't proceed.
+            if self._job is None:
+                raise CLIRuntimeError("Handshake failed: no job received")
+
+            # initialise the job
+            self._initialise_job()
 
             # update state
+            self._logger.info("END initialising job runner.")
             self._status_handler.update(state=JobStatus.State.INITIALISED)
-
-            self._job: Job = self._job  # for PyCharm...
             self._logger.info(f"BEGIN processing job {self._job.id}...")
 
             # fetch the user identity

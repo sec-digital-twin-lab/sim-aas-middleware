@@ -18,7 +18,7 @@ from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
 from simaas.rti.api import RTIService
 from simaas.meta import __version__
-from simaas.rti.protocol import P2PPushJobStatus
+from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
 
 logger = Logging.get('node.base')
 
@@ -82,6 +82,7 @@ class Node(abc.ABC):
         self.p2p.add(P2PFetchDataObject(self))
         self.p2p.add(P2PPushDataObject(self))
         self.p2p.add(P2PPushJobStatus(self))
+        self.p2p.add(P2PRunnerPerformHandshake(self))
         self.p2p.start_service()
 
         if rest_address is not None:
