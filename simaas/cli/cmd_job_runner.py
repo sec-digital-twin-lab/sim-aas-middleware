@@ -701,8 +701,8 @@ class JobRunner(CLICommand, ProgressListener):
                                      message="Enter the id of the job:")
 
         # check if required args are defined
-        if not all(key in os.environ for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            print(f"Required env variables not found in {os.environ}")
+        print(f"Environment: {os.environ}")
+        if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
             raise CLIRuntimeError(f"Required custodian and job information missing")
 
         # determine working directory
