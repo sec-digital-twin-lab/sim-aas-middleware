@@ -29,7 +29,7 @@ from simaas.rti.schemas import Processor
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'c50fa05345f174ab9e871bd17c7cd87bf32eb856'
+REPOSITORY_COMMIT_ID = '526898cf94e93bf83fc8345024002431d7fe717f'
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
