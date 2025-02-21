@@ -167,7 +167,8 @@ def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
         environment={
             'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
             'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
-            'JOB_ID': job_id
+            'JOB_ID': job_id,
+            'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
         }
     )
 

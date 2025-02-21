@@ -9,6 +9,7 @@ import traceback
 from typing import Union
 
 import pytest
+from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
 
 from simaas.node.default import RTIType
 from simaas.rti.default import DefaultRTIService, DBJobInfo
@@ -19,7 +20,6 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
-from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
@@ -526,11 +526,12 @@ def test_job_concurrency(
                 record: DBJobInfo = session.query(DBJobInfo).get(job.id)
 
                 # wait for docker container to be shutdown
-                while docker_container_running(record.container_id):
+                container_id: str = record.runner['container_id']
+                while docker_container_running(container_id):
                     time.sleep(1)
 
                 # delete the container
-                docker_delete_container(record.container_id)
+                docker_delete_container(container_id)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

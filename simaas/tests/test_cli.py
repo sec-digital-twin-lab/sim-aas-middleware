@@ -8,13 +8,12 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import Tuple, List, Union, Any
+from typing import List, Union, Any
 
 import pytest
 from docker.errors import ImageNotFound
 from simaas.nodedb.protocol import P2PJoinNetwork
 
-from simaas.p2p.protocol import P2PLatency
 from simaas.rti.default import DBJobInfo, DefaultRTIService
 
 from examples.adapters.proc_example.processor import write_value
@@ -37,7 +36,7 @@ from simaas.helpers import find_available_port, docker_export_image, PortMaster,
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.p2p.base import P2PAddress
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PInterruptJob
+from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
 from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL

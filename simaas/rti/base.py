@@ -395,14 +395,14 @@ class RTIServiceBase(RTIService):
             raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
 
         # start the cancellation worker
-        peer = Identity.model_validate(record.peer)
-        peer_address = P2PAddress(
-            address=record.p2p_address_sec,
+        runner = Identity.model_validate(record.runner['identity'])
+        runner_address = P2PAddress(
+            address=record.runner['address'],
             curve_secret_key=self._node.keystore.curve_secret_key(),
             curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.c_public_key
+            curve_server_key=runner.c_public_key
         )
-        threading.Thread(target=self.perform_cancel, args=(job_id, peer_address)).start()
+        threading.Thread(target=self.perform_cancel, args=(job_id, runner_address)).start()
 
         return status
 

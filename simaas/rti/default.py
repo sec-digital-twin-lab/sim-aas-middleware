@@ -5,7 +5,7 @@ import socket
 import time
 
 import traceback
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, Tuple, Dict
 
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
@@ -160,8 +160,7 @@ class DefaultRTIService(RTIServiceBase):
 
     def perform_submit(self, proc: Processor, job: Job) -> dict:
         # determine P2P addresses
-        p2p_addresses = self._find_available_addresses(n=1)
-        runner_p2p_address: Tuple[str, int] = p2p_addresses[0]
+        runner_p2p_address: Tuple[str, int] = self._find_available_address()
 
         # start the job container and keep the container id
         logger.info(f"[submit:{shorten_id(proc.id)}] [job:{job.id}] start job container")
@@ -229,7 +228,7 @@ class DefaultRTIService(RTIServiceBase):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
 
-    def _find_available_addresses(self, n: int = 2, max_attempts: int = 100) -> List[Tuple[str, int]]:
+    def _find_available_address(self, max_attempts: int = 100) -> Tuple[str, int]:
         def is_port_free(_address: Tuple[str, int]) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
@@ -240,26 +239,18 @@ class DefaultRTIService(RTIServiceBase):
                     return True  # Port is free
 
         host: str = self._node.info.rest_address[0]
-        addresses: List[Tuple[str, int]] = []
         for i in range(max_attempts):
-            # update the most recent port
             with self._mutex:
-                self._most_recent_port = self._most_recent_port + n if self._most_recent_port else self._port_range[0]
+                # update the most recent port
+                self._most_recent_port = self._most_recent_port + 1 if self._most_recent_port else self._port_range[0]
                 if self._most_recent_port >= self._port_range[1]:
                     self._most_recent_port = self._port_range[0]
 
-                # create the addresses
-                for j in range(n):
-                    addresses.append((host, self._most_recent_port + j))
+                # create the address
+                address = (host, self._most_recent_port)
 
-            # test if all addresses are available
-            all_available = True
-            for address in addresses:
-                if not is_port_free(address):
-                    all_available = False
-                    break
-
-            if all_available:
-                return addresses
+            # test the address
+            if is_port_free(address):
+                return address
 
         raise RuntimeError("No free ports found in the specified range.")
