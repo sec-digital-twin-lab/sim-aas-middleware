@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Dict
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
+from simaas.rti.schemas import Task
 
 
 def determine_local_ip() -> Optional[str]:
@@ -151,26 +152,53 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
 
 
 def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
-                             custodian_address: str, custodian_pubkey: str, job_id: str) -> str:
+                             custodian_address: str, custodian_pubkey: str, job_id: str,
+                             budget: Optional[Task.Budget] = None) -> str:
+
     client = docker.from_env()
-    container = client.containers.run(
-        image=image_name,
-        volumes={
-            # job_path: {'bind': '/job', 'mode': 'rw'}
-        },
-        ports={
-            '6000/tcp': p2p_address,
-        },
-        detach=True,
-        stderr=True, stdout=True,
-        auto_remove=False,
-        environment={
-            'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
-            'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
-            'JOB_ID': job_id,
-            'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
-        }
-    )
+
+    volumes = {
+        # job_path: {'bind': '/job', 'mode': 'rw'}
+    }
+
+    ports = {
+        '6000/tcp': p2p_address,
+    }
+
+    environment = {
+        'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
+        'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
+        'JOB_ID': job_id,
+        'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
+    }
+
+    if budget is None:
+        container = client.containers.run(
+            image=image_name,
+            volumes=volumes,
+            ports=ports,
+            detach=True,
+            stderr=True, stdout=True,
+            auto_remove=False,
+            environment=environment
+        )
+    else:
+        # determine CPU quota
+        cpu_period = 100000
+        cpu_quota = cpu_period * budget.vcpus
+
+        container = client.containers.run(
+            image=image_name,
+            volumes=volumes,
+            ports=ports,
+            detach=True,
+            stderr=True, stdout=True,
+            auto_remove=False,
+            environment=environment,
+            mem_limit=budget.memory,
+            cpu_period=cpu_period,
+            cpu_quota=cpu_quota
+        )
 
     return container.id
 

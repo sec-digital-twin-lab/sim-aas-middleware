@@ -165,7 +165,8 @@ class DefaultRTIService(RTIServiceBase):
         # start the job container and keep the container id
         logger.info(f"[submit:{shorten_id(proc.id)}] [job:{job.id}] start job container")
         container_id = docker_run_job_container(
-            proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id
+            proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
+            budget=job.task.budget
         )
 
         # update the runner information

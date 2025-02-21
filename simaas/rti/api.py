@@ -171,7 +171,7 @@ class RTIProxy(EndpointProxy):
 
     def submit_job(self, proc_id: str, job_input: List[Union[Task.InputReference, Task.InputValue]],
                    job_output: List[Task.Output], with_authorisation_by: Keystore, name: str = None,
-                   description: str = None) -> Job:
+                   description: str = None, budget: Task.Budget = None) -> Job:
 
         # build the body
         body = {
@@ -180,7 +180,8 @@ class RTIProxy(EndpointProxy):
             'output': [o.model_dump() for o in job_output],
             'user_iid': with_authorisation_by.identity.id,
             'name': name,
-            'description': description
+            'description': description,
+            'budget': budget.model_dump() if budget else None
         }
 
         # post the request

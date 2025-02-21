@@ -850,7 +850,9 @@ async def execute_job(
         target_node_iid=target_node.identity.id if target_node else custodian.identity.id
     )
 
-    task = Task(proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='')
+    task = Task(
+        proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='', budget=None
+    )
 
     # create job
     job = Job(
@@ -1697,15 +1699,18 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credenti
     # create task
     task_path = os.path.join(temp_dir, 'task.json')
     with open(task_path, 'w') as f:
-        task = Task(proc_id=proc.id, user_iid=keystore.identity.id, name='test-task', description='',
-                    input=[
-                        Task.InputValue(name='a', type='value', value={'v': 10}),
-                        Task.InputValue(name='b', type='value', value={'v': 10})
-                    ],
-                    output=[
-                        Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
-                                    content_encrypted=False, target_node_iid=session_node.identity.id)
-                    ])
+        task = Task(
+            proc_id=proc.id, user_iid=keystore.identity.id, name='test-task', description='',
+            input=[
+                Task.InputValue(name='a', type='value', value={'v': 10}),
+                Task.InputValue(name='b', type='value', value={'v': 10})
+            ],
+            output=[
+                Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
+                            content_encrypted=False, target_node_iid=session_node.identity.id)
+            ],
+            budget=None
+        )
         # noinspection PyTypeChecker
         json.dump(task.model_dump(), f, indent=2)
 

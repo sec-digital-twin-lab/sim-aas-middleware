@@ -32,12 +32,17 @@ class Task(BaseModel):
         content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of this data object should be encrypted using the owner's public encryption key.", examples=[False])
         target_node_iid: Optional[str] = Field(title="Target Node IId", description="The id of the target node's identity for storing the output data objects")
 
+    class Budget(BaseModel):
+        vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs allocated for this task.")
+        memory: str = Field(..., title="Memory", description="The amount of memory allocated for this task.")
+
     proc_id: str = Field(..., title="Processor Id", description="The id of the processor to be used for this task.")
     user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns this task.")
     input: List[Union[InputReference, InputValue]] = Field(..., title="Input", description="Information needed for every input defined by the processor.")
     output: List[Output] = Field(..., title="Output", description="Information needed for every output defined by the processor.")
     name: Optional[str] = Field(title="Name", description="The optional name of this task.")
     description: Optional[str] = Field(title="Description", description="The optional description of this task.")
+    budget: Optional[Budget] = Field(title="Budget", description="The optional resource budget for this task.")
 
 
 class Job(BaseModel):
