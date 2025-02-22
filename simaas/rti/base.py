@@ -74,7 +74,7 @@ class RTIServiceBase(RTIService):
         ...
 
     @abc.abstractmethod
-    def perform_undeploy(self, proc_id: str, image_name: str, keep_image: bool = True) -> None:
+    def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
         ...
 
     @abc.abstractmethod
@@ -200,7 +200,7 @@ class RTIServiceBase(RTIService):
                     session.commit()
 
                     # start the worker
-                    threading.Thread(target=self.perform_undeploy, args=(proc.id, proc.image_name,)).start()
+                    threading.Thread(target=self.perform_undeploy, args=(proc, )).start()
 
                 # is the state busy going up? -> throw error
                 elif proc.state == Processor.State.BUSY_DEPLOY:

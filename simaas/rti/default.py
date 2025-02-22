@@ -138,25 +138,27 @@ class DefaultRTIService(RTIServiceBase):
         finally:
             loop.close()
 
-    def perform_undeploy(self, proc_id: str, image_name: str, keep_image: bool = True) -> None:
+    def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
+        # remove the docker image (if applicable)
+        if not keep_image:
+            try:
+                docker_delete_image(proc.image_name)
+
+            except Exception as e:
+                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                logger.error(
+                    f"[undeploy:{shorten_id(proc.proc_id)}] failed to delete docker image {proc.image_name}: {trace}"
+                )
+
         # remove the record from the db
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBDeployedProcessor).get(proc_id)
+                record = session.query(DBDeployedProcessor).get(proc.proc_id)
                 if record:
                     session.delete(record)
                     session.commit()
                 else:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] db record not found for removal.")
-
-        # remove the docker image (if applicable)
-        if not keep_image:
-            try:
-                docker_delete_image(image_name)
-
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
+                    logger.warning(f"[undeploy:{shorten_id(proc.proc_id)}] db record not found for removal.")
 
     def perform_submit(self, proc: Processor, job: Job) -> dict:
         # determine P2P addresses
