@@ -5,6 +5,8 @@ import time
 import traceback
 from typing import Optional, Tuple
 
+from simaas.rti.schemas import Processor
+
 from simaas.dor.api import DORService
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
@@ -116,13 +118,31 @@ class Node(abc.ABC):
         if boot_node_address:
             self.join_network(boot_node_address)
 
-    def shutdown(self, leave_network: bool = True) -> None:
+    def shutdown(self, leave_network: bool = True, timeout: int = 60) -> None:
+        # leave the network
         if leave_network:
             self.leave_network()
-
         else:
             logger.warning("node shutting down silently (not leaving the network)")
 
+        # if we have any procs deployed, undeploy them
+        if self.rti is not None:
+            for proc in self.rti.get_all_procs():
+                proc_id: str = proc.id
+                self.rti.undeploy(proc_id)
+
+                # wait until proc is undeployed
+                deadline = get_timestamp_now() + timeout * 1000
+                check: Optional[Processor] = self.rti.get_proc(proc_id)
+                while get_timestamp_now() < deadline and check is not None:
+                    time.sleep(1)
+                    check: Optional[Processor] = self.rti.get_proc(proc_id)
+
+                # successful?
+                if check is not None:
+                    logger.warning(f"undeploying processor {proc_id} failed.")
+
+        # stop the services
         logger.info("stopping all services.")
         if self.p2p:
             self.p2p.stop_service()

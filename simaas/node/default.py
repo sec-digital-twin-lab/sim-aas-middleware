@@ -8,6 +8,7 @@ from simaas.core.logging import Logging
 from simaas.dor.default import DefaultDORService
 from simaas.node.base import Node
 from simaas.nodedb.default import DefaultNodeDBService
+from simaas.rti.aws import AWSRTIService
 from simaas.rti.default import DefaultRTIService
 
 logger = Logging.get('node.default')
@@ -20,6 +21,7 @@ class DORType(Enum):
 class RTIType(Enum):
     NONE = 'none'
     DOCKER = 'docker'
+    AWS = 'aws'
 
 
 class DefaultNode(Node):
@@ -48,6 +50,13 @@ class DefaultNode(Node):
             self.rti = DefaultRTIService(self, db_path,
                                          retain_job_history=retain_job_history,
                                          strict_deployment=strict_deployment)
+
+        elif rti_type == RTIType.AWS:
+            db_path = f"sqlite:///{os.path.join(self._datastore_path, 'rti.db')}"
+            self.rti = AWSRTIService(self, db_path,
+                                     retain_job_history=retain_job_history,
+                                     strict_deployment=strict_deployment)
+
 
     @property
     def datastore(self) -> str:
