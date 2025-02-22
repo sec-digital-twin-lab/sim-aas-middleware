@@ -105,6 +105,13 @@ class OutputObjectHandler(threading.Thread):
                 'target_node': target_node.model_dump()
             })
 
+        # check if the target node is the custodian, if so override the P2P address
+        if target_node.identity.id == self._owner.custodian_identity.id:
+            self._logger.info(
+                f"target node is custodian -> overriding P2P address: {self._owner.custodian_address.address}"
+            )
+            target_node.p2p_address = self._owner.custodian_address.address
+
         # determine recipe
         recipe = DataObjectRecipe(
             name=obj_name,
@@ -139,20 +146,26 @@ class OutputObjectHandler(threading.Thread):
         # creator(s) is assumed to be the user on whose behalf the job is executed
         creator_iids = [self._owner.user.id]
 
-        # license is least-permissive by default
-        license = DataObject.License(by=True, sa=True, nc=True, nd=True)
-
         # push the data object to the DOR
+        self._logger.info(
+            f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
+        )
         obj = await P2PPushDataObject.perform(
             target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
-            restricted_access, content_encrypted, license, recipe,
+            restricted_access, content_encrypted,
+            license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+            recipe=recipe,
             tags={
                 'name': obj_name,
                 'job_id': self._owner.job.id
             }
         )
 
+        self._logger.info(
+            f"END push output '{obj_name}'"
+        )
+        
         return obj
 
     def run(self) -> None:
@@ -352,6 +365,10 @@ class JobRunner(CLICommand, ProgressListener):
         return self._user
 
     @property
+    def custodian_identity(self) -> Optional[Identity]:
+        return self._custodian
+
+    @property
     def custodian_address(self) -> Optional[P2PAddress]:
         return self._custodian_address
 
@@ -489,7 +506,8 @@ class JobRunner(CLICommand, ProgressListener):
         self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
         ))
-        self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address} has id={self._custodian.id}")
+        self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
+                          f"has id={self._custodian.id}")
 
     def _initialise_job(self) -> None:
         # write the job descriptor
