@@ -150,7 +150,7 @@ class OutputObjectHandler(threading.Thread):
         self._logger.info(
             f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
         )
-        
+
         obj = await P2PPushDataObject.perform(
             target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
