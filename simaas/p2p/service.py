@@ -45,6 +45,10 @@ class P2PService:
         """Returns the address (host:port) of the P2P service."""
         return self._address
 
+    def port(self) -> int:
+        """Returns the port of the P2P service."""
+        return self._port
+
     def fq_address(self) -> str:
         """Returns the fully qualified address of the P2P service"""
         fqdn = socket.getfqdn()

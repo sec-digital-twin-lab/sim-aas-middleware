@@ -2,9 +2,12 @@ import abc
 import json
 import os
 import threading
+import traceback
 from typing import Optional, List
 
 from fastapi.requests import Request
+from simaas.core.exceptions import ExceptionContent
+
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 
 from simaas.cli.helpers import shorten_id
@@ -263,18 +266,34 @@ class RTIServiceBase(RTIService):
             session.commit()
 
         # perform the job submission and update the details
-        details = self.perform_submit(proc, job)
+        try:
+            details = self.perform_submit(proc, job)
 
-        # update the runner information
-        with self._session_maker() as session:
-            # get the record and status
-            record = session.query(DBJobInfo).get(job.id)
+            # update the runner information
+            with self._session_maker() as session:
+                record = session.query(DBJobInfo).get(job.id)
+                runner: dict = dict(record.runner)
+                runner.update(details)
+                record.runner = runner
+                session.commit()
 
-            # update
-            runner: dict = dict(record.runner)
-            runner.update(details)
-            record.runner = runner
-            session.commit()
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[submit:{shorten_id(proc.id)}] failed: {trace}")
+
+            # update the runner information
+            with self._session_maker() as session:
+                status.state = JobStatus.State.FAILED
+                status.errors.append(JobStatus.Error(
+                    message=str(e),
+                    exception=ExceptionContent(
+                        id=0, reason=str(e), details={}
+                    )
+                ))
+
+                record = session.query(DBJobInfo).get(job.id)
+                record.status = status
+                session.commit()
 
         return job
 
