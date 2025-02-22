@@ -6,14 +6,15 @@ import re
 import threading
 import time
 import traceback
-from typing import Dict, Union, Optional, Tuple, Set
+from typing import Dict, Union, Optional, Tuple, Set, List
+
+from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
-
 from simaas.p2p.service import P2PService
-
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
 from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
@@ -22,7 +23,6 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
-from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
     InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
     AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
@@ -57,8 +57,7 @@ class OutputObjectHandler(threading.Thread):
             })
 
         # get the owner
-        db_proxy = NodeDBProxy(self._owner.job.custodian.rest_address)
-        owner = db_proxy.get_identity(task_out.owner_iid)
+        owner = await P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
         if owner is None:
             raise DataObjectOwnerNotFoundError({
                 'output_name': obj_name,
@@ -83,28 +82,27 @@ class OutputObjectHandler(threading.Thread):
         # if content_encrypted:
         #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
 
+        # get the network
+        network: List[NodeInfo] = await P2PGetNetwork.perform(self._owner.custodian_address)
+
         # do we have a target node specified for storing the data object?
-        target_address = self._owner.job.custodian.rest_address
+        target_node = self._owner.job.custodian
         if task_out.target_node_iid:
             # check with the node db to see if we know about this node
-            network = {item.identity.id: item for item in db_proxy.get_network()}
-            if task_out.target_node_iid not in network:
+            nodes_by_id: Dict[str, NodeInfo] = {node.identity.id: node for node in network}
+            if task_out.target_node_iid not in nodes_by_id:
                 raise CLIRuntimeError("Target node not found in network", details={
                     'target_node_iid': task_out.target_node_iid,
                     'network': network
                 })
 
             # extract the rest address from that node record
-            node = network[task_out.target_node_iid]
-            target_address = node.rest_address
+            target_node = nodes_by_id[task_out.target_node_iid]
 
         # check if the target node has DOR capabilities
-        db_proxy = NodeDBProxy(target_address)
-        node = db_proxy.get_node()
-        if not node.dor_service:
+        if not target_node.dor_service:
             raise CLIRuntimeError("Target node does not support DOR capabilities", details={
-                'target_address': target_address,
-                'node': node.model_dump()
+                'target_node': target_node.model_dump()
             })
 
         # determine recipe
@@ -146,7 +144,7 @@ class OutputObjectHandler(threading.Thread):
 
         # push the data object to the DOR
         obj = await P2PPushDataObject.perform(
-            node.p2p_address, self._owner.keystore, node.identity,
+            target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
             restricted_access, content_encrypted, license, recipe,
             tags={
@@ -353,6 +351,10 @@ class JobRunner(CLICommand, ProgressListener):
     def user(self) -> Optional[Identity]:
         return self._user
 
+    @property
+    def custodian_address(self) -> Optional[P2PAddress]:
+        return self._custodian_address
+
     def on_job_cancel(self) -> None:
         # interrupt the processor. note: whether this request is honored or even implemented depends on the
         # actual processor.
@@ -531,8 +533,7 @@ class JobRunner(CLICommand, ProgressListener):
             return {}
 
         # obtain a list of nodes in the network and filter by peers with DOR capability
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        network = db_proxy.get_network()
+        network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
         network = [node for node in network if node.dor_service]
 
         loop = asyncio.new_event_loop()
@@ -675,9 +676,8 @@ class JobRunner(CLICommand, ProgressListener):
                     })
 
         # check if the owner identity exists for each output data object
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
         for o in self._job.task.output:
-            owner = db_proxy.get_identity(o.owner_iid)
+            owner = asyncio.run(P2PGetIdentity.perform(self._custodian_address, o.owner_iid))
             if owner is None:
                 raise DataObjectOwnerNotFoundError({
                     'output_name': o.name,
@@ -748,8 +748,9 @@ class JobRunner(CLICommand, ProgressListener):
             self._logger.info(f"BEGIN processing job {self._job.id}...")
 
             # fetch the user identity
-            db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-            self._user: Identity = db_proxy.get_identity(self._job.task.user_iid)
+            self._user: Optional[Identity] = asyncio.run(
+                P2PGetIdentity.perform(self._custodian_address, self._job.task.user_iid)
+            )
             if self._user is None:
                 raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
             self._logger.info(f"Using user identity with id={self._user.id}")

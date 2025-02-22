@@ -12,7 +12,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.nodedb.api import NodeDBService, NodeDBProxy
-from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
+from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity, P2PGetIdentity, P2PGetNetwork
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
@@ -82,6 +82,8 @@ class Node(abc.ABC):
         self.p2p.add(P2PFetchDataObject(self))
         self.p2p.add(P2PPushDataObject(self))
         self.p2p.add(P2PPushJobStatus(self))
+        self.p2p.add(P2PGetIdentity(self))
+        self.p2p.add(P2PGetNetwork(self))
         self.p2p.add(P2PRunnerPerformHandshake(self))
         self.p2p.start_service()
 
