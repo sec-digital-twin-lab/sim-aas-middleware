@@ -195,7 +195,7 @@ def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
             stderr=True, stdout=True,
             auto_remove=False,
             environment=environment,
-            mem_limit=budget.memory,
+            mem_limit=f"{budget.memory}m",
             cpu_period=cpu_period,
             cpu_quota=cpu_quota
         )

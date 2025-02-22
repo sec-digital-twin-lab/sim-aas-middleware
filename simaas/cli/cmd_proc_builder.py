@@ -63,7 +63,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
 
 def build_processor_image(processor_path: str, image_name: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False) -> bool:
+                          force_build: bool = False, platform: Optional[str] = None) -> bool:
     # check if the image already exists
     client = docker.from_env()
     image_existed = False
@@ -90,6 +90,8 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
             try:
                 # assemble the command
                 command = ['docker', 'build', '--no-cache']
+                if platform:
+                    command.extend(['--platform', platform])
                 if credentials:
                     # write the credentials to file (temporarily)
                     with open(credentials_path, 'w') as f:

@@ -183,7 +183,7 @@ def test_rest_submit_list_get_job(
     ]
 
     # submit the job
-    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory="1024m"))
+    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=1024))
     assert (result is not None)
 
     job_id = result.id

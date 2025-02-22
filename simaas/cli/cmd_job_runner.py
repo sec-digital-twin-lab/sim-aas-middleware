@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 import traceback
@@ -470,8 +471,16 @@ class JobRunner(CLICommand, ProgressListener):
             curve_server_key=custodian_pub_key
         )
 
-        # determine runner address
+        # figure out the port of the P2P service
+        fields = re.split(r'[:/]+', service_address)
+        port = fields[-1]
+
+        # determine the external address (resolve redirection to host name if applicable)
         external_address = os.environ.get('EXTERNAL_P2P_ADDRESS', service_address)
+        if external_address == 'HOSTNAME':
+            hostname = os.environ['HOSTNAME']
+            external_address = f"tcp://{hostname}:{port}"
+        self._logger.info(f"P2P service determined external address as {external_address}")
 
         # perform handshake with custodian
         self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(

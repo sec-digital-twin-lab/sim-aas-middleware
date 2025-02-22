@@ -169,13 +169,6 @@ class DefaultRTIService(RTIServiceBase):
             budget=job.task.budget
         )
 
-        # update the runner information
-        with self._session_maker() as session:
-            # get the record and status
-            record = session.query(DBJobInfo).get(job.id)
-            record.runner['container_id'] = container_id
-            session.commit()
-
         return {
             'container_id': container_id
         }

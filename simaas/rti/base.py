@@ -262,8 +262,18 @@ class RTIServiceBase(RTIService):
             session.add(record)
             session.commit()
 
-            # perform the job submission and update the details
-            record.details = self.perform_submit(proc, job)
+        # perform the job submission and update the details
+        details = self.perform_submit(proc, job)
+
+        # update the runner information
+        with self._session_maker() as session:
+            # get the record and status
+            record = session.query(DBJobInfo).get(job.id)
+
+            # update
+            runner: dict = dict(record.runner)
+            runner.update(details)
+            record.runner = runner
             session.commit()
 
         return job

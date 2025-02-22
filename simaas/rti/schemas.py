@@ -34,7 +34,7 @@ class Task(BaseModel):
 
     class Budget(BaseModel):
         vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs allocated for this task.")
-        memory: str = Field(..., title="Memory", description="The amount of memory allocated for this task.")
+        memory: int = Field(..., title="Memory", description="The amount of memory (in megabytes) allocated for this task.")
 
     proc_id: str = Field(..., title="Processor Id", description="The id of the processor to be used for this task.")
     user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns this task.")
