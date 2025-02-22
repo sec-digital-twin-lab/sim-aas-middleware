@@ -121,7 +121,7 @@ class P2PInterruptJob(P2PProtocol):
             except PeerUnavailableError:
                 await asyncio.sleep(0.5)
 
-        raise RTIException(f"Uploading job input failed after {max_attempts} attempts.")
+        raise RTIException(f"Interrupting job input failed after {max_attempts} attempts.")
 
     async def handle(
             self, request: InterruptJobRequest, attachment_path: Optional[str] = None,

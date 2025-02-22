@@ -287,7 +287,7 @@ class RTIServiceBase(RTIService):
                 status.errors.append(JobStatus.Error(
                     message=str(e),
                     exception=ExceptionContent(
-                        id=0, reason=str(e), details={}
+                        id='', reason=str(e), details={}
                     )
                 ))
 

@@ -150,6 +150,7 @@ class OutputObjectHandler(threading.Thread):
         self._logger.info(
             f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
         )
+        
         obj = await P2PPushDataObject.perform(
             target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
@@ -162,10 +163,7 @@ class OutputObjectHandler(threading.Thread):
             }
         )
 
-        self._logger.info(
-            f"END push output '{obj_name}'"
-        )
-        
+        self._logger.info(f"END push output '{obj_name}'")
         return obj
 
     def run(self) -> None:
@@ -566,6 +564,13 @@ class JobRunner(CLICommand, ProgressListener):
             pending: Dict[str, str] = {item.obj_id: item.user_signature for item in relevant.values()}
             found: Dict[str, str] = {}
             for peer in network:
+                # check if the peer is the custodian, if so override the P2P address
+                if peer.identity.id == self.custodian_identity.id:
+                    self._logger.info(
+                        f"peer is custodian -> overriding P2P address: {self.custodian_address.address}"
+                    )
+                    peer.p2p_address = self.custodian_address.address
+
                 # does the remote DOR have any of the pending data objects?
                 result: Dict[str, DataObject] = loop.run_until_complete(
                     lookup.perform(peer, list(pending.keys()))
