@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import tempfile
 import threading
 import asyncio
@@ -26,6 +27,7 @@ class P2PService:
         self._mutex = Lock()
         self._keystore = keystore
         self._address = address
+        self._port = int(address.split(':')[-1])
         self._socket: Optional[Socket] = None
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
@@ -42,6 +44,11 @@ class P2PService:
     def address(self) -> str:
         """Returns the address (host:port) of the P2P service."""
         return self._address
+
+    def fq_address(self) -> str:
+        """Returns the fully qualified address of the P2P service"""
+        fqdn = socket.getfqdn()
+        return f"tcp://{fqdn}:{self._port}"
 
     def start_service(self, encrypt: bool = True, timeout: int = 5000) -> None:
         """Starts the TCP socket server at the specified address."""
