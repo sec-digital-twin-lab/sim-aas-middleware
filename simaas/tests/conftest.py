@@ -23,7 +23,7 @@ from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy
-from simaas.rti.aws import get_default_ecr_config
+from simaas.rti.aws import get_default_aws_config
 from simaas.rti.schemas import Processor
 
 load_dotenv()
@@ -57,7 +57,7 @@ def docker_available():
 
 @pytest.fixture(scope="session")
 def aws_available():
-    return get_default_ecr_config() is not None
+    return get_default_aws_config() is not None
 
 
 @pytest.fixture(scope="session")
