@@ -145,7 +145,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
 
     # Push the image to ECR
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
-    result = subprocess.run(f"docker push {ecr_image}", shell=True, capture_output=True)
+    result = subprocess.run(f"docker push --platform linux/amd64 {ecr_image}", shell=True, capture_output=True)
     if result.returncode != 0:
         raise RTIException(f"Failed to push to ECR", details={
             'stdout': result.stdout.decode('utf-8'),
