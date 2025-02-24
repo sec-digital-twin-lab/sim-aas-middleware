@@ -885,13 +885,21 @@ async def execute_job(
 
     # cancel if requested
     if cancel:
-        await asyncio.sleep(2)
+        runner_identity = None
+        runner_address = None
+        for i in range(10):
+            await asyncio.sleep(1)
 
-        # get the runner information
-        with rti._session_maker() as session:
-            record = session.query(DBJobInfo).get(job_id)
-            runner_identity: Identity = Identity.model_validate(record.runner['identity'])
-            runner_address: str = record.runner['address']
+            # get the runner information
+            with rti._session_maker() as session:
+                record = session.query(DBJobInfo).get(job_id)
+                if 'identity' in record.runner and 'address' in record.runner:
+                    runner_identity: Identity = Identity.model_validate(record.runner['identity'])
+                    runner_address: str = record.runner['address']
+                    break
+
+        if runner_identity is None or runner_address is None:
+            assert False
 
         # perform the interrupt request
         await P2PInterruptJob.perform(P2PAddress(
