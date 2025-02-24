@@ -1,21 +1,33 @@
 from __future__ import annotations
 
 import os
+from enum import Enum
 
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.default import DefaultDORService
 from simaas.node.base import Node
 from simaas.nodedb.default import DefaultNodeDBService
+from simaas.rti.aws import AWSRTIService
 from simaas.rti.default import DefaultRTIService
 
 logger = Logging.get('node.default')
 
+class DORType(Enum):
+    NONE = 'none'
+    BASIC = 'basic'
+
+
+class RTIType(Enum):
+    NONE = 'none'
+    DOCKER = 'docker'
+    AWS = 'aws'
+
 
 class DefaultNode(Node):
     def __init__(self, keystore: Keystore, datastore_path: str,
-                 enable_db: bool, enable_dor: bool, enable_rti: bool,
-                 retain_job_history: bool = None, strict_deployment: bool = None, job_concurrency: bool = None) -> None:
+                 enable_db: bool, dor_type: DORType, rti_type: RTIType,
+                 retain_job_history: bool = None, strict_deployment: bool = None) -> None:
         super().__init__(keystore)
 
         # create datastore (if it doesn't already exist)
@@ -28,17 +40,23 @@ class DefaultNode(Node):
             logger.info(f"creating default NodeDB service using {db_path}.")
             self.db = DefaultNodeDBService(self, db_path)
 
-        if enable_dor:
+        if dor_type == DORType.BASIC:
             db_path = f"sqlite:///{os.path.join(self._datastore_path, 'dor.db')}"
             logger.info(f"creating default DOR service using {db_path}.")
             self.dor = DefaultDORService(self, db_path)
 
-        if enable_rti:
+        if rti_type == RTIType.DOCKER:
             db_path = f"sqlite:///{os.path.join(self._datastore_path, 'rti.db')}"
             self.rti = DefaultRTIService(self, db_path,
                                          retain_job_history=retain_job_history,
-                                         strict_deployment=strict_deployment,
-                                         job_concurrency=job_concurrency)
+                                         strict_deployment=strict_deployment)
+
+        elif rti_type == RTIType.AWS:
+            db_path = f"sqlite:///{os.path.join(self._datastore_path, 'rti.db')}"
+            self.rti = AWSRTIService(self, db_path,
+                                     retain_job_history=retain_job_history,
+                                     strict_deployment=strict_deployment)
+
 
     @property
     def datastore(self) -> str:
@@ -48,13 +66,12 @@ class DefaultNode(Node):
     def create(
             cls, keystore: Keystore, storage_path: str, p2p_address: str, rest_address: (str, int) = None,
             boot_node_address: (str, int) = None, bind_all_address: bool = False, enable_db: bool = True,
-            enable_dor: bool = False, enable_rti: bool = False, retain_job_history: bool = False,
-            strict_deployment: bool = True, job_concurrency: bool = False
+            dor_type: DORType = DORType.NONE, rti_type: RTIType = RTIType.NONE, retain_job_history: bool = False,
+            strict_deployment: bool = True
     ) -> Node:
         node = DefaultNode(keystore, storage_path,
-                           enable_db=enable_db, enable_dor=enable_dor, enable_rti=enable_rti,
-                           retain_job_history=retain_job_history, strict_deployment=strict_deployment,
-                           job_concurrency=job_concurrency)
+                           enable_db=enable_db, dor_type=dor_type, rti_type=rti_type,
+                           retain_job_history=retain_job_history, strict_deployment=strict_deployment)
         node.startup(p2p_address, rest_address, boot_node_address, bind_all_address)
 
         return node

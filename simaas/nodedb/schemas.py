@@ -17,4 +17,3 @@ class NodeInfo(BaseModel):
     rest_address: Optional[Tuple[str, int]] = Field(title="REST Address", description="The address of the REST service (if applicable - not all nodes have the REST interface enabled).", examples=[('127.0.0.1', 5001)])
     retain_job_history: Optional[bool] = Field(title="Retain History", description="Indicates if the node retains the job history (only applicable to full or execution nodes that offer RTI services).", examples=[True])
     strict_deployment: Optional[bool] = Field(title="Strict Deployment", description="Indicates if the node restricts (un)deployment of processors to the node owner only (only applicable to full or execution nodes that offer RTI services).", examples=[True])
-    job_concurrency: Optional[bool] = Field(title="Job Concurrency", description="Indicates if the node executes jobs concurrently (only applicable to full or execution nodes that offer RTI services).", examples=[True])

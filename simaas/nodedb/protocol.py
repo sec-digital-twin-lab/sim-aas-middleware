@@ -89,6 +89,86 @@ class P2PUpdateIdentity(P2PProtocol):
         return UpdateIdentityMessage
 
 
+class GetIdentityRequest(BaseModel):
+    iid: str
+
+
+class GetIdentityResponse(BaseModel):
+    identity: Identity
+
+
+class P2PGetIdentity(P2PProtocol):
+    NAME = 'nodedb-get-id'
+
+    def __init__(self, node) -> None:
+        super().__init__(self.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(cls, peer_address: P2PAddress, iid: str) -> Optional[Identity]:
+        reply, _ = await p2p_request(
+            peer_address, cls.NAME, GetIdentityRequest(iid=iid), reply_type=GetIdentityResponse
+        )
+        reply: GetIdentityResponse = reply  # casting for PyCharm
+
+        return reply.identity
+
+    async def handle(
+            self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        identity: Optional[Identity] = self._node.db.get_identity(request.iid)
+        return GetIdentityResponse(identity=identity), None
+
+    @staticmethod
+    def request_type():
+        return GetIdentityRequest
+
+    @staticmethod
+    def response_type():
+        return GetIdentityResponse
+
+
+class GetNetworkRequest(BaseModel):
+    ...
+
+
+class GetNetworkResponse(BaseModel):
+    network: List[NodeInfo]
+
+
+class P2PGetNetwork(P2PProtocol):
+    NAME = 'nodedb-get-network'
+
+    def __init__(self, node) -> None:
+        super().__init__(self.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(cls, peer_address: P2PAddress) -> List[NodeInfo]:
+        reply, _ = await p2p_request(
+            peer_address, cls.NAME, GetNetworkRequest(), reply_type=GetNetworkResponse
+        )
+        reply: GetNetworkResponse = reply  # casting for PyCharm
+
+        return reply.network
+
+    async def handle(
+            self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        network: List[NodeInfo] = self._node.db.get_network()
+        return GetNetworkResponse(network=network), None
+
+    @staticmethod
+    def request_type():
+        return GetNetworkRequest
+
+    @staticmethod
+    def response_type():
+        return GetNetworkResponse
+
+
 class PeerUpdateMessage(BaseModel):
     origin: NodeInfo
     snapshot: NodeDBSnapshot

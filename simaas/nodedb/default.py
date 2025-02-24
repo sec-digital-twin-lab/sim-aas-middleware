@@ -27,7 +27,6 @@ class NodeRecord(Base):
     rest_address = Column(String, nullable=True)
     retain_job_history = Column(Boolean, nullable=True)
     strict_deployment = Column(Boolean, nullable=True)
-    job_concurrency = Column(Boolean, nullable=True)
 
 
 class IdentityRecord(Base):
@@ -67,8 +66,7 @@ class DefaultNodeDBService(NodeDBService):
                 p2p_address=record.p2p_address,
                 rest_address=record.rest_address.split(':') if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
-                strict_deployment=record.strict_deployment if record.strict_deployment is not None else None,
-                job_concurrency=record.job_concurrency if record.job_concurrency is not None else None
+                strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
             )
 
     def get_network(self) -> List[NodeInfo]:
@@ -84,8 +82,7 @@ class DefaultNodeDBService(NodeDBService):
                 p2p_address=record.p2p_address,
                 rest_address=record.rest_address.split(':') if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
-                strict_deployment=record.strict_deployment if record.strict_deployment is not None else None,
-                job_concurrency=record.job_concurrency if record.job_concurrency is not None else None
+                strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
             ) for record in session.query(NodeRecord).all()]
 
     def update_network(self, node: NodeInfo) -> None:
@@ -132,8 +129,7 @@ class DefaultNodeDBService(NodeDBService):
                                        dor_service=node.dor_service, rti_service=node.rti_service,
                                        p2p_address=p2p_address, rest_address=rest_address,
                                        retain_job_history=node.retain_job_history,
-                                       strict_deployment=node.strict_deployment,
-                                       job_concurrency=node.job_concurrency))
+                                       strict_deployment=node.strict_deployment))
                 session.commit()
 
             elif node.last_seen > record.last_seen:
@@ -144,7 +140,6 @@ class DefaultNodeDBService(NodeDBService):
                 record.rest_address = rest_address
                 record.retain_job_history = node.retain_job_history
                 record.strict_deployment = node.strict_deployment
-                record.job_concurrency = node.job_concurrency
                 session.commit()
 
             else:

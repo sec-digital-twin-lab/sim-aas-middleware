@@ -9,6 +9,9 @@ import traceback
 from typing import Union
 
 import pytest
+from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
+
+from simaas.node.default import RTIType
 from simaas.rti.default import DefaultRTIService, DBJobInfo
 
 from simaas.core.helpers import generate_random_string
@@ -17,7 +20,6 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
-from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
@@ -38,7 +40,7 @@ def non_strict_node(test_context, github_credentials_available):
                 REPOSITORY_URL,
                 GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
             )
-        _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=False)
+        _node = test_context.get_node(keystore, rti_type=RTIType.DOCKER, enable_rest=True, strict_deployment=False)
         yield _node
 
 
@@ -51,7 +53,7 @@ def strict_node(test_context, extra_keystores, github_credentials_available):
                 REPOSITORY_URL,
                 GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
             )
-        _node = test_context.get_node(keystore, use_rti=True, enable_rest=True, strict_deployment=True)
+        _node = test_context.get_node(keystore, rti_type=RTIType.DOCKER, enable_rest=True, strict_deployment=True)
         yield _node
 
 
@@ -181,7 +183,7 @@ def test_rest_submit_list_get_job(
     ]
 
     # submit the job
-    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
+    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=1024))
     assert (result is not None)
 
     job_id = result.id
@@ -524,11 +526,12 @@ def test_job_concurrency(
                 record: DBJobInfo = session.query(DBJobInfo).get(job.id)
 
                 # wait for docker container to be shutdown
-                while docker_container_running(record.container_id):
+                container_id: str = record.runner['container_id']
+                while docker_container_running(container_id):
                     time.sleep(1)
 
                 # delete the container
-                docker_delete_container(record.container_id)
+                docker_delete_container(container_id)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

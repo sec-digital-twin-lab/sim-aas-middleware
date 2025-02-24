@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Dict
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
+from simaas.rti.schemas import Task
 
 
 def determine_local_ip() -> Optional[str]:
@@ -150,21 +151,54 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
         return found
 
 
-def docker_run_job_container(image_name: str, p2p_address_pub: Tuple[str, int], p2p_address_sec: Tuple[str, int]) -> str:
+def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
+                             custodian_address: str, custodian_pubkey: str, job_id: str,
+                             budget: Optional[Task.Budget] = None) -> str:
+
     client = docker.from_env()
-    container = client.containers.run(
-        image=image_name,
-        volumes={
-            # job_path: {'bind': '/job', 'mode': 'rw'}
-        },
-        ports={
-            '6000/tcp': p2p_address_pub,
-            '6001/tcp': p2p_address_sec,
-        },
-        detach=True,
-        stderr=True, stdout=True,
-        auto_remove=False
-    )
+
+    volumes = {
+        # job_path: {'bind': '/job', 'mode': 'rw'}
+    }
+
+    ports = {
+        '6000/tcp': p2p_address,
+    }
+
+    environment = {
+        'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
+        'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
+        'JOB_ID': job_id,
+        'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
+    }
+
+    if budget is None:
+        container = client.containers.run(
+            image=image_name,
+            volumes=volumes,
+            ports=ports,
+            detach=True,
+            stderr=True, stdout=True,
+            auto_remove=False,
+            environment=environment
+        )
+    else:
+        # determine CPU quota
+        cpu_period = 100000
+        cpu_quota = cpu_period * budget.vcpus
+
+        container = client.containers.run(
+            image=image_name,
+            volumes=volumes,
+            ports=ports,
+            detach=True,
+            stderr=True, stdout=True,
+            auto_remove=False,
+            environment=environment,
+            mem_limit=f"{budget.memory}m",
+            cpu_period=cpu_period,
+            cpu_quota=cpu_quota
+        )
 
     return container.id
 
@@ -174,10 +208,12 @@ def docker_kill_job_container(container_id: str) -> None:
     container = client.containers.get(container_id)
     container.kill()
 
+
 def docker_delete_container(container_id: str) -> None:
     client = docker.from_env()
     container = client.containers.get(container_id)
     container.remove()
+
 
 def docker_container_running(container_id: str) -> bool:
     client = docker.from_env()
@@ -190,3 +226,17 @@ def docker_container_list() -> Dict[str, Container]:
     return {
         container.id: container for container in client.containers.list()
     }
+
+
+def docker_check_image_platform(image_name: str, platform: str) -> bool:
+    client = docker.from_env()
+
+    # extract OS and architecture
+    os_ref, arch_ref = platform.split('/')
+
+    # get the image and its OS and arch types
+    image = client.images.get(image_name)
+    os_type = image.attrs.get("Os", "")
+    arch_type = image.attrs.get("Architecture", "")
+
+    return os_type == os_ref and arch_type == arch_ref

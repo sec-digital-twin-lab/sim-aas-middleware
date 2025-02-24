@@ -2,33 +2,33 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 import traceback
-from typing import Dict, Union, Optional, Tuple, Set
+from typing import Dict, Union, Optional, Tuple, Set, List
+
+from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
-
 from simaas.p2p.service import P2PService
-
 from simaas.cli.exceptions import CLIRuntimeError
-from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing
+from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
 from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
-from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
     InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
     AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJob, P2PPushJobStatus, P2PInterruptJob
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
 from simaas.core.processor import ProgressListener, ProcessorBase, find_processors
-
 
 class OutputObjectHandler(threading.Thread):
     def __init__(self, logger: logging.Logger, owner, obj_name: str):
@@ -57,8 +57,7 @@ class OutputObjectHandler(threading.Thread):
             })
 
         # get the owner
-        db_proxy = NodeDBProxy(self._owner.job.custodian.rest_address)
-        owner = db_proxy.get_identity(task_out.owner_iid)
+        owner = await P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
         if owner is None:
             raise DataObjectOwnerNotFoundError({
                 'output_name': obj_name,
@@ -83,29 +82,35 @@ class OutputObjectHandler(threading.Thread):
         # if content_encrypted:
         #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
 
+        # get the network
+        network: List[NodeInfo] = await P2PGetNetwork.perform(self._owner.custodian_address)
+
         # do we have a target node specified for storing the data object?
-        target_address = self._owner.job.custodian.rest_address
+        target_node = self._owner.job.custodian
         if task_out.target_node_iid:
             # check with the node db to see if we know about this node
-            network = {item.identity.id: item for item in db_proxy.get_network()}
-            if task_out.target_node_iid not in network:
+            nodes_by_id: Dict[str, NodeInfo] = {node.identity.id: node for node in network}
+            if task_out.target_node_iid not in nodes_by_id:
                 raise CLIRuntimeError("Target node not found in network", details={
                     'target_node_iid': task_out.target_node_iid,
                     'network': network
                 })
 
             # extract the rest address from that node record
-            node = network[task_out.target_node_iid]
-            target_address = node.rest_address
+            target_node = nodes_by_id[task_out.target_node_iid]
 
         # check if the target node has DOR capabilities
-        db_proxy = NodeDBProxy(target_address)
-        node = db_proxy.get_node()
-        if not node.dor_service:
+        if not target_node.dor_service:
             raise CLIRuntimeError("Target node does not support DOR capabilities", details={
-                'target_address': target_address,
-                'node': node.model_dump()
+                'target_node': target_node.model_dump()
             })
+
+        # check if the target node is the custodian, if so override the P2P address
+        if target_node.identity.id == self._owner.custodian_identity.id:
+            self._logger.info(
+                f"target node is custodian -> overriding P2P address: {self._owner.custodian_address.address}"
+            )
+            target_node.p2p_address = self._owner.custodian_address.address
 
         # determine recipe
         recipe = DataObjectRecipe(
@@ -141,20 +146,24 @@ class OutputObjectHandler(threading.Thread):
         # creator(s) is assumed to be the user on whose behalf the job is executed
         creator_iids = [self._owner.user.id]
 
-        # license is least-permissive by default
-        license = DataObject.License(by=True, sa=True, nc=True, nd=True)
-
         # push the data object to the DOR
+        self._logger.info(
+            f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
+        )
+
         obj = await P2PPushDataObject.perform(
-            node.p2p_address, self._owner.keystore, node.identity,
+            target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
-            restricted_access, content_encrypted, license, recipe,
+            restricted_access, content_encrypted,
+            license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+            recipe=recipe,
             tags={
                 'name': obj_name,
                 'job_id': self._owner.job.id
             }
         )
 
+        self._logger.info(f"END push output '{obj_name}'")
         return obj
 
     def run(self) -> None:
@@ -286,10 +295,14 @@ class JobRunner(CLICommand, ProgressListener):
             Argument('--job-path', dest='job_path', action='store', help="path to the job"),
             Argument('--proc-path', dest='proc_path', action='store', help="path to the processor"),
             Argument('--log-level', dest='log_level', action='store', help="log level: debug, info, warning, error"),
-            Argument('--p2p-address-pub', dest='p2p_address_pub', action='store',
-                     help="address used by P2P service for unsecured communication (handshakes)"),
-            Argument('--p2p-address-sec', dest='p2p_address_sec', action='store',
-                     help="address used by P2P service for secure communication")
+            Argument('--service-address', dest='service_address', action='store',
+                     help="address used by P2P service for secure communication"),
+            Argument('--custodian-address', dest='custodian_address', action='store',
+                     help="P2P address of the custodian"),
+            Argument('--custodian-pub-key', dest='custodian_pub_key', action='store',
+                     help="Public curve key of custodian"),
+            Argument('--job-id', dest='job_id', action='store',
+                     help="Id of the job (will be used by the runner to retrieve job information from the custodian)")
         ])
 
         self._mutex = threading.Lock()
@@ -303,15 +316,14 @@ class JobRunner(CLICommand, ProgressListener):
 
         # set during initialise_p2p
         self._keystore: Optional[Keystore] = None
-        self._custodian: Optional[Identity] = None
+        self._p2p: Optional[P2PService] = None
         self._custodian_address: Optional[P2PAddress] = None
-        self._p2p_pub: Optional[P2PService] = None
-        self._p2p_sec: Optional[P2PService] = None
+        self._custodian: Optional[Identity] = None
+        self._job: Optional[Job] = None
 
         # set upon job update
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
-        self._job: Optional[Job] = None
         self._status_handler: Optional[StatusHandler] = None
         self._user: Optional[Identity] = None
 
@@ -350,6 +362,14 @@ class JobRunner(CLICommand, ProgressListener):
     def user(self) -> Optional[Identity]:
         return self._user
 
+    @property
+    def custodian_identity(self) -> Optional[Identity]:
+        return self._custodian
+
+    @property
+    def custodian_address(self) -> Optional[P2PAddress]:
+        return self._custodian_address
+
     def on_job_cancel(self) -> None:
         # interrupt the processor. note: whether this request is honored or even implemented depends on the
         # actual processor.
@@ -362,36 +382,6 @@ class JobRunner(CLICommand, ProgressListener):
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
                 self._logger.error(f"Received job cancellation notification -> INTERRUPT FAILED: {e}\n{trace}")
-
-    def on_custodian_update(self, custodian: Identity, custodian_address: str) -> None:
-        self._custodian = custodian
-        self._custodian_address = P2PAddress(
-            address=custodian_address,
-            curve_secret_key=self._keystore.curve_secret_key(),
-            curve_public_key=self._keystore.curve_public_key(),
-            curve_server_key=custodian.c_public_key
-        )
-        self._logger.info(f"Using custodian at {custodian_address} with id={self._custodian.id}")
-
-    def on_job_update(self, job: Job) -> None:
-        self._logger.info(f"Received job with id={job.id}")
-
-        # write the job descriptor
-        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
-        with open(job_descriptor_path, 'w') as f:
-            json.dump(job.model_dump(), f, indent=2)
-
-        # prepare input/output interfaces
-        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.input}
-        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
-            {item.name: item for item in self._gpp.proc_descriptor.output}
-
-        # update job and set up status handler
-        job_status_path = os.path.join(self._wd_path, 'job.status')
-        self._status_handler = StatusHandler(self._logger, self._custodian_address, job.id, job_status_path)
-        self._status_handler.start()
-        self._job = job
 
     def on_progress_update(self, progress: int) -> None:
         self._logger.info(f"Received progress update notification: {progress}")
@@ -468,7 +458,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # find processors at the given location
         procs_by_name = find_processors(proc_path)
-        print(f"Found the following processors: {list(procs_by_name.keys())}")
+        self._logger.info(f"Found the following processors: {list(procs_by_name.keys())}")
 
         # do we have the processor we are looking for?
         proc_name = self._gpp.proc_descriptor.name
@@ -476,32 +466,63 @@ class JobRunner(CLICommand, ProgressListener):
         if self._proc is None:
             raise CLIRuntimeError(f"Processor '{proc_name}' not found at '{proc_path}'.")
 
-    def _initialise_p2p(self, p2p_address_pub: str, p2p_address_sec: str) -> None:
+    def _initialise_p2p(
+            self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+    ) -> None:
         # create the ephemeral job keystore
         self._keystore = Keystore.new('runner')
         self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
 
-        # start the unsecured P2P service
-        self._p2p_pub = P2PService(self._keystore, p2p_address_pub)
-        self._p2p_pub.add(P2PLatency())
-        self._p2p_pub.add(P2PRunnerPerformHandshake(self))
-        self._p2p_pub.start_service(encrypt=False)
-        self._logger.info("Insecure P2P service up -> waiting for handshake.")
-
-        while self._custodian is None:
-            time.sleep(0.5)
-        self._logger.info("Handshake done!")
-
         # start the secured P2P service
-        self._p2p_sec = P2PService(self._keystore, p2p_address_sec)
-        self._p2p_sec.add(P2PLatency())
-        self._p2p_sec.add(P2PPushJob(self))
-        self._p2p_sec.add(P2PInterruptJob(self))
-        self._p2p_sec.start_service(encrypt=True)
-        self._logger.info("Secure P2P service up.")
+        self._p2p = P2PService(self._keystore, service_address)
+        self._p2p.add(P2PLatency())
+        self._p2p.add(P2PInterruptJob(self))
+        self._p2p.start_service(encrypt=True)
+        self._logger.info("P2P service interface is up.")
 
-        self._p2p_pub.stop_service()
-        self._logger.info("Insecure P2P service down.")
+        # determine the full P2P address of the custodian
+        self._custodian_address = P2PAddress(
+            address=custodian_address,
+            curve_secret_key=self._keystore.curve_secret_key(),
+            curve_public_key=self._keystore.curve_public_key(),
+            curve_server_key=custodian_pub_key
+        )
+
+        # figure out the port of the P2P service
+        fields = re.split(r'[:/]+', service_address)
+        port = fields[-1]
+
+        # determine the external address (resolve redirection to host name if applicable)
+        external_address = os.environ.get('EXTERNAL_P2P_ADDRESS', service_address)
+        if external_address == 'HOSTNAME':
+            hostname = os.environ['HOSTNAME']
+            external_address = f"tcp://{hostname}:{port}"
+        self._logger.info(f"P2P service determined external address as {external_address}")
+
+        # perform handshake with custodian
+        self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address}...")
+        self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(
+            self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
+        ))
+        self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
+                          f"has id={self._custodian.id}")
+
+    def _initialise_job(self) -> None:
+        # write the job descriptor
+        job_descriptor_path = os.path.join(self._wd_path, 'job.descriptor')
+        with open(job_descriptor_path, 'w') as f:
+            json.dump(self._job.model_dump(), f, indent=2)
+
+        # prepare input/output interfaces
+        self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.input}
+        self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = \
+            {item.name: item for item in self._gpp.proc_descriptor.output}
+
+        # update job and set up status handler
+        job_status_path = os.path.join(self._wd_path, 'job.status')
+        self._status_handler = StatusHandler(self._logger, self._custodian_address, self._job.id, job_status_path)
+        self._status_handler.start()
 
     def _store_value_input_data_objects(self) -> None:
         for item in self._job.task.input:
@@ -528,8 +549,7 @@ class JobRunner(CLICommand, ProgressListener):
             return {}
 
         # obtain a list of nodes in the network and filter by peers with DOR capability
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-        network = db_proxy.get_network()
+        network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
         network = [node for node in network if node.dor_service]
 
         loop = asyncio.new_event_loop()
@@ -544,6 +564,13 @@ class JobRunner(CLICommand, ProgressListener):
             pending: Dict[str, str] = {item.obj_id: item.user_signature for item in relevant.values()}
             found: Dict[str, str] = {}
             for peer in network:
+                # check if the peer is the custodian, if so override the P2P address
+                if peer.identity.id == self.custodian_identity.id:
+                    self._logger.info(
+                        f"peer is custodian -> overriding P2P address: {self.custodian_address.address}"
+                    )
+                    peer.p2p_address = self.custodian_address.address
+
                 # does the remote DOR have any of the pending data objects?
                 result: Dict[str, DataObject] = loop.run_until_complete(
                     lookup.perform(peer, list(pending.keys()))
@@ -672,9 +699,8 @@ class JobRunner(CLICommand, ProgressListener):
                     })
 
         # check if the owner identity exists for each output data object
-        db_proxy = NodeDBProxy(self._job.custodian.rest_address)
         for o in self._job.task.output:
-            owner = db_proxy.get_identity(o.owner_iid)
+            owner = asyncio.run(P2PGetIdentity.perform(self._custodian_address, o.owner_iid))
             if owner is None:
                 raise DataObjectOwnerNotFoundError({
                     'output_name': o.name,
@@ -701,8 +727,16 @@ class JobRunner(CLICommand, ProgressListener):
     def execute(self, args: dict) -> None:
         prompt_if_missing(args, 'job_path', prompt_for_string, message="Enter path to the job working directory:")
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
-        prompt_if_missing(args, 'p2p_address_pub', prompt_for_string, message="Enter address for unsecured P2P service:")
-        prompt_if_missing(args, 'p2p_address_sec', prompt_for_string, message="Enter address for secured P2P service:")
+        prompt_if_missing(args, 'service_address', prompt_for_string, message="Enter address for the P2P service:")
+        env_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS')
+        env_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY')
+        env_if_missing(args, 'job_id', 'JOB_ID')
+
+        # check if required args are defined
+        print(f"Environment: {os.environ}")
+        print(f"Arguments: {args}")
+        if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
+            raise CLIRuntimeError("Required custodian and job arguments missing")
 
         # determine working directory
         self._wd_path = args['job_path']
@@ -720,22 +754,26 @@ class JobRunner(CLICommand, ProgressListener):
             self._initialise_processor(args['proc_path'])
 
             # initialise P2P services
-            self._initialise_p2p(args['p2p_address_pub'], args['p2p_address_sec'])
+            self._initialise_p2p(
+                args['service_address'], args['custodian_address'], args['custodian_pub_key'], args['job_id']
+            )
 
-            # wait for runner to be primed
-            self._logger.info("END initialising job runner -> WAITING for job...")
-            while self._job is None:
-                time.sleep(0.5)
+            # if, for some reason, we have not received a job, then we can't proceed.
+            if self._job is None:
+                raise CLIRuntimeError("Handshake failed: no job received")
+
+            # initialise the job
+            self._initialise_job()
 
             # update state
+            self._logger.info("END initialising job runner.")
             self._status_handler.update(state=JobStatus.State.INITIALISED)
-
-            self._job: Job = self._job  # for PyCharm...
             self._logger.info(f"BEGIN processing job {self._job.id}...")
 
             # fetch the user identity
-            db_proxy = NodeDBProxy(self._job.custodian.rest_address)
-            self._user: Identity = db_proxy.get_identity(self._job.task.user_iid)
+            self._user: Optional[Identity] = asyncio.run(
+                P2PGetIdentity.perform(self._custodian_address, self._job.task.user_iid)
+            )
             if self._user is None:
                 raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
             self._logger.info(f"Using user identity with id={self._user.id}")

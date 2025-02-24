@@ -28,6 +28,28 @@ class ExampleProcessor(ProcessorBase):
         self._is_cancelled = False
 
     def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
+        """
+        Put all your code here that executes the model in this function.
+
+        You can assume all input data are available in the working directory: `wd_path`. So for example,
+        if you need a network which is stored in a file called 'network.json', you can expect it to be
+        accessible at `os.path.join(wd_path, 'network.json')`. Likewise, if you produce output, it should
+        be placed in the working directory using a well-defined name. For example, the output name is
+        'result.json', then it should be stored at `os.path.join(wd_path, 'result.json')`
+
+        When the processor is being executed, the Simulation-as-a-Service node that started the job will
+        be monitoring the job. To publish the progress (in %), use `listener.on_progress_update(55)`. To
+        publish a message, use `listener.on_message(Severity.INFO, "Hello...")`. Publishing progress and
+        messages are not strictly required but help to communicate what's going.
+
+        It is required to publish the availability of output. Use `listener.on_output_available('c')`,
+        where 'c' in this example is the name of the output. Replace with the well-defined name of your
+        output as needed.
+
+        Below is an example processor implementation which doesn't do much but illustrates how a
+        functional processor is implemented.
+        """
+
         def interruptable_sleep(seconds: float) -> None:
             if seconds >= 0:  # interruptible
                 t_done = get_timestamp_now() + seconds * 1000

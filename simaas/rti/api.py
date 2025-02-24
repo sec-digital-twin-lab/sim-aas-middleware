@@ -18,10 +18,9 @@ JOB_ENDPOINT_PREFIX = "/api/v1/job"
 
 
 class RTIService(abc.ABC):
-    def __init__(self, retain_job_history: bool, strict_deployment: bool, job_concurrency: bool):
+    def __init__(self, retain_job_history: bool, strict_deployment: bool):
         self._retain_job_history = retain_job_history
         self._strict_deployment = strict_deployment
-        self._job_concurrency = job_concurrency
 
     @property
     def retain_job_history(self) -> bool:
@@ -30,10 +29,6 @@ class RTIService(abc.ABC):
     @property
     def strict_deployment(self) -> bool:
         return self._strict_deployment
-
-    @property
-    def job_concurrency(self) -> bool:
-        return self._job_concurrency
 
     def endpoints(self) -> List[EndpointDefinition]:
         return [
@@ -176,7 +171,7 @@ class RTIProxy(EndpointProxy):
 
     def submit_job(self, proc_id: str, job_input: List[Union[Task.InputReference, Task.InputValue]],
                    job_output: List[Task.Output], with_authorisation_by: Keystore, name: str = None,
-                   description: str = None) -> Job:
+                   description: str = None, budget: Task.Budget = None) -> Job:
 
         # build the body
         body = {
@@ -185,7 +180,8 @@ class RTIProxy(EndpointProxy):
             'output': [o.model_dump() for o in job_output],
             'user_iid': with_authorisation_by.identity.id,
             'name': name,
-            'description': description
+            'description': description,
+            'budget': budget.model_dump() if budget else None
         }
 
         # post the request
