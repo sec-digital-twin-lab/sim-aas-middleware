@@ -128,7 +128,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     login_cmd = f"echo {password} | docker login --username AWS --password-stdin {ecr_url}"
     result = subprocess.run(login_cmd, shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException(f"Failed to log into ECR", details={
+        raise RTIException("Failed to log into ECR", details={
             'stdout': result.stdout.decode('utf-8'),
             'stderr': result.stderr.decode('utf-8')
         })
@@ -138,7 +138,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     ecr_image = get_ecr_image_name(repository_uri, get_ecr_tag(image_name))
     result = subprocess.run(f"docker tag {image_name} {ecr_image}", shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException(f"Failed to tag image", details={
+        raise RTIException("Failed to tag image", details={
             'stdout': result.stdout.decode('utf-8'),
             'stderr': result.stderr.decode('utf-8')
         })
@@ -147,7 +147,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     result = subprocess.run(f"docker push --platform linux/amd64 {ecr_image}", shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException(f"Failed to push to ECR", details={
+        raise RTIException("Failed to push to ECR", details={
             'stdout': result.stdout.decode('utf-8'),
             'stderr': result.stderr.decode('utf-8')
         })
@@ -310,7 +310,7 @@ class AWSRTIService(RTIServiceBase):
         self._aws_repository_name = 'simaas-processors'
         self._aws_config = aws_config if aws_config else get_default_aws_config()
         if self._aws_config is None:
-            raise RTIException(f"No AWS configuration found.")
+            raise RTIException("No AWS configuration found.")
 
         # initialise directories
         self._jobs_path = os.path.join(self._node.datastore, 'jobs')

@@ -736,7 +736,7 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Environment: {os.environ}")
         print(f"Arguments: {args}")
         if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            raise CLIRuntimeError(f"Required custodian and job arguments missing")
+            raise CLIRuntimeError("Required custodian and job arguments missing")
 
         # determine working directory
         self._wd_path = args['job_path']
