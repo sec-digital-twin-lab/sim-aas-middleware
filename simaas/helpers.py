@@ -226,3 +226,17 @@ def docker_container_list() -> Dict[str, Container]:
     return {
         container.id: container for container in client.containers.list()
     }
+
+
+def docker_check_image_platform(image_name: str, platform: str) -> bool:
+    client = docker.from_env()
+
+    # extract OS and architecture
+    os_ref, arch_ref = platform.split('/')
+
+    # get the image and its OS and arch types
+    image = client.images.get(image_name)
+    os_type = image.attrs.get("Os", "")
+    arch_type = image.attrs.get("Architecture", "")
+
+    return os_type == os_ref and arch_type == arch_ref

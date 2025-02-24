@@ -10,6 +10,7 @@ from typing import Optional, Tuple, Dict
 
 import boto3
 from pydantic import BaseModel
+
 from simaas.core.helpers import get_timestamp_now
 
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
@@ -17,7 +18,7 @@ from simaas.cli.cmd_rti import shorten_id
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
-from simaas.helpers import docker_load_image, docker_delete_image, docker_find_image
+from simaas.helpers import docker_load_image, docker_delete_image, docker_find_image, docker_check_image_platform
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBJobInfo, DBDeployedProcessor
 from simaas.rti.exceptions import RTIException
@@ -107,6 +108,10 @@ def ecr_check_image_exists(repository_name: str, image_name: str, config: Option
 
 
 def ecr_push_local_image(repository_name: str, image_name: str, config: Optional[AWSConfiguration] = None) -> str:
+    # check if the image is 'linux/amd64'
+    if not docker_check_image_platform(image_name, 'linux/amd64'):
+        raise RTIException(f"Image {image_name} platform not 'linux/amd64'")
+
     # get the client
     client, config = get_ecr_client(config)
 
@@ -340,9 +345,18 @@ class AWSRTIService(RTIServiceBase):
 
             # do we already have this docker image deployed? if not fetch and load from DOR
             if not ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
-                # is the image available locally?
-                images = docker_find_image(image_name)
-                if not images:
+                require_build = True
+
+                # check if we already have that image locally
+                if docker_find_image(image_name):
+                    # check if the existing image matches the required platform
+                    if docker_check_image_platform(image_name, 'linux/amd64'):
+                        require_build = False
+                    else:
+                        # remove the existing image before rebuilding
+                        docker_delete_image(image_name)
+
+                if require_build:
                     # is the processor data object and image or a GPP?
                     if proc_obj.data_format == 'tar':
                         # fetch the data object
@@ -385,8 +399,8 @@ class AWSRTIService(RTIServiceBase):
                         # build the image
                         build_processor_image(proc_path, image_name, credentials=credentials, platform='linux/amd64')
 
-            # push to ECR
-            ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
+                # push to ECR
+                ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
 
             # update processor object
             proc.state = Processor.State.READY
