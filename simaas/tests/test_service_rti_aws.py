@@ -32,23 +32,27 @@ logger = Logging.get(__name__)
 
 
 @pytest.fixture(scope="session")
-def aws_session_node(session_keystore):
-    with tempfile.TemporaryDirectory() as tempdir:
-        # establish tunnel:
-        # ssh -N -N -R 0.0.0.0:5999:localhost:5999 -R 0.0.0.0:4999:localhost:4999 -i ~/Desktop/OneDrive/operations/ce2m-heiko.pem ubuntu@ec2-18-142-253-111.ap-southeast-1.compute.amazonaws.com
-        rest_address = ('localhost', 5999)
-        p2p_address = "tcp://localhost:4999"
+def aws_session_node(aws_available, session_keystore, session_node):
+    if not aws_available:
+        yield session_node
 
-        _node = DefaultNode.create(
-            keystore=session_keystore, storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.AWS,
-            retain_job_history=True, strict_deployment=False
-        )
+    else:
+        with tempfile.TemporaryDirectory() as tempdir:
+            # establish tunnel:
+            # ssh -N -N -R 0.0.0.0:5999:localhost:5999 -R 0.0.0.0:4999:localhost:4999 -i ~/Desktop/OneDrive/operations/ce2m-heiko.pem ubuntu@ec2-18-142-253-111.ap-southeast-1.compute.amazonaws.com
+            rest_address = ('localhost', 5999)
+            p2p_address = "tcp://localhost:4999"
 
-        yield _node
+            _node = DefaultNode.create(
+                keystore=session_keystore, storage_path=tempdir,
+                p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
+                enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.AWS,
+                retain_job_history=True, strict_deployment=False
+            )
 
-        _node.shutdown()
+            yield _node
+
+            _node.shutdown()
 
 
 @pytest.fixture(scope="session")
@@ -70,29 +74,37 @@ def aws_node_db_proxy(aws_session_node):
 
 
 @pytest.fixture(scope='session')
-def non_strict_node(test_context, github_credentials_available):
-    with tempfile.TemporaryDirectory() as tempdir:
-        keystore = Keystore.new("non_strict_node", "no-email-provided", path=tempdir, password="password")
-        if github_credentials_available:
-            keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
-        _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=False)
-        yield _node
+def non_strict_node(aws_available, test_context, github_credentials_available, session_node):
+    if not aws_available:
+        yield session_node
+
+    else:
+        with tempfile.TemporaryDirectory() as tempdir:
+            keystore = Keystore.new("non_strict_node", "no-email-provided", path=tempdir, password="password")
+            if github_credentials_available:
+                keystore.github_credentials.update(
+                    REPOSITORY_URL,
+                    GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+                )
+            _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=False)
+            yield _node
 
 
 @pytest.fixture(scope='session')
-def strict_node(test_context, extra_keystores, github_credentials_available):
-    with tempfile.TemporaryDirectory() as tempdir:
-        keystore = Keystore.new("strict_node", "no-email-provided", path=tempdir, password="password")
-        if github_credentials_available:
-            keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
-        _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=True)
-        yield _node
+def strict_node(aws_available, test_context, extra_keystores, github_credentials_available, session_node):
+    if not aws_available:
+        yield session_node
+
+    else:
+        with tempfile.TemporaryDirectory() as tempdir:
+            keystore = Keystore.new("strict_node", "no-email-provided", path=tempdir, password="password")
+            if github_credentials_available:
+                keystore.github_credentials.update(
+                    REPOSITORY_URL,
+                    GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
+                )
+            _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=True)
+            yield _node
 
 
 @pytest.fixture()
@@ -102,7 +114,10 @@ def known_user(extra_keystores, aws_node_db_proxy):
     return _keystore
 
 
-def test_rti_get_deployed(aws_rti_proxy):
+def test_rti_get_deployed(aws_available, aws_rti_proxy):
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
     result = aws_rti_proxy.get_all_procs()
     assert (result is not None)
 
@@ -202,7 +217,7 @@ def test_rest_deploy_undeploy(
 def aws_deployed_test_processor(
         docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
 ) -> DataObject:
-    if not github_credentials_available:
+    if not github_credentials_available or not aws_available:
         yield DataObject(
             obj_id='dummy',
             c_hash='dummy',
