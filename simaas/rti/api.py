@@ -5,10 +5,10 @@ import abc
 from typing import List, Tuple, Optional, Union
 from fastapi import Request
 
+from simaas.decorators import requires_proc_deployed, requires_authentication, requires_job_or_node_ownership, \
+    requires_proc_not_busy, requires_node_ownership_if_strict
 from simaas.rest.schemas import EndpointDefinition
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
-from simaas.rest.auth import VerifyProcessorDeployed, VerifyUserIsNodeOwner, VerifyProcessorNotBusy, \
-    VerifyAuthorisation, VerifyUserIsJobOwnerOrNodeOwner
 
 from simaas.core.keystore import Keystore
 from simaas.rti.schemas import Job, JobStatus, Processor, Task
@@ -17,56 +17,45 @@ RTI_ENDPOINT_PREFIX = "/api/v1/rti"
 JOB_ENDPOINT_PREFIX = "/api/v1/job"
 
 
-class RTIService(abc.ABC):
-    def __init__(self, retain_job_history: bool, strict_deployment: bool):
-        self._retain_job_history = retain_job_history
-        self._strict_deployment = strict_deployment
+class RTIAdminInterface(abc.ABC):
+    @abc.abstractmethod
+    @requires_node_ownership_if_strict
+    def deploy(self, proc_id: str) -> Processor:
+        """
+        Deploys a processor.
+        """
 
-    @property
-    def retain_job_history(self) -> bool:
-        return self._retain_job_history
+    @abc.abstractmethod
+    @requires_node_ownership_if_strict
+    @requires_proc_deployed
+    @requires_proc_not_busy
+    def undeploy(self, proc_id: str) -> Optional[Processor]:
+        """
+        Removes a processor from the RTI (if it exists).
+        """
 
-    @property
-    def strict_deployment(self) -> bool:
-        return self._strict_deployment
+    @abc.abstractmethod
+    @requires_proc_deployed
+    def jobs_by_proc(self, proc_id: str) -> List[Job]:
+        """
+        Retrieves a list of active jobs processed by a processor. Any job that is pending execution or actively
+        executed will be included in the list.
+        """
 
-    def endpoints(self) -> List[EndpointDefinition]:
-        return [
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc',
-                               self.get_all_procs, List[Processor], None),
+    @abc.abstractmethod
+    @requires_job_or_node_ownership
+    def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
+        """
+        Updates the status of a particular job. Authorisation is required by the owner of the job
+        (i.e., the user that has created the job by submitting the task in the first place).
+        """
 
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.get_proc, Optional[Processor], []),
+    @abc.abstractmethod
+    def get_job_owner_iid(self, job_id: str) -> str:
+        ...
 
-            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.deploy, Processor,
-                               [VerifyUserIsNodeOwner] if self._strict_deployment else []),
 
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}',
-                               self.undeploy, Processor,
-                               [VerifyProcessorDeployed, VerifyProcessorNotBusy, VerifyUserIsNodeOwner] if
-                               self._strict_deployment else [VerifyProcessorDeployed, VerifyProcessorNotBusy]),
-
-            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs',
-                               self.submit, Job, [VerifyProcessorDeployed, VerifyProcessorNotBusy,
-                                                  VerifyAuthorisation]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs',
-                               self.jobs_by_proc, List[Job], [VerifyProcessorDeployed]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job',
-                               self.jobs_by_user, List[Job], [VerifyAuthorisation]),
-
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status',
-                               self.get_job_status, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel',
-                               self.job_cancel, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge',
-                               self.job_purge, JobStatus, [VerifyUserIsJobOwnerOrNodeOwner]),
-        ]
-
+class RTIInterface(abc.ABC):
     @abc.abstractmethod
     def get_all_procs(self) -> List[Processor]:
         """
@@ -80,49 +69,14 @@ class RTIService(abc.ABC):
         """
 
     @abc.abstractmethod
-    def deploy(self, proc_id: str) -> Processor:
+    @requires_proc_deployed
+    def submit(self, proc_id: str, task: Task) -> Job:
         """
-        Deploys a processor.
-        """
-
-    @abc.abstractmethod
-    def undeploy(self, proc_id: str) -> Optional[Processor]:
-        """
-        Removes a processor from the RTI (if it exists).
+        Submits a task to a deployed processor, thereby creating a new job.
         """
 
     @abc.abstractmethod
-    def submit(self, proc_id: str, task: Task, request: Request) -> Job:
-        """
-        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
-        of the task/job.
-        """
-
-    @abc.abstractmethod
-    def jobs_by_proc(self, proc_id: str) -> List[Job]:
-        """
-        Retrieves a list of active jobs processed by a processor. Any job that is pending execution or actively
-        executed will be included in the list.
-        """
-
-    @abc.abstractmethod
-    def jobs_by_user(self, request: Request) -> List[Job]:
-        """
-        Retrieves a list of active jobs by a user. If the user is the node owner, all active jobs will be returned.
-        """
-
-    @abc.abstractmethod
-    def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
-        """
-        Updates the status of a particular job. Authorisation is required by the owner of the job
-        (i.e., the user that has created the job by submitting the task in the first place).
-        """
-
-    @abc.abstractmethod
-    def get_job_owner_iid(self, job_id: str) -> str:
-        ...
-
-    @abc.abstractmethod
+    @requires_job_or_node_ownership
     def get_job_status(self, job_id: str) -> JobStatus:
         """
         Retrieves detailed information about the status of a job. Authorisation is required by the owner of the job
@@ -130,6 +84,7 @@ class RTIService(abc.ABC):
         """
 
     @abc.abstractmethod
+    @requires_job_or_node_ownership
     def job_cancel(self, job_id: str) -> JobStatus:
         """
         Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
@@ -137,10 +92,56 @@ class RTIService(abc.ABC):
         """
 
     @abc.abstractmethod
+    @requires_job_or_node_ownership
     def job_purge(self, job_id: str) -> JobStatus:
         """
         Purges a running job. It will be removed regardless of its state.
         """
+
+
+class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
+    def __init__(self, retain_job_history: bool, strict_deployment: bool):
+        self._retain_job_history = retain_job_history
+        self._strict_deployment = strict_deployment
+
+    @property
+    def retain_job_history(self) -> bool:
+        return self._retain_job_history
+
+    @property
+    def strict_deployment(self) -> bool:
+        return self._strict_deployment
+
+    @abc.abstractmethod
+    @requires_proc_deployed
+    @requires_proc_not_busy
+    @requires_authentication
+    def rest_submit(self, proc_id: str, task: Task, request: Request) -> Job:
+        """
+        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
+        of the task/job.
+        """
+
+    @abc.abstractmethod
+    @requires_authentication
+    def jobs_by_user(self, request: Request) -> List[Job]:
+        """
+        Retrieves a list of active jobs by a user. If the user is the node owner, all active jobs will be returned.
+        """
+
+    def endpoints(self) -> List[EndpointDefinition]:
+        return [
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc', self.get_all_procs, List[Processor]),
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.get_proc, Optional[Processor]),
+            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.deploy, Processor),
+            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.undeploy, Processor),
+            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs', self.rest_submit, Job),
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs', self.jobs_by_proc, List[Job]),
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job', self.jobs_by_user, List[Job]),
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status', self.get_job_status, JobStatus),
+            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel', self.job_cancel, JobStatus),
+            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge', self.job_purge, JobStatus)
+        ]
 
 
 class RTIProxy(EndpointProxy):

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional, Sequence, Union, Tuple
+from typing import Any, Union, Tuple
 
 from pydantic import BaseModel
 
@@ -11,7 +11,6 @@ class EndpointDefinition:
     rule: str
     function: Any
     response_model: Any
-    dependencies: Optional[Sequence[Any]]
 
 
 class Token(BaseModel):

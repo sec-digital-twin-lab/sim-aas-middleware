@@ -3,7 +3,6 @@ import os
 from typing import List, Optional, Dict, Tuple, Union
 
 from pydantic import BaseModel
-from simaas.core.helpers import hash_file_content
 
 from simaas.core.identity import Identity
 
@@ -269,14 +268,12 @@ class P2PPushDataObject(P2PProtocol):
                 }
             ), None
 
-        # calculate content hash
-        c_hash: str = hash_file_content(attachment_path).hex()
-
         # add the data object
-        meta = self._node.dor.add_(
-            attachment_path, c_hash, request.data_type, request.data_format, request.owner_iid,
-            request.creators_iid, request.access_restricted, request.content_encrypted, request.license,
-            request.recipe, request.tags
+        meta = self._node.dor.add(
+            attachment_path, request.data_type, request.data_format, request.owner_iid,
+            creators_iid=request.creators_iid, access_restricted=request.access_restricted,
+            content_encrypted=request.content_encrypted, license=request.license,
+            tags=request.tags, recipe=request.recipe
         )
 
         return PushResponse(successful=True, meta=meta, details=None), None
