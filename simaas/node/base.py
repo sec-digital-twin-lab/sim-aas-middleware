@@ -9,6 +9,7 @@ from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError
 from simaas.dor.schemas import DataObject
 from simaas.rest.exceptions import AuthorisationFailedError
 from simaas.dor.exceptions import DataObjectNotFoundError
+from simaas.dor.api import DORRESTService
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.rti.schemas import Processor
 from simaas.core.helpers import get_timestamp_now
@@ -90,6 +91,7 @@ class Node(abc.ABC):
         self.p2p.add(P2PGetIdentity(self))
         self.p2p.add(P2PGetNetwork(self))
         self.p2p.add(P2PRunnerPerformHandshake(self))
+        self.p2p.add(P2PNamespaceServiceCall(self))
         self.p2p.start_service()
 
         if rest_address is not None:
