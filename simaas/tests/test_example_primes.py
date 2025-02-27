@@ -346,38 +346,37 @@ def test_proc_factorisation_cancel(dummy_namespace):
     N = 987654321987
     num_sub_jobs = 2
 
-    with tempfile.TemporaryDirectory() as temp_dir:
-        job: Job = dummy_namespace.rti.submit('factorisation', Task(
-            proc_id='factorisation',
-            user_iid='someone',
-            input=[Task.InputValue(
-                name='parameters',
-                type='value',
-                value={
-                    'N': N,
-                    'num_sub_jobs': num_sub_jobs
-                }
-            )],
-            output=[Task.Output(
-                name='result',
-                owner_iid='someone',
-                restricted_access=False,
-                content_encrypted=False,
-                target_node_iid=None
-            )],
-            name=None,
-            description=None,
-            budget=None
-        ))
+    job: Job = dummy_namespace.rti.submit('factorisation', Task(
+        proc_id='factorisation',
+        user_iid='someone',
+        input=[Task.InputValue(
+            name='parameters',
+            type='value',
+            value={
+                'N': N,
+                'num_sub_jobs': num_sub_jobs
+            }
+        )],
+        output=[Task.Output(
+            name='result',
+            owner_iid='someone',
+            restricted_access=False,
+            content_encrypted=False,
+            target_node_iid=None
+        )],
+        name=None,
+        description=None,
+        budget=None
+    ))
 
-        # wait for a bit...
-        time.sleep(5)
+    # wait for a bit...
+    time.sleep(5)
 
-        # cancel it
-        dummy_namespace.rti.job_cancel(job.id)
+    # cancel it
+    dummy_namespace.rti.job_cancel(job.id)
 
-        status: JobStatus = dummy_namespace.rti.get_job_status(job.id)
-        assert status.state == JobStatus.State.CANCELLED
+    status: JobStatus = dummy_namespace.rti.get_job_status(job.id)
+    assert status.state == JobStatus.State.CANCELLED
 
 
 @pytest.fixture(scope="session")
