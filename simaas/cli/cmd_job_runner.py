@@ -795,7 +795,7 @@ class JobRunner(CLICommand, ProgressListener):
 
             # run the processor
             namespace = DefaultNamespace('', self._custodian, self.custodian_address.address, self._keystore)
-            self._proc.run(self._wd_path, self, namespace, self._logger)
+            self._proc.run(self._wd_path, self._job, self, namespace, self._logger)
 
             # was the processor interrupted?
             if self._interrupted:

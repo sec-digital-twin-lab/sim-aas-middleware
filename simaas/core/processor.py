@@ -8,7 +8,7 @@ from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string
 from simaas.dor.schemas import ProcessorDescriptor
 from simaas.namespace.api import Namespace
-from simaas.rti.schemas import Severity
+from simaas.rti.schemas import Severity, Job
 
 
 class ProcessorRuntimeError(Exception):
@@ -146,7 +146,9 @@ class ProcessorBase(abc.ABC):
         return self._descriptor
 
     @abc.abstractmethod
-    def run(self, wd_path: str, listener: ProgressListener, namespace: Namespace, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         """
         Abstract method to run the processor. Must be implemented by subclasses.
 
@@ -156,9 +158,10 @@ class ProcessorBase(abc.ABC):
             inputs and outputs must exactly match the specification in descriptor.json. The RTI is responsible to
             ensure the correct naming of inputs. Similarly, the processor implementation needs to ensure the correct
             naming of outputs.
-        :param namespace:
+        :param job:
         :param listener: A callback that allows the processor to provide updates on its progress, available
             outputs and messages.
+        :param namespace:
         :param logger: A logger for logging messages.
         :return:
         """

@@ -4,6 +4,8 @@ import os
 import time
 from typing import Any
 
+from simaas.rti.schemas import Job
+
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace
 
@@ -27,7 +29,9 @@ class ProcessorABC(ProcessorBase):
         super().__init__(proc_path)
         self._is_cancelled = False
 
-    def run(self, wd_path: str, listener: ProgressListener, namespace: Namespace, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         """
         Put all your code here that executes the model in this function.
 

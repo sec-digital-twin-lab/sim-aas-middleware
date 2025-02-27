@@ -26,7 +26,9 @@ class ProcessorFactorisation(ProcessorBase):
         self._is_cancelled = False
         self._use_threads = use_threads
 
-    def run(self, wd_path: str, listener: ProgressListener, namespace: Namespace, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         # read the parameters
         parameters_path: str = os.path.join(wd_path, 'parameters')
         with open(parameters_path, 'r') as f:

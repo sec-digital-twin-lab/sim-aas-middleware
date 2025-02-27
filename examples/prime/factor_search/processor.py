@@ -3,6 +3,7 @@ import logging
 import os
 from typing import List, Set, Optional
 from pydantic import BaseModel
+from simaas.rti.schemas import Job
 
 from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace
 
@@ -23,7 +24,9 @@ class ProcessorFactorSearch(ProcessorBase):
         self._is_cancelled = False
         self._limit = limit
 
-    def run(self, wd_path: str, listener: ProgressListener, namespace: Namespace, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         # read the parameters
         parameters_path: str = os.path.join(wd_path, 'parameters')
         with open(parameters_path, 'r') as f:
