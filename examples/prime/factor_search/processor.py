@@ -2,7 +2,6 @@ import json
 import logging
 import os
 from typing import List, Set, Optional
-
 from pydantic import BaseModel
 
 from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace

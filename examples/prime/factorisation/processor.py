@@ -4,20 +4,20 @@ import os
 import tempfile
 import time
 from typing import Optional, List
-
 from pydantic import BaseModel
 
-from examples.prime.factor_search.processor import Result
 from simaas.dor.schemas import DataObject
-
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, Processor
-
 from simaas.core.processor import ProcessorBase, ProgressListener, Namespace, ProcessorRuntimeError
 
 
 class Parameters(BaseModel):
     N: int
     num_sub_jobs: int
+
+
+class Result(BaseModel):
+    factors: List[int]
 
 
 class ProcessorFactorisation(ProcessorBase):
