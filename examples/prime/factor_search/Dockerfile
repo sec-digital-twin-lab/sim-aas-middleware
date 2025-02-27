@@ -17,7 +17,7 @@ RUN --mount=type=secret,id=git_credentials \
 
 WORKDIR /sim-aas-middleware
 # RUN git checkout dev-1.0.1
-RUN git checkout 04cd73ff1e2dd2d2ea2c5daea2f8575412deed90
+RUN git checkout f2b9565b51893f0a8fa0ab71deae34da4c445c59
 
 WORKDIR /processor
 COPY . .
