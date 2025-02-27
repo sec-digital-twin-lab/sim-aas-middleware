@@ -12,9 +12,12 @@ from typing import List, Optional, Tuple, Dict
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
+from simaas.core.logging import Logging
 
 from simaas.core.processor import ProcessorBase
 from simaas.rti.schemas import Task
+
+logger = Logging.get(__name__)
 
 
 def determine_local_ip() -> Optional[str]:

@@ -255,8 +255,8 @@ class DefaultDORService(DORRESTService):
         return provenance
 
     def search(
-            self, patterns: Optional[List[str]], owner_iid: Optional[str], data_type: Optional[str],
-            data_format: Optional[str], c_hashes: Optional[List[str]]
+            self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
+            data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
     ) -> List[DataObject]:
         """
         Searches a DOR for data objects that match the search criteria. There are two kinds of criteria: constraints
