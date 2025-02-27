@@ -23,9 +23,9 @@
       "data_schema": {
         "type": "object",
         "properties": {
-          "value": {"type": "number"}
+          "factors": {"type": "array"}
         },
-        "required": ["value"]
+        "required": ["factors"]
       }
     }
   ]
