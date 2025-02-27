@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -6,6 +7,7 @@ import time
 from typing import List, Optional, Dict, Union
 
 import pytest
+from simaas.core.logging import Logging
 
 from simaas.core.keystore import Keystore
 
@@ -23,6 +25,10 @@ from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecip
 from simaas.namespace.api import Namespace
 from simaas.rti.api import RTIInterface
 from simaas.rti.schemas import Severity, JobStatus, Task, Job, Processor
+from simaas.tests.conftest import add_abc_processor, add_test_processor
+
+Logging.initialise(level=logging.DEBUG)
+logger = Logging.get(__name__)
 
 
 class DummyProgressListener(ProgressListener):
@@ -132,14 +138,14 @@ class DummyNamespace(Namespace):
                 'factor_search': Processor(
                     id="factor_search",
                     state=Processor.State.READY,
-                    image_name=None,
+                    image_name='factor_search',
                     gpp=None,
                     error=None
                 ),
                 'factorisation': Processor(
                     id="factorisation",
                     state=Processor.State.READY,
-                    image_name=None,
+                    image_name='factorisation',
                     gpp=None,
                     error=None
                 )
@@ -294,6 +300,7 @@ def test_proc_factor_search(dummy_namespace):
         else:
             print(f"N={N} is NOT prime")
 
+
 def test_proc_factorisation(dummy_namespace):
     N = 100
     num_sub_jobs = 2
@@ -333,6 +340,7 @@ def test_proc_factorisation(dummy_namespace):
         else:
             print(f"N={N} is NOT prime")
 
+
 def test_proc_factorisation_cancel(dummy_namespace):
     N = 987654321987
     num_sub_jobs = 2
@@ -369,3 +377,214 @@ def test_proc_factorisation_cancel(dummy_namespace):
 
         status: JobStatus = dummy_namespace.rti.get_job_status(job.id)
         assert status.state == JobStatus.State.CANCELLED
+
+
+@pytest.fixture(scope="session")
+def deployed_factorisation_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, proc_name='proc-factorisation', proc_path='examples/prime/factorisation'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
+    else:
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
+
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
+
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                logger.info(f"Waiting for processor to be ready: {proc}")
+                time.sleep(1)
+        except Exception as e:
+            print(e)
+
+        logger.info(f"Processor undeployed: {proc}")
+
+
+@pytest.fixture(scope="session")
+def deployed_factor_search_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, proc_name='proc-factor-search', proc_path='examples/prime/factor_search'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
+    else:
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
+
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
+
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                logger.info(f"Waiting for processor to be ready: {proc}")
+                time.sleep(1)
+        except Exception as e:
+            print(e)
+
+        logger.info(f"Processor undeployed: {proc}")
+
+
+def test_factor_search_submit_list_get_job(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_factor_search_processor
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    proc_id = deployed_factor_search_processor.obj_id
+    owner = session_node.keystore
+
+    # submit the job
+    job = rti_proxy.submit_job(proc_id, [
+        Task.InputValue.model_validate({
+            'name': 'parameters', 'type': 'value', 'value': {
+                'start': 2,
+                'end': 100,
+                'number': 100
+            }
+        }),
+    ], [
+        Task.Output.model_validate({
+            'name': 'result',
+            'owner_iid': owner.identity.id,
+            'restricted_access': False,
+            'content_encrypted': False,
+            'target_node_iid': None
+        })
+    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
+    assert (job is not None)
+
+    job_id = job.id
+
+    while True:
+        try:
+            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert (status is not None)
+
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # check if we have an object id for output object 'c'
+    assert ('result' in status.output)
+
+    # get the contents of the output data object
+    download_path = os.path.join(test_context.testing_dir, 'result.json')
+    dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
+    assert (os.path.isfile(download_path))
+
+    # read the result
+    with open(download_path, 'r') as f:
+        result: dict = json.load(f)
+        result: Result = Result.model_validate(result)
+
+    # print the result
+    print(result.factors)
+    assert (result.factors == [2, 4, 5, 10, 20, 25, 50])
+
+
+def test_factorisation_submit_list_get_job(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_factorisation_processor, deployed_factor_search_processor
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    proc_id = deployed_factorisation_processor.obj_id
+    owner = session_node.keystore
+
+    # submit the job
+    job = rti_proxy.submit_job(proc_id, [
+        Task.InputValue.model_validate({
+            'name': 'parameters', 'type': 'value', 'value': {
+                'N': 100,
+                'num_sub_jobs': 2
+            }
+        }),
+    ], [
+        Task.Output.model_validate({
+            'name': 'result',
+            'owner_iid': owner.identity.id,
+            'restricted_access': False,
+            'content_encrypted': False,
+            'target_node_iid': None
+        })
+    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
+    assert (job is not None)
+
+    job_id = job.id
+
+    while True:
+        try:
+            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert (status is not None)
+
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # check if we have an object id for output object 'c'
+    assert ('result' in status.output)
+
+    # get the contents of the output data object
+    download_path = os.path.join(test_context.testing_dir, 'result.json')
+    dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
+    assert (os.path.isfile(download_path))
+
+    # read the result
+    with open(download_path, 'r') as f:
+        result: dict = json.load(f)
+        result: Result = Result.model_validate(result)
+
+    # print the result
+    print(result.factors)
+    assert (result.factors == [2, 4, 5, 10, 20, 25, 50])

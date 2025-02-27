@@ -3,15 +3,16 @@ import logging
 import os
 import tempfile
 import time
+from typing import Optional, List
 
 from pydantic import BaseModel
 
 from examples.prime.factor_search.processor import Result
 from simaas.dor.schemas import DataObject
 
-from simaas.rti.schemas import Task, Job, JobStatus, Severity
+from simaas.rti.schemas import Task, Job, JobStatus, Severity, Processor
 
-from simaas.core.processor import ProcessorBase, ProgressListener, Namespace
+from simaas.core.processor import ProcessorBase, ProgressListener, Namespace, ProcessorRuntimeError
 
 
 class Parameters(BaseModel):
@@ -34,6 +35,19 @@ class ProcessorFactorisation(ProcessorBase):
 
         # determine number of steps
         step = p.N // p.num_sub_jobs
+
+        # find the processor
+        proc_id: Optional[str] = None
+        found: List[Processor] = namespace.rti.get_all_procs()
+        for proc in found:
+            if 'factor_search' in proc.image_name:
+                proc_id = proc.id
+                break
+
+        if proc_id is None:
+            raise ProcessorRuntimeError("Factor search processor not found", details={
+                'found': [item.model_dump() for item in found]
+            })
 
         # create child jobs
         pending = []
