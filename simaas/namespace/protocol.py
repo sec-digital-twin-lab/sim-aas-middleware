@@ -1,5 +1,4 @@
 import os.path
-import traceback
 import canonicaljson
 from typing import Optional, Tuple, Any
 
