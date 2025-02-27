@@ -4,18 +4,12 @@ import os
 import random
 import tempfile
 import time
-import traceback
 from typing import Optional, List
 
 import pytest
-from simaas.rest.exceptions import UnsuccessfulRequestError
-
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
-
 from simaas.dor.schemas import DataObject, DataObjectProvenance
-
 from simaas.core.exceptions import SaaSRuntimeException
-
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.namespace.default import DefaultNamespace
@@ -185,7 +179,7 @@ def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, rand
 
 
 def test_namespace_rti_job_procs(
-        docker_available, github_credentials_available, session_node, known_user, deployed_test_processor
+        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -206,7 +200,7 @@ def test_namespace_rti_job_procs(
 
 
 def test_namespace_rti_job_submit_status(
-        docker_available, github_credentials_available, session_node, known_user, deployed_test_processor
+        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -215,7 +209,7 @@ def test_namespace_rti_job_submit_status(
         pytest.skip("Github credentials not available")
 
     session_node.db.update_identity(known_user.identity)
-    proc_id = deployed_test_processor.obj_id
+    proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
 

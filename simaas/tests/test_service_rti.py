@@ -25,7 +25,7 @@ from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Task, JobStatus, Processor, Job
-from simaas.tests.conftest import add_test_processor, REPOSITORY_URL
+from simaas.tests.conftest import REPOSITORY_URL, add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -95,9 +95,9 @@ def test_rest_deploy_undeploy(
     assert (info1.strict_deployment is True)
 
     # upload the test proc GCC
-    proc0: DataObject = add_test_processor(dor0, node0.keystore)
+    proc0: DataObject = add_test_processor(dor0, node0.keystore, 'proc-abc', 'examples/simple/abc')
     proc_id0 = proc0.obj_id
-    proc1: DataObject = add_test_processor(dor1, node1.keystore)
+    proc1: DataObject = add_test_processor(dor1, node1.keystore, 'proc-abc', 'examples/simple/abc')
     proc_id1 = proc1.obj_id
 
     # make the wrong user identity known to the nodes
@@ -159,7 +159,7 @@ def test_rest_deploy_undeploy(
 
 def test_rest_submit_list_get_job(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_test_processor, known_user
+        deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -167,7 +167,7 @@ def test_rest_submit_list_get_job(
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    proc_id = deployed_test_processor.obj_id
+    proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
 
@@ -244,7 +244,7 @@ def test_rest_submit_list_get_job(
 
 
 def test_rest_submit_cancel_job(
-        docker_available, github_credentials_available, session_node, rti_proxy, deployed_test_processor, known_user
+        docker_available, github_credentials_available, session_node, rti_proxy, deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -252,7 +252,7 @@ def test_rest_submit_cancel_job(
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    proc_id = deployed_test_processor.obj_id
+    proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
 
@@ -299,7 +299,7 @@ def test_rest_submit_cancel_job(
 
 
 def test_rest_submit_cancel_kill_job(
-        docker_available, github_credentials_available, session_node, rti_proxy, deployed_test_processor, known_user
+        docker_available, github_credentials_available, session_node, rti_proxy, deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -307,7 +307,7 @@ def test_rest_submit_cancel_kill_job(
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    proc_id = deployed_test_processor.obj_id
+    proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
 
     task_input = [
@@ -390,7 +390,7 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
 
 def test_provenance(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_test_processor
+        deployed_abc_processor
 ):
     rti: DefaultRTIService = session_node.rti
 
@@ -426,7 +426,7 @@ def test_provenance(
     # run 3 iterations
     log = []
     for i in range(3):
-        job: Job = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=obj_a, b=obj_b)
+        job: Job = execute_job(deployed_abc_processor.obj_id, owner, rti_proxy, session_node, a=obj_a, b=obj_b)
 
         # wait until the job is done
         status: JobStatus = rti.get_job_status(job.id)
@@ -452,7 +452,8 @@ def test_provenance(
 
 
 def test_job_concurrency(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy, deployed_test_processor
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_abc_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -486,7 +487,7 @@ def test_job_concurrency(
             time.sleep(dt)
 
             logprint(idx, f"[{idx}] [{time.time()}] submit job")
-            job = execute_job(deployed_test_processor.obj_id, owner, rti_proxy, session_node, a=v0, b=v1)
+            job = execute_job(deployed_abc_processor.obj_id, owner, rti_proxy, session_node, a=v0, b=v1)
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
 
             # wait until the job is done

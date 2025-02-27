@@ -25,7 +25,7 @@ from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.base import RTIServiceBase
 from simaas.rti.schemas import Task, JobStatus, Processor, Job
-from simaas.tests.conftest import add_test_processor, REPOSITORY_URL
+from simaas.tests.conftest import REPOSITORY_URL, add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -151,9 +151,9 @@ def test_rest_deploy_undeploy(
     assert (info1.strict_deployment is True)
 
     # upload the test proc GCC
-    proc0: DataObject = add_test_processor(dor0, node0.keystore)
+    proc0: DataObject = add_test_processor(dor0, node0.keystore, 'proc-abc', 'examples/simple/abc')
     proc_id0 = proc0.obj_id
-    proc1: DataObject = add_test_processor(dor1, node1.keystore)
+    proc1: DataObject = add_test_processor(dor1, node1.keystore, 'proc-abc', 'examples/simple/abc')
     proc_id1 = proc1.obj_id
 
     # make the wrong user identity known to the nodes
@@ -237,7 +237,7 @@ def aws_deployed_test_processor(
 
     else:
         # add test processor
-        meta = add_test_processor(aws_dor_proxy, aws_session_node.keystore)
+        meta = add_test_processor(aws_dor_proxy, aws_session_node.keystore, 'proc-abc', 'examples/simple/abc')
         proc_id = meta.obj_id
 
         if not docker_available:

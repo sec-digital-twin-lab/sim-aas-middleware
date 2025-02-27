@@ -14,12 +14,9 @@ import pytest
 from docker.errors import ImageNotFound
 
 from examples.simple.abc.processor import write_value
-from simaas.core.helpers import hash_string_object
 
 from simaas.nodedb.protocol import P2PJoinNetwork
-
 from simaas.rti.default import DBJobInfo, DefaultRTIService
-
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
 from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
@@ -42,7 +39,7 @@ from simaas.p2p.base import P2PAddress
 from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, Namespace
-from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
+from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL, PROC_ABC_PATH
 
 logger = Logging.get(__name__)
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
@@ -814,7 +811,8 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 
 
 async def execute_job(
-        wd_parent_path: str, custodian: Node, job_id: str, a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
+        wd_parent_path: str, custodian: Node, job_id: str,
+        a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
         user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
 ) -> JobStatus:
     # convenience variable
@@ -941,32 +939,16 @@ def run_job_cmd(
         print(trace)
 
 
-class TestNamespace(Namespace):
-    def __init__(self, node: Node) -> None:
-        super().__init__(node.dor, node.rti)
-        self._node = node
-        self._name = 'test-namespace'
-        self._id = hash_string_object(self._name).hex()
-
-    def id(self) -> str:
-        return self._id
-
-    def name(self) -> str:
-        return self._name
-
-    def destroy(self) -> None:
-        ...
-
-
 class ProcessorRunner(threading.Thread, ProgressListener):
     def __init__(
-            self, proc: ProcessorBase, wd_path: str, namespace: Namespace = None, log_level: int = logging.INFO
+            self, proc: ProcessorBase, wd_path: str, job: Job, namespace: Namespace = None, log_level: int = logging.INFO
     ) -> None:
         super().__init__()
 
         self._mutex = threading.Lock()
         self._proc = proc
         self._wd_path = wd_path
+        self._job = job
         self._namespace = namespace
         self._interrupted = False
 
@@ -1013,7 +995,7 @@ class ProcessorRunner(threading.Thread, ProgressListener):
         try:
             self._logger.info(f"begin processing job at {self._wd_path}")
 
-            self._proc.run(self._wd_path, self, self._namespace, self._logger)
+            self._proc.run(self._wd_path, self._job, self, self._namespace, self._logger)
 
             if self._interrupted:
                 self._logger.info(f"end processing job at {self._wd_path} -> INTERRUPTED")
@@ -1327,11 +1309,10 @@ def test_cli_builder_build_image(docker_available, github_credentials_available,
     repo_path = os.path.join(temp_dir, 'repository')
     clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
 
-    proc_path = "examples/adapters/proc_example"
     image_name = 'test'
 
     try:
-        build_processor_image(os.path.join(repo_path+"_wrong", proc_path), image_name, credentials=credentials)
+        build_processor_image(os.path.join(repo_path+"_wrong", PROC_ABC_PATH), image_name, credentials=credentials)
         assert False
     except CLIRuntimeError:
         assert True
@@ -1344,7 +1325,7 @@ def test_cli_builder_build_image(docker_available, github_credentials_available,
         assert True
 
     try:
-        build_processor_image(os.path.join(repo_path, proc_path), image_name, credentials=credentials)
+        build_processor_image(os.path.join(repo_path, PROC_ABC_PATH), image_name, credentials=credentials)
     except CLIRuntimeError:
         assert False
 
@@ -1370,9 +1351,8 @@ def test_cli_builder_export_image(docker_available, github_credentials_available
     clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
 
     # build image
-    proc_path = "examples/adapters/proc_example"
     image_name = 'test'
-    build_processor_image(os.path.join(repo_path, proc_path), image_name, credentials=credentials)
+    build_processor_image(os.path.join(repo_path, PROC_ABC_PATH), image_name, credentials=credentials)
 
     # export image
     try:
@@ -1397,7 +1377,7 @@ def test_cli_builder_cmd(docker_available, github_credentials_available, session
     args = {
         'repository': REPOSITORY_URL,
         'commit_id': REPOSITORY_COMMIT_ID,
-        'proc_path': 'examples/adapters/proc_example',
+        'proc_path': PROC_ABC_PATH,
         'address': f"{address[0]}:{address[1]}"
     }
 
@@ -1441,7 +1421,7 @@ def test_cli_builder_cmd_store_image(docker_available, github_credentials_availa
     args = {
         'repository': REPOSITORY_URL,
         'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': 'examples/adapters/proc_example',
+        'proc_path': PROC_ABC_PATH,
         'address': f"{address[0]}:{address[1]}",
         'store_image': True
     }
@@ -1486,7 +1466,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
     args = {
         'repository': REPOSITORY_URL,
         'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': 'examples/adapters/proc_example',
+        'proc_path': PROC_ABC_PATH,
         'address': f"{address[0]}:{address[1]}",
         'store_image': True
     }
@@ -1653,7 +1633,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credenti
     args = {
         'repository': REPOSITORY_URL,
         'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': 'examples/adapters/proc_example',
+        'proc_path': PROC_ABC_PATH,
         'address': f"{address[0]}:{address[1]}",
         'store_image': True
     }

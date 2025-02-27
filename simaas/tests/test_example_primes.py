@@ -8,15 +8,10 @@ from typing import List, Optional, Dict, Union
 
 import pytest
 from simaas.core.logging import Logging
-
 from simaas.core.keystore import Keystore
-
 from simaas.nodedb.schemas import NodeInfo
-
 from simaas.core.helpers import get_timestamp_now, hash_json_object
-
 from simaas.core.processor import ProgressListener, ProcessorBase
-
 from examples.prime.factor_search.processor import Parameters as FactorSearchParameters, ProcessorFactorSearch, \
     Result
 from examples.prime.factorisation.processor import Parameters as FactorisationParameters, ProcessorFactorisation
@@ -25,7 +20,7 @@ from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecip
 from simaas.namespace.api import Namespace
 from simaas.rti.api import RTIInterface
 from simaas.rti.schemas import Severity, JobStatus, Task, Job, Processor
-from simaas.tests.conftest import add_abc_processor, add_test_processor
+from simaas.tests.conftest import add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -169,7 +164,7 @@ class DummyNamespace(Namespace):
         def submit(self, proc_id: str, task: Task) -> Job:
             job_id = str(self._next_job_id)
             self._next_job_id += 1
-            self._jobs[job_id] = Job(
+            job = Job(
                 id=job_id,
                 task=task,
                 retain=True,
@@ -186,6 +181,7 @@ class DummyNamespace(Namespace):
                 proc_name=task.proc_id,
                 t_submitted=get_timestamp_now()
             )
+            self._jobs[job_id] = job
 
             status = JobStatus(
                 state=JobStatus.State.INITIALISED,
@@ -212,7 +208,7 @@ class DummyNamespace(Namespace):
 
                         print(f"job:{job_id} -> {in0.value}")
                         self._instances[job_id].run(
-                            wd_path, DummyProgressListener(wd_path, status, self._namespace.dor), self._namespace, None
+                            wd_path, job, DummyProgressListener(wd_path, status, self._namespace.dor), self._namespace, None
                         )
                         if status.state == JobStatus.State.RUNNING:
                             status.state = JobStatus.State.SUCCESSFUL
@@ -240,12 +236,16 @@ class DummyNamespace(Namespace):
 
     def __init__(self):
         super().__init__(DummyNamespace.DummyDOR(), DummyNamespace.DummyRTI(self))
+        self._keystore = Keystore.new('dummy')
 
     def id(self) -> str:
         return 'dummy'
 
     def name(self) -> str:
         return 'dummy'
+
+    def keystore(self) -> Keystore:
+        return self._keystore
 
     def destroy(self) -> None:
         pass
@@ -283,7 +283,7 @@ def test_proc_factor_search(dummy_namespace):
         )
         proc_path = os.path.join('..', '..', 'examples', 'prime', 'factor_search')
         proc = ProcessorFactorSearch(proc_path)
-        proc.run(temp_dir, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
+        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
         # read the result
         result_path = os.path.join(temp_dir, 'result')
@@ -312,7 +312,6 @@ def test_proc_factorisation(dummy_namespace):
         with open(parameters_path, 'w') as f:
             json.dump(parameters.model_dump(), f, indent=2)
 
-        # create the processor and run it
         status = JobStatus(
             state=JobStatus.State.INITIALISED,
             progress=0,
@@ -321,9 +320,11 @@ def test_proc_factorisation(dummy_namespace):
             errors=[],
             message=None
         )
+
+        # create the processor and run it
         proc_path = os.path.join('..', '..', 'examples', 'prime', 'factorisation')
         proc = ProcessorFactorisation(proc_path)
-        proc.run(temp_dir, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
+        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
         # read the result
         result_path = os.path.join(temp_dir, 'result')
@@ -385,7 +386,7 @@ def deployed_factorisation_processor(
 ) -> DataObject:
     # add test processor
     meta = add_test_processor(
-        dor_proxy, session_node.keystore, proc_name='proc-factorisation', proc_path='examples/prime/factorisation'
+        dor_proxy, session_node.keystore, 'proc-factorisation', 'examples/prime/factorisation'
     )
     proc_id = meta.obj_id
 
@@ -422,7 +423,7 @@ def deployed_factor_search_processor(
 ) -> DataObject:
     # add test processor
     meta = add_test_processor(
-        dor_proxy, session_node.keystore, proc_name='proc-factor-search', proc_path='examples/prime/factor_search'
+        dor_proxy, session_node.keystore, 'proc-factor-search', 'examples/prime/factor_search'
     )
     proc_id = meta.obj_id
 
