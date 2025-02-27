@@ -138,14 +138,14 @@ class DummyNamespace(Namespace):
                 'factor_search': Processor(
                     id="factor_search",
                     state=Processor.State.READY,
-                    image_name='factor_search',
+                    image_name='proc-factor-search',
                     gpp=None,
                     error=None
                 ),
                 'factorisation': Processor(
                     id="factorisation",
                     state=Processor.State.READY,
-                    image_name='factorisation',
+                    image_name='proc-factorisation',
                     gpp=None,
                     error=None
                 )

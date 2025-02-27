@@ -40,7 +40,7 @@ class ProcessorFactorisation(ProcessorBase):
         proc_id: Optional[str] = None
         found: List[Processor] = namespace.rti.get_all_procs()
         for proc in found:
-            if 'factor_search' in proc.image_name:
+            if 'proc-factor-search' in proc.image_name:
                 proc_id = proc.id
                 break
 
