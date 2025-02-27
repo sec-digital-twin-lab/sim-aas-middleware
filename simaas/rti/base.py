@@ -94,12 +94,16 @@ class RTIServiceBase(RTIRESTService):
 
     def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Optional[Job]:
         with self._session_maker() as session:
+            # get the DB record for the job (if any)
             record = session.query(DBJobInfo).get(job_id)
             if record is not None:
                 # update the runner information
                 record.runner['identity'] = runner_identity.model_dump()
                 record.runner['address'] = runner_address
                 session.commit()
+
+                # make the runner identity known to the node
+                self._node.db.update_identity(runner_identity)
 
                 return Job.model_validate(record.job)
 
