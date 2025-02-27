@@ -8,6 +8,7 @@ import time
 import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
+from simaas.namespace.default import DefaultNamespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
@@ -28,7 +29,9 @@ from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrF
     AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
 from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
-from simaas.core.processor import ProgressListener, ProcessorBase, find_processors
+from simaas.core.processor import ProgressListener, ProcessorBase
+from simaas.helpers import find_processors
+
 
 class OutputObjectHandler(threading.Thread):
     def __init__(self, logger: logging.Logger, owner, obj_name: str):
@@ -791,7 +794,8 @@ class JobRunner(CLICommand, ProgressListener):
             self._status_handler.update(state=JobStatus.State.RUNNING)
 
             # run the processor
-            self._proc.run(self._wd_path, self, self._logger)
+            namespace = DefaultNamespace('', self._custodian, self.custodian_address.address, self._keystore)
+            self._proc.run(self._wd_path, self, namespace, self._logger)
 
             # was the processor interrupted?
             if self._interrupted:

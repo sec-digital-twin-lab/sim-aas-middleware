@@ -5,6 +5,10 @@ from simaas.rti.api import RTIInterface
 
 
 class Namespace(abc.ABC):
+    def __init__(self, dor: DORInterface, rti: RTIInterface):
+        self._dor = dor
+        self._rti = rti
+
     @abc.abstractmethod
     def id(self) -> str:
         ...
@@ -13,13 +17,13 @@ class Namespace(abc.ABC):
     def name(self) -> str:
         ...
 
-    @abc.abstractmethod
+    @property
     def dor(self) -> DORInterface:
-        ...
+        return self._dor
 
-    @abc.abstractmethod
+    @property
     def rti(self) -> RTIInterface:
-        ...
+        return self._rti
 
     @abc.abstractmethod
     def destroy(self) -> None:

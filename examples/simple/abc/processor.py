@@ -27,7 +27,7 @@ class ProcessorABC(ProcessorBase):
         super().__init__(proc_path)
         self._is_cancelled = False
 
-    def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
+    def run(self, wd_path: str, listener: ProgressListener, namespace: Namespace, logger: logging.Logger) -> None:
         """
         Put all your code here that executes the model in this function.
 

@@ -12,11 +12,14 @@ from typing import List, Union, Any
 
 import pytest
 from docker.errors import ImageNotFound
+
+from examples.simple.abc.processor import write_value
+from simaas.core.helpers import hash_string_object
+
 from simaas.nodedb.protocol import P2PJoinNetwork
 
 from simaas.rti.default import DBJobInfo, DefaultRTIService
 
-from examples.adapters.proc_example.processor import write_value
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
 from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
@@ -32,18 +35,18 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
-from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip
+from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip, find_processors
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.p2p.base import P2PAddress
 from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
-from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, find_processors
+from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, Namespace
 from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL
 
 logger = Logging.get(__name__)
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-examples_path = os.path.join(repo_root_path, 'examples', 'adapters', 'proc_example')
+examples_path = os.path.join(repo_root_path, 'examples')
 
 
 @pytest.fixture(scope="session")
@@ -778,7 +781,8 @@ def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: st
 
 def prepare_proc_path(proc_path: str) -> GitProcessorPointer:
     # copy the processor
-    shutil.copytree(examples_path, proc_path)
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
+    shutil.copytree(proc_abc_path, proc_path)
 
     # read the processor descriptor
     descriptor_path = os.path.join(proc_path, 'descriptor.json')
@@ -937,13 +941,33 @@ def run_job_cmd(
         print(trace)
 
 
+class TestNamespace(Namespace):
+    def __init__(self, node: Node) -> None:
+        super().__init__(node.dor, node.rti)
+        self._node = node
+        self._name = 'test-namespace'
+        self._id = hash_string_object(self._name).hex()
+
+    def id(self) -> str:
+        return self._id
+
+    def name(self) -> str:
+        return self._name
+
+    def destroy(self) -> None:
+        ...
+
+
 class ProcessorRunner(threading.Thread, ProgressListener):
-    def __init__(self, proc: ProcessorBase, wd_path: str, log_level: int = logging.INFO) -> None:
+    def __init__(
+            self, proc: ProcessorBase, wd_path: str, namespace: Namespace = None, log_level: int = logging.INFO
+    ) -> None:
         super().__init__()
 
         self._mutex = threading.Lock()
         self._proc = proc
         self._wd_path = wd_path
+        self._namespace = namespace
         self._interrupted = False
 
         # setup logger
@@ -989,7 +1013,7 @@ class ProcessorRunner(threading.Thread, ProgressListener):
         try:
             self._logger.info(f"begin processing job at {self._wd_path}")
 
-            self._proc.run(self._wd_path, self, self._logger)
+            self._proc.run(self._wd_path, self, self._namespace, self._logger)
 
             if self._interrupted:
                 self._logger.info(f"end processing job at {self._wd_path} -> INTERRUPTED")
@@ -1026,7 +1050,7 @@ def test_job_worker_done(temp_dir):
 
     # find the Example processor
     result = find_processors(examples_path)
-    proc = result.get('example-processor')
+    proc = result.get('proc-abc')
     assert(proc is not None)
 
     worker = ProcessorRunner(proc, job_path, logging.INFO)
@@ -1052,7 +1076,7 @@ def test_job_worker_interrupted(temp_dir):
 
     # find the Example processor
     result = find_processors(examples_path)
-    proc = result.get('example-processor')
+    proc = result.get('proc-abc')
     assert(proc is not None)
 
     worker = ProcessorRunner(proc, job_path, logging.INFO)
@@ -1079,7 +1103,7 @@ def test_job_worker_error(temp_dir):
 
     # find the Example processor
     result = find_processors(examples_path)
-    proc = result.get('example-processor')
+    proc = result.get('proc-abc')
     assert(proc is not None)
 
     worker = ProcessorRunner(proc, job_path, logging.INFO)

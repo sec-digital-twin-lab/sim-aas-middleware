@@ -577,7 +577,7 @@ def test_provenance(
     # get the provenance and print it
     provenance = aws_dor_proxy.get_provenance(log[2][1][2])
     assert (provenance is not None)
-    print(json.dumps(provenance.dict(), indent=2))
+    print(json.dumps(provenance.model_dump(), indent=2))
 
 
 def test_job_concurrency(

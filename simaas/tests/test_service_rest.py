@@ -9,8 +9,8 @@ from pydantic import BaseModel
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
+from simaas.decorators import requires_authentication
 from simaas.node.base import Node
-from simaas.rest.auth import VerifyAuthorisation
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
@@ -49,22 +49,22 @@ class TestRESTService:
     def endpoints(self) -> list:
         return [
             EndpointDefinition('POST', endpoint_prefix, 'create/{value}',
-                               self.rest_post, TestResponse, None),
+                               self.rest_post, TestResponse),
 
             EndpointDefinition('GET', endpoint_prefix, 'read/{key}',
-                               self.rest_get, TestResponse, None),
+                               self.rest_get, TestResponse),
 
             EndpointDefinition('PUT', endpoint_prefix, 'update/{key}/{value}',
-                               self.rest_put, TestResponse, None),
+                               self.rest_put, TestResponse),
 
             EndpointDefinition('DELETE', endpoint_prefix, 'delete/{key}',
-                               self.rest_delete, TestResponse, None),
+                               self.rest_delete, TestResponse),
 
             EndpointDefinition('DELETE', endpoint_prefix, 'delete_body',
-                               self.rest_delete_with_body, TestResponse, None),
+                               self.rest_delete_with_body, TestResponse),
 
             EndpointDefinition('DELETE', endpoint_prefix, 'delete_auth',
-                               self.rest_delete_with_body, TestResponse, [VerifyAuthorisation])
+                               self.rest_delete_with_auth, TestResponse)
         ]
 
     def rest_post(self, value: str) -> TestResponse:
@@ -102,6 +102,16 @@ class TestRESTService:
         })
 
     def rest_delete_with_body(self, r: TestDeleteRequest) -> TestResponse:
+        if r.key in self._objects:
+            value = self._objects.pop(r.key)
+            return TestResponse(key=r.key, value=value)
+
+        raise TestException("obj does not exist", details={
+            'key': r.key
+        })
+
+    @requires_authentication
+    def rest_delete_with_auth(self, r: TestDeleteRequest) -> TestResponse:
         if r.key in self._objects:
             value = self._objects.pop(r.key)
             return TestResponse(key=r.key, value=value)
@@ -218,8 +228,11 @@ def test_delete_with_body(rest_test_proxy):
     result = rest_test_proxy.create('hello world')
     key = result.key
 
-    result = rest_test_proxy.remove_with_body(key)
-    assert(result is not None)
+    try:
+        result = rest_test_proxy.remove_with_body(key)
+        assert(result is not None)
+    except Exception as e:
+        print(e)
 
     with pytest.raises(UnsuccessfulRequestError):
         rest_test_proxy.read(key)

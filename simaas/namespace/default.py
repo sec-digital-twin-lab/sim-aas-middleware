@@ -220,11 +220,13 @@ class NamespaceRTI(RTIInterface):
 
 
 class DefaultNamespace(Namespace):
-    def __init__(self, name: str,  custodian_identity: Identity, custodian_address: str, authority: Keystore) -> None:
+    def __init__(self, name: str, custodian_identity: Identity, custodian_address: str, authority: Keystore) -> None:
+        super().__init__(
+            NamespaceDOR(custodian_identity, custodian_address, authority),
+            NamespaceRTI(custodian_identity, custodian_address, authority)
+        )
         self._id = generate_random_string(16)
         self._name = name
-        self._dor = NamespaceDOR(custodian_identity, custodian_address, authority)
-        self._rti = NamespaceRTI(custodian_identity, custodian_address, authority)
 
     def id(self) -> str:
         return self._id
@@ -232,15 +234,5 @@ class DefaultNamespace(Namespace):
     def name(self) -> str:
         return self._name
 
-    @property
-    def dor(self) -> DORInterface:
-        return self._dor
-
-    @property
-    def rti(self) -> RTIInterface:
-        return self._rti
-
     def destroy(self) -> None:
         pass
-
-    ...

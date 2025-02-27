@@ -1,4 +1,8 @@
+import inspect
+import os
 import socket
+import sys
+from importlib.util import spec_from_file_location, module_from_spec
 from threading import Lock
 
 import netifaces
@@ -8,6 +12,8 @@ from typing import List, Optional, Tuple, Dict
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
+
+from simaas.core.processor import ProcessorBase
 from simaas.rti.schemas import Task
 
 
@@ -240,3 +246,42 @@ def docker_check_image_platform(image_name: str, platform: str) -> bool:
     arch_type = image.attrs.get("Architecture", "")
 
     return os_type == os_ref and arch_type == arch_ref
+
+
+def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
+    """
+    Convenient function that finds all processor implementations in a given search path (including all its
+    subdirectories) and returns a dictionary with the findings.
+
+    :param search_path: the path to search for processors.
+    :return: a dictionary that maps name of the processor to its implementation class.
+    """
+    sys.path.append(search_path)
+
+    result = {}
+    for root, dirs, files in os.walk(search_path):
+        for file in files:
+            print(file)
+            if file == "processor.py":
+                module_path = os.path.join(root, file)
+                module_name = os.path.splitext(os.path.basename(module_path))[0]
+
+                spec = spec_from_file_location(module_name, module_path)
+                module = module_from_spec(spec)
+
+                try:
+                    spec.loader.exec_module(module)
+                except Exception as e:
+                    logger.warning(f"spec loader failed: {e}")
+                    continue
+
+                # module = importlib.import_module(module_name)
+                for name, obj in inspect.getmembers(module):
+                    if inspect.isclass(obj) and obj != ProcessorBase and issubclass(obj, ProcessorBase):
+                        try:
+                            instance: ProcessorBase = obj(root)
+                            result[instance.name] = instance
+                        except Exception as e:
+                            logger.warning(f"creating instance of {obj} failed: {e}")
+
+    return result
