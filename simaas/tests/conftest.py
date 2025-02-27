@@ -146,7 +146,7 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
     repo_name = 'sim-aas-middleware'
     repo_url = f'https://github.com/{org}/{repo_name}'
     proc_name = 'example-processor'
-    proc_path = 'examples/adapters/proc_example'
+    proc_path = 'examples/simple/abc'
     image_name = f'{org}/{repo_name}/{proc_name}:{REPOSITORY_COMMIT_ID}'
 
     # does it exist in DOR? if not, build and add it

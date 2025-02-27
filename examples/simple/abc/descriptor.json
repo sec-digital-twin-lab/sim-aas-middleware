@@ -1,5 +1,5 @@
 {
-  "name": "example-processor",
+  "name": "proc-abc",
   "input": [
     {
       "name": "a",
