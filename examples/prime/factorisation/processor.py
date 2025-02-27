@@ -57,9 +57,9 @@ class ProcessorFactorisation(ProcessorBase):
             start = 2 + i * step
             end = (i + 1) * step
 
-            job: Job = namespace.rti.submit('factor_search', Task(
-                proc_id='factor_search',
-                user_iid='someone',
+            job: Job = namespace.rti.submit(proc_id, Task(
+                proc_id=proc_id,
+                user_iid=namespace.keystore().identity.id,
                 input=[Task.InputValue(
                     name='parameters',
                     type='value',
@@ -71,7 +71,7 @@ class ProcessorFactorisation(ProcessorBase):
                 )],
                 output=[Task.Output(
                     name='result',
-                    owner_iid='someone',
+                    owner_iid=namespace.keystore().identity.id,
                     restricted_access=False,
                     content_encrypted=False,
                     target_node_iid=None
