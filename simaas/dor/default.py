@@ -6,8 +6,6 @@ from stat import S_IREAD, S_IRGRP
 from threading import Lock
 from typing import Optional, List, Dict, Union
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
 from fastapi import UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import Column, String, Boolean, BigInteger
@@ -402,17 +400,14 @@ class DefaultDORService(DORRESTService):
             part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
             if part_info.idx == 0:
                 attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
-                digest: hashes.Hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
                 f = open(attachment_path, 'wb')
                 self._parts[part_info.id] = {
                     'attachment_path': attachment_path,
-                    'digest': digest,
                     'idx': 0,
                     'f': f
                 }
             else:
                 attachment_path: str = self._parts[part_info.id]['attachment_path']
-                digest: hashes.Hash = self._parts[part_info.id]['digest']
                 f = self._parts[part_info.id]['f']
 
                 # check sequence
@@ -426,7 +421,6 @@ class DefaultDORService(DORRESTService):
             attachment_path: str = os.path.join(
                 self.obj_content_path(f"{get_timestamp_now()}_{generate_random_string(4)}")
             )
-            digest: hashes.Hash = hashes.Hash(hashes.SHA256(), backend=default_backend())
             f = open(attachment_path, 'wb')
 
         try:
@@ -434,7 +428,6 @@ class DefaultDORService(DORRESTService):
             while True:
                 chunk = attachment.file.read(1024 * 1024)
                 if chunk:
-                    digest.update(chunk)
                     f.write(chunk)
                 else:
                     break
@@ -459,9 +452,6 @@ class DefaultDORService(DORRESTService):
                 self._parts.pop(part_info.id)
         else:
             f.close()
-
-        # calculate the hash for the data object content
-        c_hash = digest.finalize().hex()
 
         # create parameters object
         p = AddDataObjectParameters.model_validate(body)
