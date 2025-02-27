@@ -227,12 +227,16 @@ class DefaultNamespace(Namespace):
         )
         self._id = generate_random_string(16)
         self._name = name
+        self._authority = authority
 
     def id(self) -> str:
         return self._id
 
     def name(self) -> str:
         return self._name
+
+    def keystore(self) -> Keystore:
+        return self._authority
 
     def destroy(self) -> None:
         pass
