@@ -49,7 +49,8 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
         # set the secret environment variables (if any)
         for key, value in response.secrets.items():
-            os.environ[key] = value
+            if value is not None:
+                os.environ[key] = value
 
         return response.job, response.custodian_identity
 
@@ -64,8 +65,8 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
         # determine the secrets
         secrets: Dict[str, Optional[str]] = {}
-        for secret in request.gpp.proc_descriptor.required_secrets:
-            secrets[secret] = os.environ.get(secret, None)
+        for key in request.gpp.proc_descriptor.required_secrets:
+            secrets[key] = os.environ.get(key, None)
 
         return RunnerHandshakeResponse(job=job, custodian_identity=self._node.identity, secrets=secrets), None
 
