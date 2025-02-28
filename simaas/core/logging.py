@@ -46,17 +46,23 @@ class Logging:
 
             # do we have AWS logging enabled?
             if log_to_aws:
-                default_region = os.environ.get('AWS_REGION', 'ap-southeast-1')
-                log_group_name = os.environ.get('LOG_GROUP_NAME', 'test-saas-aws-log')
-                log_stream_name = os.environ.get('AWS_TASK_ID', 'test-log-stream')
-                boto3.setup_default_session(region_name=default_region)
+                # do we have all the variables?
+                required = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_LOG_GROUP_NAME', 'SIMAAS_AWS_TASK_ID']
+                if not all(var in os.environ for var in required):
+                    root_logger.error(f"Required environment variables not defined: {required}")
 
-                try:
-                    cloudwatch_handler = CloudWatchLogHandler(log_group_name=log_group_name, log_stream_name=log_stream_name)
-                    cloudwatch_handler.setFormatter(formatter)
-                    root_logger.addHandler(cloudwatch_handler)
-                except NoCredentialsError:
-                    root_logger.error("No credentials found for AWS cloud watch.")
+                else:
+                    region_name = os.environ['SIMAAS_AWS_REGION']
+                    log_group_name = os.environ['SIMAAS_AWS_LOG_GROUP_NAME']
+                    log_stream_name = os.environ['SIMAAS_AWS_TASK_ID']
+                    boto3.setup_default_session(region_name=region_name)
+
+                    try:
+                        cloudwatch_handler = CloudWatchLogHandler(log_group_name=log_group_name, log_stream_name=log_stream_name)
+                        cloudwatch_handler.setFormatter(formatter)
+                        root_logger.addHandler(cloudwatch_handler)
+                    except NoCredentialsError:
+                        root_logger.error("No credentials found for AWS cloud watch.")
 
     @classmethod
     def get(cls, name: str, level: int = None, custom_log_path: str = None) -> logging.Logger:
