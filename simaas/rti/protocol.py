@@ -46,6 +46,11 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             ), RunnerHandshakeResponse
         )
         response: RunnerHandshakeResponse = response[0]
+
+        # set the secret environment variables (if any)
+        for key, value in response.secrets.items():
+            os.environ[key] = value
+
         return response.job, response.custodian_identity
 
     async def handle(
