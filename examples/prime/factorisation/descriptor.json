@@ -1,0 +1,32 @@
+{
+  "name": "proc-factorisation",
+  "input": [
+    {
+      "name": "parameters",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": {
+        "type": "object",
+        "properties": {
+          "N": {"type": "number"},
+          "num_sub_jobs": {"type": "number"}
+        },
+        "required": ["N", "num_sub_jobs"]
+      }
+    }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": {
+        "type": "object",
+        "properties": {
+          "factors": {"type": "array"}
+        },
+        "required": ["factors"]
+      }
+    }
+  ]
+}

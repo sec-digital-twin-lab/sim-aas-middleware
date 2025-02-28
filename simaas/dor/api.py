@@ -1,60 +1,25 @@
 from __future__ import annotations
 
 import abc
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Union
 from fastapi import Response, Form, UploadFile, File
 
-from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters
+from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.rest.auth import VerifyIsOwner, VerifyUserHasAccess
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
+from simaas.decorators import requires_ownership, requires_access
 
 DOR_ENDPOINT_PREFIX = "/api/v1/dor"
 
 
-class DORService(abc.ABC):
-    def endpoints(self) -> List[EndpointDefinition]:
-        return [
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '',
-                               self.search, List[DataObject], None),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, 'statistics',
-                               self.statistics, DORStatistics, None),
-
-            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, 'add',
-                               self.add, Optional[DataObject], None),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}',
-                               self.remove, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/meta',
-                               self.get_meta, Optional[DataObject], None),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/content',
-                               self.get_content, None, [VerifyUserHasAccess]),
-
-            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{c_hash}/provenance',
-                               self.get_provenance, Optional[DataObjectProvenance], None),
-
-            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}',
-                               self.grant_access, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}',
-                               self.revoke_access, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/owner/{new_owner_iid}',
-                               self.transfer_ownership, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/tags',
-                               self.update_tags, DataObject, [VerifyIsOwner]),
-
-            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/tags',
-                               self.remove_tags, DataObject, [VerifyIsOwner])
-        ]
-
-    def search(self, p: SearchParameters) -> List[DataObject]:
+class DORInterface(abc.ABC):
+    @abc.abstractmethod
+    def search(
+            self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
+            data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
+    ) -> List[DataObject]:
         """
         Searches a DOR for data objects that match the search criteria. There are two kinds of criteria: constraints
         and patterns. Search constraints are conjunctive, i.e., all constraints have to be matched in order for a data
@@ -65,24 +30,34 @@ class DORService(abc.ABC):
         data object tags only. A search pattern is considered matched if it is a substring of either tag key or value.
         """
 
+    @abc.abstractmethod
     def statistics(self) -> DORStatistics:
         """
         Retrieves some statistics from the DOR. This includes a list of all data types and formats found in the DOR.
         """
 
-    def add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
+    @abc.abstractmethod
+    def add(
+            self, content_path: str, data_type: str, data_format: str, owner_iid: str,
+            creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
+            content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
+            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None,
+            recipe: Optional[DataObjectRecipe] = None
+    ) -> DataObject:
         """
-        Adds a new content data object to the DOR and returns the meta information for this data object. The content
-        of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
-        size of the content.
+        Adds a new content data object to the DOR and returns the meta information for this data object. There is no
+        restriction as to the nature or size of the content.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def remove(self, obj_id: str) -> Optional[DataObject]:
         """
         Deletes a data object from the DOR and returns the meta information of that data object. Authorisation by the
         data object owner is required.
         """
 
+    @abc.abstractmethod
     def get_meta(self, obj_id: str) -> Optional[DataObject]:
         """
         Retrieves the meta information of a data object. Depending on the type of the data object, either a
@@ -90,12 +65,14 @@ class DORService(abc.ABC):
         respectively.
         """
 
-    def get_content(self, obj_id: str) -> Response:
-        """
-        Retrieves the content of a data object. Authorisation required by a user who has been granted access to the
-        data object.
-        """
 
+    @abc.abstractmethod
+    @requires_access
+    def get_content(self, obj_id: str, content_path: str) -> None:
+        ...
+
+
+    @abc.abstractmethod
     def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
         """
         Retrieves the provenance information of a data object (identified by its content hash `c_hash`). Provenance
@@ -106,34 +83,93 @@ class DORService(abc.ABC):
         understand how the content has been created.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Grants a user the right to access the contents of a restricted data object. Authorisation required by the owner
         of the data object. Note that access rights only matter if the data object has access restrictions.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Revokes the right to access the contents of a restricted data object from a user. Authorisation required by the
         owner of the data object. Note that access rights only matter if the data object has access restrictions.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
         """
         Transfers the ownership of a data object to another user. Authorisation required by the current owner of the
         data object.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
         """
         Adds tags to a data object or updates tags in case they already exist. Authorisation required by the owner of
         the data object.
         """
 
+    @abc.abstractmethod
+    @requires_ownership
     def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
         """
         Removes tags from a data object. Authorisation required by the owner of the data object.
         """
+
+
+class DORRESTService(DORInterface):
+    @abc.abstractmethod
+    def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
+        """
+        Adds a new content data object to the DOR and returns the meta information for this data object. The content
+        of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
+        size of the content.
+        """
+
+    @abc.abstractmethod
+    @requires_access
+    def rest_get_content(self, obj_id: str) -> Response:
+        """
+        Retrieves the content of a data object. Authorisation required by a user who has been granted access to the
+        data object.
+        """
+
+    def rest_search(self, p: SearchParameters) -> List[DataObject]:
+        """
+        Searches a DOR for data objects that match the search criteria. There are two kinds of criteria: constraints
+        and patterns. Search constraints are conjunctive, i.e., all constraints have to be matched in order for a data
+        objective to be considered for inclusion in the search result. Constraints include: `owner_iid`, `data_type`,
+        `data_format` or list of `c_hashes`. After applying the search constraints, the result set is further filtered
+        by the search patterns. Unlike constraints, search patterns are disjunctive, i.e., so long as any of the
+        patterns is matched, the data object is included in the final result set. Search patterns are applied to the
+        data object tags only. A search pattern is considered matched if it is a substring of either tag key or value.
+        """
+        return self.search(
+            patterns=p.patterns, owner_iid=p.owner_iid, data_type=p.data_type, data_format=p.data_format,
+            c_hashes=p.c_hashes
+        )
+
+    def endpoints(self) -> List[EndpointDefinition]:
+        return [
+            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '', self.rest_search, List[DataObject]),
+            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, 'statistics', self.statistics, DORStatistics),
+            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, 'add', self.rest_add, Optional[DataObject]),
+            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}', self.remove, DataObject),
+            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/meta', self.get_meta, Optional[DataObject]),
+            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{obj_id}/content', self.rest_get_content, None),
+            EndpointDefinition('GET', DOR_ENDPOINT_PREFIX, '{c_hash}/provenance', self.get_provenance, Optional[DataObjectProvenance]),
+            EndpointDefinition('POST', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}', self.grant_access, DataObject),
+            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/access/{user_iid}', self.revoke_access, DataObject),
+            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/owner/{new_owner_iid}', self.transfer_ownership, DataObject),
+            EndpointDefinition('PUT', DOR_ENDPOINT_PREFIX, '{obj_id}/tags', self.update_tags, DataObject),
+            EndpointDefinition('DELETE', DOR_ENDPOINT_PREFIX, '{obj_id}/tags', self.remove_tags, DataObject),
+        ]
 
 
 class DORProxy(EndpointProxy):

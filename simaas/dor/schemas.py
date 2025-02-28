@@ -141,7 +141,7 @@ class DataObject(BaseModel):
     last_accessed: int = Field(..., title="Last Accessed", description="The timestamp (in UTC milliseconds since the beginning of the epoch) when the data object has been accessed the last time.", examples=[1664849510076])
     custodian: Optional[NodeInfo] = Field(title='Custodian', description="Information about the node that hosts this data object.")
     content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of the data object is encrypted.", examples=[False])
-    license: License = Field(..., title="License", description="The license information for this data object.")
+    license: Optional[License] = Field(title="License", description="The license information for this data object.")
     recipe: Optional[DataObjectRecipe] = Field(title="Recipe", description="If this data object has been produced by a processor, a recipe is provided. Data objects that are uploaded by users typically do not come with a recipe unless the user provides one manually when uploading the content to the DOR.")
 
 

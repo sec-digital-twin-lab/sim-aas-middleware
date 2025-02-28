@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import traceback
+from pathlib import Path
 from typing import List, Tuple
 
 import pytest
@@ -29,7 +30,10 @@ from simaas.rti.schemas import Processor
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '3051e34713b404ec1201222eb6a551e1d145aede'
+REPOSITORY_COMMIT_ID = 'f834f5e40f6b1888a9577c10d4e2a2dc9f332fd9'
+PROC_ABC_PATH = "examples/simple/abc"
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
@@ -141,12 +145,10 @@ def session_node(session_keystore):
         _node.shutdown()
 
 
-def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
+def add_test_processor(dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str) -> DataObject:
     org = 'sec-digital-twin-lab'
     repo_name = 'sim-aas-middleware'
     repo_url = f'https://github.com/{org}/{repo_name}'
-    proc_name = 'example-processor'
-    proc_path = 'examples/adapters/proc_example'
     image_name = f'{org}/{repo_name}/{proc_name}:{REPOSITORY_COMMIT_ID}'
 
     # does it exist in DOR? if not, build and add it
@@ -190,7 +192,7 @@ def add_test_processor(dor: DORProxy, keystore: Keystore) -> DataObject:
 
 
 @pytest.fixture(scope="session")
-def deployed_test_processor(
+def deployed_abc_processor(
         docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
 ) -> DataObject:
     if not github_credentials_available:
@@ -213,7 +215,9 @@ def deployed_test_processor(
 
     else:
         # add test processor
-        meta = add_test_processor(dor_proxy, session_node.keystore)
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH
+        )
         proc_id = meta.obj_id
 
         if not docker_available:

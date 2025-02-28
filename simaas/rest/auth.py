@@ -1,4 +1,5 @@
 import json
+from typing import List, Any
 
 import canonicaljson
 from cryptography.hazmat.backends import default_backend
@@ -6,11 +7,7 @@ from cryptography.hazmat.primitives import hashes
 from fastapi import Request
 
 from simaas.core.identity import Identity
-from simaas.dor.exceptions import DataObjectNotFoundError
-from simaas.dor.schemas import DataObject
 from simaas.rest.exceptions import AuthorisationFailedError
-from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError, ProcessorDeployedError
-from simaas.rti.schemas import Processor
 
 
 def verify_authorisation_token(identity: Identity, signature: str, url: str, body: dict = None) -> bool:
@@ -69,19 +66,7 @@ class VerifyIsOwner:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-
-        # get the meta information of the object
-        meta = self.node.dor.get_meta(obj_id)
-        if meta is None:
-            raise DataObjectNotFoundError(obj_id)
-
-        # check if the identity is the owner of that data object
-        if meta.owner_iid != identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'user is not the data object owner',
-                'obj_id': obj_id,
-                'user_iid': identity.id
-            })
+        self.node.check_dor_ownership(obj_id, identity)
 
 
 class VerifyUserHasAccess:
@@ -90,22 +75,7 @@ class VerifyUserHasAccess:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-
-        # get the meta information of the object
-        meta: DataObject = self.node.dor.get_meta(obj_id)
-        if meta is None:
-            raise AuthorisationFailedError({
-                'reason': 'data object does not exist',
-                'obj_id': obj_id
-            })
-
-        # check if the identity has access to the data object content
-        if meta.access_restricted and identity.id not in meta.access:
-            raise AuthorisationFailedError({
-                'reason': 'user has no access to the data object content',
-                'obj_id': obj_id,
-                'user_iid': identity.id
-            })
+        self.node.check_dor_has_access(obj_id, identity)
 
 
 class VerifyProcessorDeployed:
@@ -113,21 +83,7 @@ class VerifyProcessorDeployed:
         self.node = node
 
     async def __call__(self, proc_id: str):
-        if not self.node.rti.is_deployed(proc_id):
-            raise ProcessorNotDeployedError({
-                'proc_id': proc_id
-            })
-
-
-class VerifyProcessorNotDeployed:
-    def __init__(self, node):
-        self.node = node
-
-    async def __call__(self, proc_id: str):
-        if self.node.rti.is_deployed(proc_id):
-            raise ProcessorDeployedError({
-                'proc_id': proc_id
-            })
+        self.node.check_rti_is_deployed(proc_id)
 
 
 class VerifyProcessorNotBusy:
@@ -135,11 +91,7 @@ class VerifyProcessorNotBusy:
         self.node = node
 
     async def __call__(self, proc_id: str):
-        proc: Processor = self.node.rti.get_proc(proc_id)
-        if proc.state in [Processor.State.BUSY_DEPLOY, Processor.State.BUSY_UNDEPLOY]:
-            raise ProcessorBusyError({
-                'proc_id': proc_id
-            })
+        self.node.check_rti_not_busy(proc_id)
 
 
 class VerifyUserIsJobOwnerOrNodeOwner:
@@ -148,17 +100,7 @@ class VerifyUserIsJobOwnerOrNodeOwner:
 
     async def __call__(self, job_id: str, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-
-        # get the job user (i.e., owner) and check if the caller user ids check out
-        job_owner_iid = self.node.rti.get_job_owner_iid(job_id)
-        if job_owner_iid != identity.id and identity.id != self.node.identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'user is not the job owner or the node owner',
-                'job_id': job_id,
-                'job_owner_iid': job_owner_iid,
-                'request_user_iid': identity.id,
-                'node_iid': self.node.identity.id
-            })
+        self.node.check_rti_job_or_node_owner(job_id, identity)
 
 
 class VerifyUserIsNodeOwner:
@@ -167,11 +109,45 @@ class VerifyUserIsNodeOwner:
 
     async def __call__(self, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
+        self.node.check_rti_node_owner(identity)
 
-        # check if the user is the owner of the node
-        if self.node.identity.id != identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'User is not the node owner',
-                'user_iid': identity.id,
-                'node_iid': self.node.identity.id
-            })
+
+def make_depends(method, node) -> List[Any]:
+    result = []
+
+    # Get the class that owns the method
+    cls = getattr(method, "__self__", None)
+    if cls is not None:
+        cls = cls.__class__  # Get actual class if method is bound
+
+    if cls is None:
+        return result  # No class found, return empty list
+
+    # Iterate over the class and its parent classes (including ABCs)
+    for base_cls in cls.__mro__:  # Method Resolution Order (MRO) includes all parents
+        interface_method = getattr(base_cls, method.__name__, None)
+        if interface_method:
+            # Check for restriction flags and append appropriate dependencies
+            if getattr(interface_method, "_require_authentication", False):
+                result.append(VerifyAuthorisation)
+
+            if getattr(interface_method, "_dor_requires_ownership", False):
+                result.append(VerifyIsOwner)
+
+            if getattr(interface_method, "_dor_requires_access", False):
+                result.append(VerifyUserHasAccess)
+
+            if getattr(interface_method, "_rti_requires_proc_deployed", False):
+                result.append(VerifyProcessorDeployed)
+
+            if getattr(interface_method, "_rti_node_ownership_if_strict", False):
+                if node.rti.strict_deployment:
+                    result.append(VerifyUserIsNodeOwner)
+
+            if getattr(interface_method, "_rti_job_or_node_ownership", False):
+                result.append(VerifyUserIsJobOwnerOrNodeOwner)
+
+            if getattr(interface_method, "_rti_requires_proc_not_busy", False):
+                result.append(VerifyProcessorNotBusy)
+
+    return None if len(result) == 0 else result

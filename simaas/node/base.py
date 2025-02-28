@@ -5,9 +5,13 @@ import time
 import traceback
 from typing import Optional, Tuple
 
+from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError
+from simaas.dor.schemas import DataObject
+from simaas.rest.exceptions import AuthorisationFailedError
+from simaas.dor.exceptions import DataObjectNotFoundError
+from simaas.dor.api import DORRESTService
+from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.rti.schemas import Processor
-
-from simaas.dor.api import DORService
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -18,7 +22,7 @@ from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIde
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
-from simaas.rti.api import RTIService
+from simaas.rti.api import RTIRESTService
 from simaas.meta import __version__
 from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
 
@@ -32,8 +36,8 @@ class Node(abc.ABC):
         self.p2p: Optional[P2PService] = None
         self.rest: Optional[RESTService] = None
         self.db: Optional[NodeDBService] = None
-        self.dor: Optional[DORService] = None
-        self.rti: Optional[RTIService] = None
+        self.dor: Optional[DORRESTService] = None
+        self.rti: Optional[RTIRESTService] = None
 
     @property
     def keystore(self) -> Keystore:
@@ -87,6 +91,7 @@ class Node(abc.ABC):
         self.p2p.add(P2PGetIdentity(self))
         self.p2p.add(P2PGetNetwork(self))
         self.p2p.add(P2PRunnerPerformHandshake(self))
+        self.p2p.add(P2PNamespaceServiceCall(self))
         self.p2p.start_service()
 
         if rest_address is not None:
@@ -210,3 +215,72 @@ class Node(abc.ABC):
                     loop.close()
 
             return identity
+
+
+    def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
+        # get the meta information of the object
+        meta = self.dor.get_meta(obj_id)
+        if meta is None:
+            raise DataObjectNotFoundError(obj_id)
+
+        # check if the identity is the owner of that data object
+        if meta.owner_iid != identity.id:
+            raise AuthorisationFailedError({
+                'reason': 'user is not the data object owner',
+                'obj_id': obj_id,
+                'user_iid': identity.id
+            })
+
+    def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
+        # get the meta information of the object
+        meta: DataObject = self.dor.get_meta(obj_id)
+        if meta is None:
+            raise AuthorisationFailedError({
+                'reason': 'data object does not exist',
+                'obj_id': obj_id
+            })
+
+        # check if the identity has access to the data object content
+        if meta.access_restricted and identity.id not in meta.access:
+            raise AuthorisationFailedError({
+                'reason': 'user has no access to the data object content',
+                'obj_id': obj_id,
+                'user_iid': identity.id
+            })
+
+    def check_rti_is_deployed(self, proc_id: str) -> None:
+        if not self.rti.get_proc(proc_id):
+            raise ProcessorNotDeployedError({
+                'proc_id': proc_id
+            })
+
+    def check_rti_not_busy(self, proc_id: str) -> None:
+        proc: Processor = self.rti.get_proc(proc_id)
+        if proc.state in [Processor.State.BUSY_DEPLOY, Processor.State.BUSY_UNDEPLOY]:
+            raise ProcessorBusyError({
+                'proc_id': proc_id
+            })
+
+    def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
+        # get the job user (i.e., owner) and check if the caller user ids check out
+        job_owner_iid = self.rti.get_job_owner_iid(job_id)
+        if job_owner_iid != identity.id and identity.id != self.identity.id:
+            raise AuthorisationFailedError({
+                'reason': 'user is not the job owner or the node owner',
+                'job_id': job_id,
+                'job_owner_iid': job_owner_iid,
+                'request_user_iid': identity.id,
+                'node_iid': self.identity.id
+            })
+
+    def check_rti_node_owner(self, identity: Identity) -> None:
+        # check if the user is the owner of the node
+        if self.identity.id != identity.id:
+            raise AuthorisationFailedError({
+                'reason': 'User is not the node owner',
+                'user_iid': identity.id,
+                'node_iid': self.identity.id
+            })
+
+
+

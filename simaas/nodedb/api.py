@@ -15,19 +15,19 @@ class NodeDBService(abc.ABC):
     def endpoints(self) -> List[EndpointDefinition]:
         return [
             EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'node',
-                               self.get_node, NodeInfo, None),
+                               self.get_node, NodeInfo),
 
             EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'network',
-                               self.get_network, List[NodeInfo], None),
+                               self.get_network, List[NodeInfo]),
 
             EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'identity/{iid}',
-                               self.get_identity, Optional[Identity], None),
+                               self.get_identity, Optional[Identity]),
 
             EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'identity',
-                               self.get_identities, List[Identity], None),
+                               self.get_identities, List[Identity]),
 
             EndpointDefinition('POST', DB_ENDPOINT_PREFIX, 'identity',
-                               self.update_identity, Identity, None),
+                               self.update_identity, Identity),
         ]
 
     @abc.abstractmethod

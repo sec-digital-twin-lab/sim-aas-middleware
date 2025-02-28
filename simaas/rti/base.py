@@ -19,7 +19,7 @@ from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
 from simaas.rti.schemas import JobStatus, Processor, Task, Job
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PAddress
-from simaas.rti.api import RTIService
+from simaas.rti.api import RTIRESTService
 
 from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -50,7 +50,7 @@ class DBJobInfo(Base):
     runner = Column(NestedMutableJson, nullable=False)
 
 
-class RTIServiceBase(RTIService):
+class RTIServiceBase(RTIRESTService):
     def __init__(self, node, db_path: str, retain_job_history: bool, strict_deployment: bool):
         super().__init__(retain_job_history, strict_deployment)
 
@@ -94,12 +94,16 @@ class RTIServiceBase(RTIService):
 
     def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Optional[Job]:
         with self._session_maker() as session:
+            # get the DB record for the job (if any)
             record = session.query(DBJobInfo).get(job_id)
             if record is not None:
                 # update the runner information
                 record.runner['identity'] = runner_identity.model_dump()
                 record.runner['address'] = runner_address
                 session.commit()
+
+                # make the runner identity known to the node
+                self._node.db.update_identity(runner_identity)
 
                 return Job.model_validate(record.job)
 
@@ -215,7 +219,7 @@ class RTIServiceBase(RTIService):
 
                 return proc
 
-    def submit(self, proc_id: str, task: Task, request: Request) -> Job:
+    def rest_submit(self, proc_id: str, task: Task, request: Request) -> Job:
         """
         Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
         of the task/job.
@@ -228,10 +232,21 @@ class RTIServiceBase(RTIService):
                 'iid': iid,
                 'task': task
             })
-        user: Identity = self._node.db.get_identity(iid)
+
+        return self.submit(proc_id, task)
+
+
+    def submit(self, proc_id: str, task: Task) -> Job:
+        """
+        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
+        of the task/job.
+        """
+
+        # get the user
+        user: Identity = self._node.db.get_identity(task.user_iid)
 
         # get the processor
-        proc: Optional[Processor] = self.get_proc(task.proc_id)
+        proc: Optional[Processor] = self.get_proc(proc_id)
         if proc is None:
             raise ProcessorNotDeployedError({
                 'proc_id': proc_id

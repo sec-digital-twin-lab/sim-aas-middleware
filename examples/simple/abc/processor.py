@@ -4,8 +4,10 @@ import os
 import time
 from typing import Any
 
+from simaas.rti.schemas import Job
+
 from simaas.core.helpers import get_timestamp_now
-from simaas.core.processor import ProcessorBase, ProgressListener, Severity
+from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace
 
 
 def read_value(data_object_path: str) -> int:
@@ -22,12 +24,14 @@ def write_value(data_object_path: str, v: Any) -> None:
         }, f, indent=4, sort_keys=True)
 
 
-class ExampleProcessor(ProcessorBase):
+class ProcessorABC(ProcessorBase):
     def __init__(self, proc_path: str) -> None:
         super().__init__(proc_path)
         self._is_cancelled = False
 
-    def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         """
         Put all your code here that executes the model in this function.
 

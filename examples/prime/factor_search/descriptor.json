@@ -1,0 +1,33 @@
+{
+  "name": "proc-factor-search",
+  "input": [
+    {
+      "name": "parameters",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": {
+        "type": "object",
+        "properties": {
+          "start": {"type": "number"},
+          "end": {"type": "number"},
+          "number": {"type": "number"}
+        },
+        "required": ["start", "end", "number"]
+      }
+    }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": {
+        "type": "object",
+        "properties": {
+          "factors": {"type": "array"}
+        },
+        "required": ["factors"]
+      }
+    }
+  ]
+}
