@@ -20,7 +20,7 @@ from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecip
 from simaas.namespace.api import Namespace
 from simaas.rti.api import RTIInterface
 from simaas.rti.schemas import Severity, JobStatus, Task, Job, Processor
-from simaas.tests.conftest import add_test_processor
+from simaas.tests.conftest import add_test_processor, BASE_DIR
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -195,7 +195,7 @@ class DummyNamespace(Namespace):
 
             # create instance
             proc_type = self._procs_classes[proc_id]
-            self._instances[job_id] = proc_type(os.path.join('..', '..', 'examples', 'prime', proc_id))
+            self._instances[job_id] = proc_type(os.path.join(BASE_DIR, 'examples', 'prime', proc_id))
 
             def execute() -> None:
                 try:
@@ -281,7 +281,7 @@ def test_proc_factor_search(dummy_namespace):
             errors=[],
             message=None
         )
-        proc_path = os.path.join('..', '..', 'examples', 'prime', 'factor_search')
+        proc_path = os.path.join(BASE_DIR, 'examples', 'prime', 'factor_search')
         proc = ProcessorFactorSearch(proc_path)
         proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
@@ -322,7 +322,7 @@ def test_proc_factorisation(dummy_namespace):
         )
 
         # create the processor and run it
-        proc_path = os.path.join('..', '..', 'examples', 'prime', 'factorisation')
+        proc_path = os.path.join(BASE_DIR, 'examples', 'prime', 'factorisation')
         proc = ProcessorFactorisation(proc_path)
         proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
@@ -383,74 +383,110 @@ def test_proc_factorisation_cancel(dummy_namespace):
 def deployed_factorisation_processor(
         docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
 ) -> DataObject:
-    # add test processor
-    meta = add_test_processor(
-        dor_proxy, session_node.keystore, 'proc-factorisation', 'examples/prime/factorisation'
-    )
-    proc_id = meta.obj_id
-
-    if not docker_available:
-        yield meta
-
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
     else:
-        # deploy it
-        rti_proxy.deploy(proc_id, session_node.keystore)
-        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-            logger.info(f"Waiting for processor to be ready: {proc}")
-            time.sleep(1)
+        # add test processor
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, 'proc-factorisation', 'examples/prime/factorisation'
+        )
+        proc_id = meta.obj_id
 
-        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-        logger.info(f"Processor deployed: {proc}")
+        if not docker_available:
+            yield meta
 
-        yield meta
-
-        # undeploy it
-        rti_proxy.undeploy(proc_id, session_node.keystore)
-        try:
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
-        except Exception as e:
-            print(e)
 
-        logger.info(f"Processor undeployed: {proc}")
+            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            try:
+                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
 
 
 @pytest.fixture(scope="session")
 def deployed_factor_search_processor(
         docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
 ) -> DataObject:
-    # add test processor
-    meta = add_test_processor(
-        dor_proxy, session_node.keystore, 'proc-factor-search', 'examples/prime/factor_search'
-    )
-    proc_id = meta.obj_id
-
-    if not docker_available:
-        yield meta
-
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
     else:
-        # deploy it
-        rti_proxy.deploy(proc_id, session_node.keystore)
-        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-            logger.info(f"Waiting for processor to be ready: {proc}")
-            time.sleep(1)
+        # add test processor
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, 'proc-factor-search', 'examples/prime/factor_search'
+        )
+        proc_id = meta.obj_id
 
-        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-        logger.info(f"Processor deployed: {proc}")
+        if not docker_available:
+            yield meta
 
-        yield meta
-
-        # undeploy it
-        rti_proxy.undeploy(proc_id, session_node.keystore)
-        try:
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
-        except Exception as e:
-            print(e)
 
-        logger.info(f"Processor undeployed: {proc}")
+            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            try:
+                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
 
 
 def test_factor_search_submit_list_get_job(

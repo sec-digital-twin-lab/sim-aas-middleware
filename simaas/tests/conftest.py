@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import traceback
+from pathlib import Path
 from typing import List, Tuple
 
 import pytest
@@ -31,6 +32,8 @@ load_dotenv()
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
 REPOSITORY_COMMIT_ID = 'f834f5e40f6b1888a9577c10d4e2a2dc9f332fd9'
 PROC_ABC_PATH = "examples/simple/abc"
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
