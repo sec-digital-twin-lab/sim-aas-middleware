@@ -39,5 +39,6 @@
         "required": ["v"]
       }
     }
-  ]
+  ],
+  "required_secrets": ["SECRET_ABC_KEY"]
 }

@@ -28,5 +28,6 @@
         "required": ["factors"]
       }
     }
-  ]
+  ],
+  "required_secrets": []
 }

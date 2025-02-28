@@ -33,6 +33,7 @@ class ProcessorDescriptor(BaseModel):
     name: str = Field(..., title="Processor Name", description="The name of the processor", examples=["urban-climate-sim"])
     input: List[IODataObject] = Field(..., title="Input Data Objects", description="A list of data objects that are consumed by the processor when executing a job.")
     output: List[IODataObject] = Field(..., title="Output Data Objects", description="A list of data objects that are produced by the processor when executing a job.")
+    required_secrets: List[str] = Field(..., title="Required Secrets", description="A list of environment variables that are required to be passed to the processor as secrets.")
 
 
 class GitProcessorPointer(BaseModel):
