@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict
 
 from pydantic import BaseModel
 
