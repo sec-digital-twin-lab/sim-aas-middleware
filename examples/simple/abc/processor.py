@@ -66,6 +66,16 @@ class ProcessorABC(ProcessorBase):
         listener.on_progress_update(0)
         listener.on_message(Severity.INFO, "This is a message at the very beginning of the process.")
 
+        # check if our secret is defined
+        secret_abc_key: int = None
+        if 'SECRET_ABC_KEY' in os.environ:
+            secret_abc_key: str = os.environ['SECRET_ABC_KEY']
+            listener.on_message(Severity.INFO, f"Environment variable SECRET_ABC_KEY is defined: '{secret_abc_key}'.")
+            secret_abc_key: int = int(secret_abc_key)
+
+        else:
+            listener.on_message(Severity.INFO, "Environment variable SECRET_ABC_KEY is not defined.")
+
         # read value from data object 'a'
         a_path = os.path.join(wd_path, 'a')
         a = read_value(a_path)
@@ -86,9 +96,11 @@ class ProcessorABC(ProcessorBase):
         if self._is_cancelled:
             return
 
+        # if the secret is defined use that as value for 'c'
+        c = a + b if secret_abc_key is None else secret_abc_key
+
         # write sum of a and b to data object 'c'
         c_path = os.path.join(wd_path, 'c')
-        c = a + b
         write_value(c_path, c)
         listener.on_output_available('c')
         listener.on_progress_update(90)

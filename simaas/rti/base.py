@@ -235,7 +235,6 @@ class RTIServiceBase(RTIRESTService):
 
         return self.submit(proc_id, task)
 
-
     def submit(self, proc_id: str, task: Task) -> Job:
         """
         Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner

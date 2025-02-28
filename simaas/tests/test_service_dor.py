@@ -243,7 +243,8 @@ def test_get_provenance(test_context, session_keystore, dor_proxy):
                 'data_type': 'JSON',
                 'data_format': 'json',
                 'data_schema': None
-            }]
+            }],
+            'required_secrets': []
         }
     }
 
@@ -294,7 +295,7 @@ def test_get_provenance(test_context, session_keystore, dor_proxy):
     assert(result is not None)
     assert(len(result.steps) == 1)
     step = result.steps[0]
-    assert(step.processor == '93703a2148633f409c2189e56d0e78cf491345b0a4b40873c7b7e6242baea96a')
+    assert(step.processor == '6782a1b8b33150c2d5fd6863ee7af4cfe1b431512a46ff1ebf7f0efcf8a5815c')
     assert(step.consumes['a'] == '9ab2253fc38981f5be9c25cf0a34b62cdf334652344bdef16b3d5dbc0b74f2f1')
     assert(step.consumes['b'] == '2b5442799fccc3af2e7e790017697373913b7afcac933d72fb5876de994f659a')
     assert(step.produces['c'] == 'b460644a73d5df6998c57c4eaf43ebc3e595bd06930af6e42d0008f84d91c849')

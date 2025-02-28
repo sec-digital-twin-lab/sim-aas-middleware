@@ -1,5 +1,6 @@
 import asyncio
-from typing import Optional, Tuple
+import os
+from typing import Optional, Tuple, Dict
 
 from pydantic import BaseModel
 
@@ -24,6 +25,7 @@ class RunnerHandshakeRequest(BaseModel):
 class RunnerHandshakeResponse(BaseModel):
     job: Optional[Job]
     custodian_identity: Identity
+    secrets: Dict[str, Optional[str]]
 
 
 class P2PRunnerPerformHandshake(P2PProtocol):
@@ -44,6 +46,12 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             ), RunnerHandshakeResponse
         )
         response: RunnerHandshakeResponse = response[0]
+
+        # set the secret environment variables (if any)
+        for key, value in response.secrets.items():
+            if value is not None:
+                os.environ[key] = value
+
         return response.job, response.custodian_identity
 
     async def handle(
@@ -54,7 +62,13 @@ class P2PRunnerPerformHandshake(P2PProtocol):
         job: Optional[Job] = self._node.rti.update_job(
             request.job_id, request.runner_identity, request.runner_address
         )
-        return RunnerHandshakeResponse(job=job, custodian_identity=self._node.identity), None
+
+        # determine the secrets
+        secrets: Dict[str, Optional[str]] = {}
+        for key in request.gpp.proc_descriptor.required_secrets:
+            secrets[key] = os.environ.get(key, None)
+
+        return RunnerHandshakeResponse(job=job, custodian_identity=self._node.identity, secrets=secrets), None
 
     @staticmethod
     def request_type():
