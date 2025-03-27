@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import random
+import subprocess
 import tempfile
 import threading
 import time
@@ -32,7 +33,42 @@ logger = Logging.get(__name__)
 
 
 @pytest.fixture(scope="session")
-def aws_session_node(aws_available, session_keystore, session_node):
+def ssh_tunnel():
+    """Set up an SSH tunnel before tests and tear it down afterward."""
+    ssh_host = os.environ.get("SSH_TUNNEL_HOST")
+    ssh_user = os.environ.get("SSH_TUNNEL_USER")
+    ssh_key_path = os.environ.get("SSH_TUNNEL_KEY_PATH")
+
+    if not ssh_host or not ssh_user or not ssh_key_path:
+        pytest.skip("Skipping test: SSH tunnel credentials are missing.")
+
+    # SSH tunnel command (runs in the background)
+    ssh_command = [
+        "ssh",
+        "-N",  # Do not execute remote commands
+        "-R", "0.0.0.0:5999:localhost:5999",  # Forward remote port 5999 to local port 5999
+        "-R", "0.0.0.0:4999:localhost:4999",  # Forward remote port 4999 to local port 4999
+        "-i", ssh_key_path,  # Private key authentication
+        f"{ssh_user}@{ssh_host}"  # Remote SSH target
+    ]
+
+    # Start the SSH tunnel as a subprocess
+    process = subprocess.Popen(
+        ssh_command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    time.sleep(2)
+
+    yield
+
+    process.terminate()
+    process.wait()
+
+
+@pytest.fixture(scope="session")
+def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
     if not aws_available:
         yield session_node
 
