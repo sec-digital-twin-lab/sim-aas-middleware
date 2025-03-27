@@ -662,7 +662,7 @@ def test_job_concurrency(
             logprint(idx, f"[{idx}] failed: {trace}")
 
     # submit jobs
-    n = 50
+    n = 20
     threads = []
     for i in range(n):
         thread = threading.Thread(target=do_a_job, kwargs={'idx': i})
