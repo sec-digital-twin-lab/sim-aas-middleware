@@ -1,5 +1,6 @@
 import asyncio
 import os
+import traceback
 from typing import Optional, Tuple, Dict
 
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ class RunnerHandshakeResponse(BaseModel):
     job: Optional[Job]
     custodian_identity: Identity
     secrets: Dict[str, Optional[str]]
+    join_batch: Optional[str]
 
 
 class P2PRunnerPerformHandshake(P2PProtocol):
@@ -39,7 +41,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
     async def perform(
             cls, peer_address: P2PAddress, runner_identity: Identity, runner_address: str, job_id: str,
             gpp: GitProcessorPointer
-    ) -> Tuple[Optional[Job], Identity]:
+    ) -> Tuple[Optional[Job], Identity, Optional[str]]:
         response = await p2p_request(
             peer_address, cls.NAME, RunnerHandshakeRequest(
                 runner_identity=runner_identity, runner_address=runner_address, job_id=job_id, gpp=gpp
@@ -58,17 +60,28 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        # based on job id, update the job with runner information and retrieve the job (if any)
-        job: Optional[Job] = self._node.rti.update_job(
-            request.job_id, request.runner_identity, request.runner_address
-        )
+        try:
+            # based on job id, update the job with runner information and retrieve the job (if any)
+            result: Tuple[Job, Optional[str]] = self._node.rti.update_job(
+                request.job_id, request.runner_identity, request.runner_address
+            )
 
-        # determine the secrets
-        secrets: Dict[str, Optional[str]] = {}
-        for key in request.gpp.proc_descriptor.required_secrets:
-            secrets[key] = os.environ.get(key, None)
+            # determine the secrets
+            secrets: Dict[str, Optional[str]] = {}
+            for key in request.gpp.proc_descriptor.required_secrets:
+                secrets[key] = os.environ.get(key, None)
 
-        return RunnerHandshakeResponse(job=job, custodian_identity=self._node.identity, secrets=secrets), None
+            return RunnerHandshakeResponse(
+                job=result[0], custodian_identity=self._node.identity, secrets=secrets, join_batch=result[1]
+            ), None
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"Handle handshake request failed: {e} {trace}")
+
+            return RunnerHandshakeResponse(
+                job=None, custodian_identity=self._node.identity, secrets={}, join_batch=None
+            ), None
 
     @staticmethod
     def request_type():

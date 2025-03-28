@@ -323,6 +323,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._custodian_address: Optional[P2PAddress] = None
         self._custodian: Optional[Identity] = None
         self._job: Optional[Job] = None
+        self._batch_id: Optional[str] = None
 
         # set upon job update
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
@@ -504,7 +505,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # perform handshake with custodian
         self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address}...")
-        self._job, self._custodian = asyncio.run(P2PRunnerPerformHandshake.perform(
+        self._job, self._custodian, self._batch_id = asyncio.run(P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
         ))
         self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
