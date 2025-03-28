@@ -4,6 +4,7 @@ import os
 import random
 import tempfile
 import time
+import traceback
 from typing import Optional, List
 
 import pytest
@@ -216,27 +217,30 @@ def test_namespace_rti_job_submit_status(
     namespace0 = DefaultNamespace('test', session_node.identity, session_node.p2p.address(), owner)
     namespace1 = DefaultNamespace('test', session_node.identity, session_node.p2p.address(), wrong_user)
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                    'restricted_access': False, 'content_encrypted': False,
-                                    'target_node_iid': None})
-    ]
-
-    # submit the job
-    job: Job = namespace0.rti.submit(proc_id, Task(
+    task = Task(
         proc_id=proc_id,
         user_iid=owner.identity.id,
-        input=task_input,
-        output=task_output,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
         name=None,
         description=None,
         budget=Task.Budget(vcpus=1, memory=1024)
-    ))
+    )
+
+    # submit the job
+    try:
+        result = namespace0.rti.submit([task])
+        job: Job = result[0]
+    except Exception as e:
+        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+        print(trace)
 
     # # get list of all jobs by correct user
     # result = rti_proxy.get_jobs_by_user(owner)

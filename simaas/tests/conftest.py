@@ -38,7 +38,7 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'e55b40c1c4c0bb527b51f2543c57abad2e46589d'
+REPOSITORY_COMMIT_ID = 'd823367b2b3ba02ebd3aa05aca6f64ec4db180d1'
 PROC_ABC_PATH = "examples/simple/abc"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -484,45 +484,9 @@ class DummyNamespace(Namespace):
         def get_proc(self, proc_id: str) -> Optional[Processor]:
             return self._procs.get(proc_id, None)
 
-        def submit(self, proc_id: str, task: Task) -> Job:
-            job_id = str(self._next_job_id)
-            self._next_job_id += 1
-            job = Job(
-                id=job_id,
-                task=task,
-                retain=True,
-                custodian=NodeInfo(
-                    identity=self._keystore.identity,
-                    last_seen=get_timestamp_now(),
-                    dor_service=True,
-                    rti_service=True,
-                    p2p_address='in-memory',
-                    rest_address=None,
-                    retain_job_history=True,
-                    strict_deployment=False
-                ),
-                proc_name=task.proc_id,
-                t_submitted=get_timestamp_now()
-            )
-            self._jobs[job_id] = job
-
-            status = JobStatus(
-                state=JobStatus.State.INITIALISED,
-                progress=0,
-                output={},
-                notes={},
-                errors=[],
-                message=None
-            )
-            self._status[job_id] = status
-
-            # create instance
-            proc_type = self._procs_classes[proc_id]
-            self._instances[job_id] = proc_type(os.path.join(BASE_DIR, 'examples', 'prime', proc_id))
-
+        def submit(self, tasks: List[Task]) -> List[Job]:
             def execute() -> None:
                 try:
-
                     with tempfile.TemporaryDirectory() as wd_path:
                         status.state = JobStatus.State.RUNNING
                         in0: Task.InputValue = task.input[0]
@@ -542,10 +506,49 @@ class DummyNamespace(Namespace):
                     status.state = JobStatus.State.FAILED
                     print(e)
 
-            thread = threading.Thread(target=execute, args=())
-            thread.start()
+            result: List[Job] = []
+            for task in tasks:
+                job_id = str(self._next_job_id)
+                self._next_job_id += 1
+                job = Job(
+                    id=job_id,
+                    task=task,
+                    retain=True,
+                    custodian=NodeInfo(
+                        identity=self._keystore.identity,
+                        last_seen=get_timestamp_now(),
+                        dor_service=True,
+                        rti_service=True,
+                        p2p_address='in-memory',
+                        rest_address=None,
+                        retain_job_history=True,
+                        strict_deployment=False
+                    ),
+                    proc_name=task.proc_id,
+                    t_submitted=get_timestamp_now()
+                )
+                self._jobs[job_id] = job
 
-            return self._jobs[job_id]
+                status = JobStatus(
+                    state=JobStatus.State.INITIALISED,
+                    progress=0,
+                    output={},
+                    notes={},
+                    errors=[],
+                    message=None
+                )
+                self._status[job_id] = status
+
+                # create instance
+                proc_type = self._procs_classes[task.proc_id]
+                self._instances[job_id] = proc_type(os.path.join(BASE_DIR, 'examples', 'prime', task.proc_id))
+
+                thread = threading.Thread(target=execute, args=())
+                thread.start()
+
+                result.append(job)
+
+            return result
 
         def get_job_status(self, job_id: str) -> JobStatus:
             return self._status[job_id]

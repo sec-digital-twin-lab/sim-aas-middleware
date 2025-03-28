@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import abc
 
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 from fastapi import Request
 
 from simaas.decorators import requires_proc_deployed, requires_authentication, requires_job_or_node_ownership, \
-    requires_proc_not_busy, requires_node_ownership_if_strict
+    requires_proc_not_busy, requires_node_ownership_if_strict, requires_tasks_supported
 from simaas.rest.schemas import EndpointDefinition
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 
@@ -69,10 +69,12 @@ class RTIInterface(abc.ABC):
         """
 
     @abc.abstractmethod
-    @requires_proc_deployed
-    def submit(self, proc_id: str, task: Task) -> Job:
+    @requires_tasks_supported
+    def submit(self, tasks: List[Task]) -> List[Job]:
         """
-        Submits a task to a deployed processor, thereby creating a new job.
+        Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
+        coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
+        to facilitate co-execution.
         """
 
     @abc.abstractmethod
@@ -113,13 +115,13 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
         return self._strict_deployment
 
     @abc.abstractmethod
-    @requires_proc_deployed
-    @requires_proc_not_busy
+    @requires_tasks_supported
     @requires_authentication
-    def rest_submit(self, proc_id: str, task: Task, request: Request) -> Job:
+    def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
         """
-        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
-        of the task/job.
+        Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
+        coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
+        to facilitate co-execution.
         """
 
     @abc.abstractmethod
@@ -132,12 +134,13 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
     def endpoints(self) -> List[EndpointDefinition]:
         return [
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc', self.get_all_procs, List[Processor]),
-            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.get_proc, Optional[Processor]),
             EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.deploy, Processor),
             EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.undeploy, Processor),
-            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs', self.rest_submit, Job),
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}', self.get_proc, Optional[Processor]),
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'proc/{proc_id}/jobs', self.jobs_by_proc, List[Job]),
+
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job', self.jobs_by_user, List[Job]),
+            EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'job', self.rest_submit, List[Job]),
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status', self.get_job_status, JobStatus),
             EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel', self.job_cancel, JobStatus),
             EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge', self.job_purge, JobStatus)
@@ -170,25 +173,10 @@ class RTIProxy(EndpointProxy):
         result = self.delete(f"proc/{proc_id}", with_authorisation_by=authority)
         return Processor.model_validate(result)
 
-    def submit_job(self, proc_id: str, job_input: List[Union[Task.InputReference, Task.InputValue]],
-                   job_output: List[Task.Output], with_authorisation_by: Keystore, name: str = None,
-                   description: str = None, budget: Task.Budget = None) -> Job:
-
-        # build the body
-        body = {
-            'proc_id': proc_id,
-            'input': [i.model_dump() for i in job_input],
-            'output': [o.model_dump() for o in job_output],
-            'user_iid': with_authorisation_by.identity.id,
-            'name': name,
-            'description': description,
-            'budget': budget.model_dump() if budget else None
-        }
-
-        # post the request
-        result = self.post(f"proc/{proc_id}/jobs", body=body, with_authorisation_by=with_authorisation_by)
-
-        return Job.model_validate(result)
+    def submit(self, tasks: List[Task], with_authorisation_by: Keystore) -> List[Job]:
+        body = [task.model_dump() for task in tasks]
+        results = self.post(f"job", body=body, with_authorisation_by=with_authorisation_by)
+        return [Job.model_validate(result) for result in results]
 
     def get_jobs_by_proc(self, proc_id: str) -> List[Job]:
         results = self.get(f"proc/{proc_id}/jobs")

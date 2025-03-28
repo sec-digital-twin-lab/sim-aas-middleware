@@ -321,24 +321,28 @@ def test_rest_submit_list_get_job(
     wrong_user = known_user
     owner = aws_session_node.keystore
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': None})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
 
     # submit the job
-    result = aws_rti_proxy.submit_job(
-        proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=2048)
-    )
-    assert (result is not None)
+    result = aws_rti_proxy.submit([task], owner)
+    assert result is not None
 
-    job_id = result.id
+    job_id = result[0].id
 
     # get list of all jobs by correct user
     result = aws_rti_proxy.get_jobs_by_user(owner)
@@ -533,19 +537,23 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
     b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=None, c_hash=None) \
         if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value={'v': b})
 
-    task_input = [a, b]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                    'restricted_access': False, 'content_encrypted': False,
-                                    'target_node_iid': target_node.identity.id})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[a, b],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': target_node.identity.id})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
 
     # submit the job
-    job = rti_proxy.submit_job(
-        proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=2048)
-    )
-    return job
+    result = rti_proxy.submit([task], owner)
+    return result[0]
 
 
 def test_provenance(

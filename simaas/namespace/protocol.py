@@ -1,4 +1,6 @@
 import os.path
+import traceback
+
 import canonicaljson
 from typing import Optional, Tuple, Any
 
@@ -101,6 +103,11 @@ class P2PNamespaceServiceCall(P2PProtocol):
                     obj_id: str = args['obj_id']
                     self._node.check_dor_has_access(obj_id, identity)
 
+                if getattr(interface_method, "_rti_requires_tasks_supported", False):
+                    for task in args['tasks']:
+                        self._node.check_rti_is_deployed(task.proc_id)
+                        self._node.check_rti_not_busy(task.proc_id)
+
                 if getattr(interface_method, "_rti_requires_proc_deployed", False):
                     proc_id: str = args['proc_id']
                     self._node.check_rti_is_deployed(proc_id)
@@ -174,13 +181,23 @@ class P2PNamespaceServiceCall(P2PProtocol):
             if not method:
                 raise AttributeError(f"Method '{request.method}' not found on {service.__class__.__name__}")
 
-            # convert Pydantic models if needed before calling the method
+            # Convert Pydantic models if needed before calling the method
             args = request.args if request.args else {}
             for key, value in args.items():
-                if isinstance(value, dict) and hasattr(method, "__annotations__"):
+                if hasattr(method, "__annotations__"):
                     expected_type = method.__annotations__.get(key)
-                    if expected_type and isinstance(expected_type, type) and issubclass(expected_type, BaseModel):
-                        args[key] = expected_type(**value)  # Convert dict to Pydantic model
+
+                    # If it's a Pydantic model, convert the dict to an instance
+                    if isinstance(value, dict) and isinstance(expected_type, type) and \
+                            issubclass(expected_type, BaseModel):
+                        args[key] = expected_type(**value)
+
+                    # If it's a list of Pydantic models, convert each dict in the list
+                    elif isinstance(value, list) and \
+                            hasattr(expected_type, "__origin__") and expected_type.__origin__ is list:
+                        item_type = expected_type.__args__[0]
+                        if isinstance(item_type, type) and issubclass(item_type, BaseModel):
+                            args[key] = [item_type(**item) for item in value]  # Convert list of dicts to list of models
 
             # do we have an attachment?
             if attachment_path is not None:
@@ -209,7 +226,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:
-            # trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             return NamespaceServiceResponse(
                 result=None, exception=ExceptionContent(id="unknown", reason=str(e), details=None)
             ), None

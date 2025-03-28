@@ -6,7 +6,7 @@ import subprocess
 import time
 
 import traceback
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 import boto3
 from pydantic import BaseModel
@@ -23,7 +23,7 @@ from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBJobInfo, DBDeployedProcessor
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job, Task
+from simaas.rti.schemas import Processor, Job, Task, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -471,36 +471,44 @@ class AWSRTIService(RTIServiceBase):
             proc.state = Processor.State.FAILED
             proc.error = str(e)
 
-    def perform_submit(self, proc: Processor, job: Job) -> dict:
-        # determine the custodian address and curve public key
-        custodian_pubkey: str = self._node.identity.c_public_key
-        if "SIMAAS_CUSTODIAN_HOST" in os.environ:
-            custodian_host: str = os.environ["SIMAAS_CUSTODIAN_HOST"]
-            custodian_address: str = f"tcp://{custodian_host}:{self._node.p2p.port()}"
-
-        else:
-            custodian_address: str = self._node.p2p.fq_address()
-
-        # submit the job to AWS Batch
-        logger.info(f"[submit:{shorten_id(proc.id)}] [job:{job.id}] submit job to AWS Batch "
-                    f"with custodian at {custodian_address}")
-
+    def perform_submit_single(self, job: Job, proc: Processor) -> None:
+        aws_job_id = None
         try:
-            aws_job_id: str = batch_run_job(
+            # determine the custodian address and curve public key
+            custodian_pubkey: str = self._node.identity.c_public_key
+            if "SIMAAS_CUSTODIAN_HOST" in os.environ:
+                custodian_host: str = os.environ["SIMAAS_CUSTODIAN_HOST"]
+                custodian_address: str = f"tcp://{custodian_host}:{self._node.p2p.port()}"
+
+            else:
+                custodian_address: str = self._node.p2p.fq_address()
+
+            # submit the job to AWS Batch
+            aws_job_id = batch_run_job(
                 self._aws_repository_name, proc, custodian_address, custodian_pubkey, job.id, job.task.budget,
                 config=self._aws_config
             )
 
-            return {
-                'aws_job_id': aws_job_id
-            }
+            # update the runner information
+            with self._session_maker() as session:
+                record = session.get(DBJobInfo, job.id)
+                record.runner['aws_job_id'] = aws_job_id
+                session.commit()
+
+            logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> aws_job_id={aws_job_id}")
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[submit:{shorten_id(proc.id)}] failed: {trace}")
+            msg = f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] failed -> "
+            logger.error(
+                msg + (f"terminating AWS Batch job {aws_job_id}" if aws_job_id else "no AWS Batch job to terminate")
+            )
+            if aws_job_id:
+                batch_terminate_job(aws_job_id, config=self._aws_config, reason=f"Issue during submit_single: {e}")
 
-            proc.state = Processor.State.FAILED
-            proc.error = str(e)
+            raise e
+
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
+        raise RTIException("Not implemented yet.")
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job

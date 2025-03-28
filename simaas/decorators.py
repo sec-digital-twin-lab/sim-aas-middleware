@@ -13,6 +13,11 @@ def requires_access(func):
     return func
 
 
+def requires_tasks_supported(func):
+    func._rti_requires_tasks_supported = True
+    return func
+
+
 def requires_proc_deployed(func):
     func._rti_requires_proc_deployed = True
     return func

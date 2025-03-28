@@ -181,14 +181,13 @@ class NamespaceRTI(RTIInterface):
         reply: Optional[Processor] = Processor.model_validate(reply) if reply else None
         return reply
 
-    def submit(self, proc_id: str, task: Task) -> Job:
-        reply: dict = asyncio.run(P2PNamespaceServiceCall.perform(
+    def submit(self, tasks: List[Task]) -> List[Job]:
+        reply: List[dict] = asyncio.run(P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'submit', args={
-                'proc_id': proc_id,
-                'task': task.model_dump()
+                'tasks': [task.model_dump() for task in tasks]
             }
         ))
-        reply: Job = Job.model_validate(reply)
+        reply: List[Job] = [Job.model_validate(job) for job in reply]
         return reply
 
     def get_job_status(self, job_id: str) -> JobStatus:

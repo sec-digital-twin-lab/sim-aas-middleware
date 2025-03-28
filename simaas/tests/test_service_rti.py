@@ -171,22 +171,29 @@ def test_rest_submit_list_get_job(
     wrong_user = known_user
     owner = session_node.keystore
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': None})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
 
     # submit the job
-    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=1024))
-    assert (result is not None)
+    jobs = rti_proxy.submit([task], with_authorisation_by=owner)
+    job = jobs[0]
+    assert (job is not None)
 
-    job_id = result.id
+    job_id = job.id
 
     # get list of all jobs by correct user
     result = rti_proxy.get_jobs_by_user(owner)
@@ -256,22 +263,28 @@ def test_rest_submit_cancel_job(
     wrong_user = known_user
     owner = session_node.keystore
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 100}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': None})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 100}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
 
     # submit the job
-    result = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
-    assert (result is not None)
+    results = rti_proxy.submit([task], owner)
+    assert (results is not None)
 
-    job_id = result.id
+    job_id = results[0].id
 
     # try to cancel the job (wrong user)
     with pytest.raises(UnsuccessfulRequestError) as e:
@@ -310,22 +323,28 @@ def test_rest_submit_cancel_kill_job(
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': None})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
 
     # submit the job
-    job: Job = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
-    assert (job is not None)
+    result = rti_proxy.submit([task], owner)
+    assert (result is not None)
 
-    job_id = job.id
+    job_id = result[0].id
 
     # wait until the job is running
     while True:
@@ -375,17 +394,23 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
     b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=None, c_hash=None) \
         if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value={'v': b})
 
-    task_input = [a, b]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                    'restricted_access': False, 'content_encrypted': False,
-                                    'target_node_iid': target_node.identity.id})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[a, b],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': target_node.identity.id})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
 
     # submit the job
-    job = rti_proxy.submit_job(proc_id, task_input, task_output, owner)
-    return job
+    result = rti_proxy.submit([task], owner)
+    return result[0]
 
 
 def test_provenance(

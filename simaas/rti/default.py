@@ -5,7 +5,7 @@ import socket
 import time
 
 import traceback
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
@@ -14,12 +14,12 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
-    docker_kill_job_container, docker_container_running
+    docker_kill_job_container, docker_container_running, docker_get_exposed_ports
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job
+from simaas.rti.schemas import Processor, Job, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -160,20 +160,36 @@ class DefaultRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-    def perform_submit(self, proc: Processor, job: Job) -> dict:
-        # determine P2P addresses
-        runner_p2p_address: Tuple[str, int] = self._find_available_address()
+    def perform_submit_single(self, job: Job, proc: Processor) -> None:
+        container_id = None
+        try:
+            # get the runner address and custom port mappings (if any)
+            runner_p2p_address, custom_ports = self._map_ports(proc.image_name)
 
-        # start the job container and keep the container id
-        logger.info(f"[submit:{shorten_id(proc.id)}] [job:{job.id}] start job container")
-        container_id = docker_run_job_container(
-            proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
-            budget=job.task.budget
-        )
+            # start the job container and keep the container id
+            container_id = docker_run_job_container(
+                proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
+                budget=job.task.budget, custom_ports=custom_ports
+            )
 
-        return {
-            'container_id': container_id
-        }
+            # update the runner information
+            with self._session_maker() as session:
+                record = session.get(DBJobInfo, job.id)
+                record.runner['container_id'] = container_id
+                session.commit()
+
+            logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> container {container_id}")
+
+        except Exception as e:
+            msg = f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] failed -> "
+            logger.error(msg + (f"terminating {container_id}" if container_id else "no container to terminate"))
+            if container_id:
+                docker_kill_job_container(container_id)
+
+            raise e
+
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
+        raise RTIException("Not implemented yet.")
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job
@@ -250,3 +266,20 @@ class DefaultRTIService(RTIServiceBase):
                 return address
 
         raise RuntimeError("No free ports found in the specified range.")
+
+    def _map_ports(self, image_name: str) -> Tuple[Tuple[str, int], List[Tuple[int, str, str, int]]]:
+        # create a mapping of ports exposed by the Docket image to P2P addresses
+        custom_ports: List[Tuple[int, str, str, int]] = []
+        runner_p2p_address: Optional[Tuple[str, int]] = None
+        for port, protocol in docker_get_exposed_ports(image_name):
+            address = self._find_available_address()
+            if port == 6000 and protocol == 'tcp':
+                runner_p2p_address = address
+            else:
+                custom_ports.append((port, protocol, address[0], address[1]))
+
+        # do we have a runner P2P address?
+        if runner_p2p_address is None:
+            raise RTIException(f"Processor docker image invalid: runner P2P port not exposed")
+
+        return runner_p2p_address, custom_ports

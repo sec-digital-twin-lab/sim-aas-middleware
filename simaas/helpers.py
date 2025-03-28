@@ -160,10 +160,17 @@ def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool =
         return found
 
 
-def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
-                             custodian_address: str, custodian_pubkey: str, job_id: str,
-                             budget: Optional[Task.Budget] = None) -> str:
+def docker_get_exposed_ports(image_name) -> List[Tuple[int, str]]:
+    client = docker.from_env()
+    image = client.images.get(image_name)
+    exposed_ports = image.attrs.get('Config', {}).get('ExposedPorts', {})
+    return [(int(port), protocol) for port, protocol in (item.split('/') for item in exposed_ports)]
 
+
+def docker_run_job_container(
+        image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_pubkey: str, job_id: str,
+        budget: Optional[Task.Budget] = None, custom_ports: List[Tuple[int, str, str, int]] = None
+) -> str:
     client = docker.from_env()
 
     volumes = {
@@ -180,6 +187,12 @@ def docker_run_job_container(image_name: str, p2p_address: Tuple[str, int],
         'JOB_ID': job_id,
         'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
     }
+
+    # do we have custom ports that need to be exposed?
+    if custom_ports:
+        for port, protocol, ext_host, ext_port in custom_ports:
+            ports[f"{port}/{protocol}"] = (ext_host, ext_port)
+            environment[f"EXTERNAL_CUSTOM_{protocol.upper()}_{port}"] = f"{protocol}://{ext_host}:{ext_port}"
 
     if budget is None:
         container = client.containers.run(

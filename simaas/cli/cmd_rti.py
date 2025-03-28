@@ -401,10 +401,6 @@ class RTIJobSubmit(CLICommand):
                 raise CLIRuntimeError(f"Processor {task.proc_id} is not deployed at {args['address']}. "
                                       f"Aborting.")
 
-            proc_id = task.proc_id
-            job_input = task.input
-            job_output = task.output
-
         # if we don't have a job descriptor then we obtain all the information interactively
         else:
             # select the processor
@@ -412,16 +408,20 @@ class RTIJobSubmit(CLICommand):
                                                    message="Select the processor for the job:",
                                                    allow_multiple=False)
 
-            # get the descriptor for this processor
-            # print(f"Processor descriptor: {json.dumps(proc.gpp.proc_descriptor.dict(), indent=4)}")
-
-            # create the job input and output
-            proc_id = proc.id
-            job_input = self._create_job_input(proc.gpp.proc_descriptor)
-            job_output = self._create_job_output(proc.gpp.proc_descriptor)
+            # create the task
+            task = Task(
+                proc_id=proc.id,
+                user_iid=keystore.identity.id,
+                input=self._create_job_input(proc.gpp.proc_descriptor),
+                output=self._create_job_output(proc.gpp.proc_descriptor),
+                name=None,
+                description=None,
+                budget=None
+            )
 
         # submit the job
-        job = self._rti.submit_job(proc_id, job_input, job_output, with_authorisation_by=keystore)
+        result = self._rti.submit([task], with_authorisation_by=keystore)
+        job: Job = result[0]
         print(f"Job submitted: {job.id}")
 
         return {

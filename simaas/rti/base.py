@@ -3,17 +3,13 @@ import json
 import os
 import threading
 import traceback
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 
 from fastapi.requests import Request
 from simaas.core.exceptions import ExceptionContent
-
 from simaas.core.helpers import generate_random_string, get_timestamp_now
-
 from simaas.cli.helpers import shorten_id
-
 from simaas.dor.schemas import GitProcessorPointer
-
 from simaas.core.identity import Identity
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
 from simaas.rti.schemas import JobStatus, Processor, Task, Job
@@ -43,6 +39,7 @@ class DBDeployedProcessor(Base):
 class DBJobInfo(Base):
     __tablename__ = 'job_info'
     id = Column(String(64), primary_key=True)
+    batch_id = Column(String(64), nullable=True)
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
     status = Column(NestedMutableJson, nullable=False)
@@ -81,7 +78,11 @@ class RTIServiceBase(RTIRESTService):
         ...
 
     @abc.abstractmethod
-    def perform_submit(self, proc: Processor, job: Job) -> dict:
+    def perform_submit_single(self, job: Job, proc: Processor) -> dict:
+        ...
+
+    @abc.abstractmethod
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
         ...
 
     @abc.abstractmethod
@@ -92,20 +93,22 @@ class RTIServiceBase(RTIRESTService):
     def perform_purge(self, job_record: DBJobInfo) -> None:
         ...
 
-    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Optional[Job]:
+    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Tuple[Job, Optional[str]]:
         with self._session_maker() as session:
             # get the DB record for the job (if any)
             record = session.query(DBJobInfo).get(job_id)
-            if record is not None:
-                # update the runner information
-                record.runner['identity'] = runner_identity.model_dump()
-                record.runner['address'] = runner_address
-                session.commit()
+            if record is None:
+                raise RTIException(f"Job {job_id} does not exist")
 
-                # make the runner identity known to the node
-                self._node.db.update_identity(runner_identity)
+            # update the runner information
+            record.runner['identity'] = runner_identity.model_dump()
+            record.runner['address'] = runner_address
+            session.commit()
 
-                return Job.model_validate(record.job)
+            # make the runner identity known to the node
+            self._node.db.update_identity(runner_identity)
+
+            return Job.model_validate(record.job), record.batch_id
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
@@ -219,97 +222,112 @@ class RTIServiceBase(RTIRESTService):
 
                 return proc
 
-    def rest_submit(self, proc_id: str, task: Task, request: Request) -> Job:
+    def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
         """
-        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
-        of the task/job.
+        Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
+        coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
+        to facilitate co-execution.
         """
 
         # get the user's identity and check if it's identical with that's indicated in the task
         iid = request.headers['saasauth-iid']
-        if iid != task.user_iid:
-            raise RTIException("Mismatch between user indicated in task and user making request", details={
-                'iid': iid,
-                'task': task
-            })
+        for task in tasks:
+            if iid != task.user_iid:
+                raise RTIException("Mismatch between user indicated in task and user making request", details={
+                    'iid': iid,
+                    'task': task
+                })
 
-        return self.submit(proc_id, task)
+        return self.submit(tasks)
 
-    def submit(self, proc_id: str, task: Task) -> Job:
+    def submit(self, tasks: List[Task]) -> List[Job]:
         """
-        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
-        of the task/job.
+        Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
+        coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
+        to facilitate co-execution.
         """
 
-        # get the user
-        user: Identity = self._node.db.get_identity(task.user_iid)
+        # if we run these tasks in-sync then it has to be the same user.
+        user_iids: List[str] = list(set([task.user_iid for task in tasks]))
+        if len(user_iids) != 1:
+            raise RTIException(f"Multiple users for job submission: {', '.join(user_iids)}")
 
-        # get the processor
-        proc: Optional[Processor] = self.get_proc(proc_id)
-        if proc is None:
-            raise ProcessorNotDeployedError({
-                'proc_id': proc_id
-            })
+        # get the identity of the user
+        user: Identity = self._node.db.get_identity(user_iids[0])
 
-        # create the job folder with a generated job id
-        job_id = generate_random_string(8)
-        job_path = os.path.join(self._jobs_path, job_id)
-        os.makedirs(job_path, exist_ok=True)
+        # if this is a batch, create a batch id
+        batch_id: Optional[str] = generate_random_string(8) if len(tasks) > 1 else None
 
-        # create the initial job descriptor and write to file
-        job = Job(id=job_id, task=task, retain=self._retain_job_history, custodian=self._node.info,
-                  proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
-        descriptor_path = os.path.join(job_path, 'job.descriptor')
-        with open(descriptor_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(job.model_dump(), f, indent=2)
+        # for each task prepare the job
+        batch: List[Tuple[Job, JobStatus, Processor]] = []
+        for task in tasks:
+            # get the processor
+            proc: Optional[Processor] = self.get_proc(task.proc_id)
+            if proc is None:
+                raise ProcessorNotDeployedError({
+                    'proc_id': task.proc_id
+                })
 
-        # create initial job status and write to file
-        status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
-                           errors=[], message=None)
-        status_path = os.path.join(job_path, 'job.status')
-        with open(status_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(status.model_dump(), f, indent=2)
+            # create the job folder with a generated job id
+            job_id = generate_random_string(8)
+            job_path = os.path.join(self._jobs_path, job_id)
+            os.makedirs(job_path, exist_ok=True)
 
-        with self._session_maker() as session:
+            # create the initial job descriptor and write to file
+            job = Job(id=job_id, task=task, retain=self._retain_job_history, custodian=self._node.info,
+                      proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
+            descriptor_path = os.path.join(job_path, 'job.descriptor')
+            with open(descriptor_path, 'w') as f:
+                # noinspection PyTypeChecker
+                json.dump(job.model_dump(), f, indent=2)
+
+            # create initial job status and write to file
+            status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
+                               errors=[], message=None)
+            status_path = os.path.join(job_path, 'job.status')
+            with open(status_path, 'w') as f:
+                # noinspection PyTypeChecker
+                json.dump(status.model_dump(), f, indent=2)
+
             # create initial job info record and write to database
-            record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                               status=status.model_dump(), job=job.model_dump(), runner={})
-            session.add(record)
-            session.commit()
-
-        # perform the job submission and update the details
-        try:
-            details = self.perform_submit(proc, job)
-
-            # update the runner information
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job.id)
-                runner: dict = dict(record.runner)
-                runner.update(details)
-                record.runner = runner
+                record = DBJobInfo(id=job.id, batch_id=batch_id, proc_id=task.proc_id, user_iid=user.id,
+                                   status=status.model_dump(), job=job.model_dump(), runner={})
+                session.add(record)
                 session.commit()
+
+            # Add the job to the batch
+            batch.append((job, status, proc))
+
+        try:
+            if len(batch) == 1:
+                # perform submission of the single task
+                job, _, proc = batch[0]
+                self.perform_submit_single(job, proc)
+
+            else:
+                # perform submission of the batch of tasks
+                self.perform_submit_batch(batch, batch_id)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[submit:{shorten_id(proc.id)}] failed: {trace}")
+            logger.error(f"[submit] failed: {trace}")
 
-            # update the runner information
+            # update the runner information of all involved jobs
             with self._session_maker() as session:
-                status.state = JobStatus.State.FAILED
-                status.errors.append(JobStatus.Error(
-                    message=str(e),
-                    exception=ExceptionContent(
-                        id='', reason=str(e), details={}
-                    )
-                ))
-
-                record = session.query(DBJobInfo).get(job.id)
-                record.status = status
+                for job, status, _ in batch:
+                    status.state = JobStatus.State.FAILED
+                    status.errors.append(JobStatus.Error(
+                        message=str(e),
+                        exception=ExceptionContent(
+                            id='', reason=str(e), details={'trace': trace}
+                        )
+                    ))
+                    record = session.query(DBJobInfo).get(job.id)
+                    record.status = status
                 session.commit()
 
-        return job
+        return [item[0] for item in batch]
 
     def jobs_by_proc(self, proc_id: str) -> List[Job]:
         """
