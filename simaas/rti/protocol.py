@@ -54,7 +54,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             if value is not None:
                 os.environ[key] = value
 
-        return response.job, response.custodian_identity
+        return response.job, response.custodian_identity, response.join_batch
 
     async def handle(
             self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
