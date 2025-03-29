@@ -120,7 +120,7 @@ class BatchBarrier(P2PProtocol):
 
     def wait_for_release(self, barrier_name: str) -> Any:
         while barrier_name not in self._releases:
-            time.sleep(50)
+            time.sleep(0.1)
         return self._releases.pop(barrier_name)
 
     async def handle(
