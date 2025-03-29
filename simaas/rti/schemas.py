@@ -118,7 +118,7 @@ class BatchStatus(BaseModel):
     class Member(BaseModel):
         name: str
         job_id: str
-        identity: Identity
+        identity: Optional[Identity]
         ports: Dict[str, Optional[str]]
 
     batch_id: str
