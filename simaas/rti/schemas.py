@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Literal, Optional, List, Union, Dict
 
 from pydantic import BaseModel, Field
-
+from simaas.core.identity import Identity
 from simaas.core.exceptions import ExceptionContent
 from simaas.dor.schemas import GitProcessorPointer, DataObject
 from simaas.nodedb.schemas import NodeInfo
