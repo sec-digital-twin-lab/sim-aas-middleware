@@ -114,6 +114,18 @@ class JobStatus(BaseModel):
     message: Optional[Message] = Field(title="Message", description="A message providing more details about its current status (if any)")
 
 
+class BatchStatus(BaseModel):
+    class Member(BaseModel):
+        name: str
+        job_id: str
+        identity: Identity
+        ports: Dict[str, Optional[str]]
+
+    batch_id: str
+    user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns this batch.")
+    members: List[Member]
+
+
 class Processor(BaseModel):
     class State(str, Enum):
         """

@@ -27,8 +27,8 @@ from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPoin
 from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
     InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
     AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob
-from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier
+from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus
 from simaas.core.processor import ProgressListener, ProcessorBase
 from simaas.helpers import find_processors
 
@@ -317,19 +317,24 @@ class JobRunner(CLICommand, ProgressListener):
         self._gpp: Optional[GitProcessorPointer] = None
         self._proc: Optional[ProcessorBase] = None
 
-        # set during initialise_p2p
+        # set/used during initialise_p2p
         self._keystore: Optional[Keystore] = None
         self._p2p: Optional[P2PService] = None
         self._custodian_address: Optional[P2PAddress] = None
         self._custodian: Optional[Identity] = None
         self._job: Optional[Job] = None
-        self._batch_id: Optional[str] = None
+        self._batch_status: Optional[BatchStatus] = None
+        self._barrier = BatchBarrier(self)
 
         # set upon job update
         self._input_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._status_handler: Optional[StatusHandler] = None
         self._user: Optional[Identity] = None
+
+        # set/used during batch sync
+        self._batch_ports: Dict[str, Dict[str, Optional[str]]] = {}
+        self._batch_identities: Dict[str, Identity] = {}
 
         self._pending_output: Set[str] = set()
         self._failed_output: Set[str] = set()
@@ -481,6 +486,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p = P2PService(self._keystore, service_address)
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
+        self._p2p.add(self._barrier)
         self._p2p.start_service(encrypt=True)
         self._logger.info("P2P service interface is up.")
 
@@ -505,7 +511,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # perform handshake with custodian
         self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address}...")
-        self._job, self._custodian, self._batch_id = asyncio.run(P2PRunnerPerformHandshake.perform(
+        self._job, self._custodian, self._batch_status = asyncio.run(P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
         ))
         self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
@@ -527,6 +533,61 @@ class JobRunner(CLICommand, ProgressListener):
         job_status_path = os.path.join(self._wd_path, 'job.status')
         self._status_handler = StatusHandler(self._logger, self._custodian_address, self._job.id, job_status_path)
         self._status_handler.start()
+
+    def _extract_batch_status(self) -> bool:
+        mappings_complete = True
+        for member in self._batch_status.members:
+            self._batch_ports[member.name] = member.ports
+            self._batch_identities[member.name] = member.identity
+            for address in member.ports.values():
+                if address is None:
+                    mappings_complete = False
+
+        return mappings_complete
+
+    def _await_batch(self) -> None:
+        # extract identity and port mappings for convenience. figure out if we have complete mapping information.
+        mappings_complete = self._extract_batch_status()
+
+        # members need to wait for all other members to be ready (i.e., they must have completed the handshake).
+        # how do we know that's the case? members may perform handshake with the custodian in any order. each
+        # member informs the custodian about it's own address. the custodian then updates the batch status and
+        # uses that to return the latest batch status whenever a handshake is performed. the last member will
+        # thus receive a batch status has COMPLETE port mappings of all members. this last member is now
+        # responsible to perform the release the barrier.
+
+        # are we the one with complete mappings?
+        if mappings_complete:
+            # release the barrier
+            for name in self._batch_ports.keys():
+                # get the identity and the P2P address (by convention that's the 6000/tcp mapping) of the member
+                member_identity = self._batch_identities[name]
+                member_p2p_address = P2PAddress(
+                    address=self._batch_ports[name]['6000/tcp'],
+                    curve_secret_key=self._keystore.curve_secret_key(),
+                    curve_public_key=self._keystore.curve_public_key(),
+                    curve_server_key=member_identity.c_public_key
+                )
+
+                # send the barrier release message to the member
+                self._logger.info(f"[barrier] send release for barrier 'initial_barrier' to {name} at {member_p2p_address}")
+                asyncio.run(BatchBarrier.perform(member_p2p_address, 'initial_barrier', self._batch_status))
+
+        # wait for the barrier to be released
+        self._logger.info(f"[barrier] waiting for barrier release 'initial_barrier'...")
+        result: dict = self._barrier.wait_for_release('initial_barrier')
+        self._logger.info(f"[barrier] barrier release 'initial_barrier' received.")
+
+        # update batch status and extract it
+        self._batch_status = BatchStatus.model_validate(result)
+        if not self._extract_batch_status():
+            raise RTIException(f"Incomplete port mappings after barrier", details={
+                'ports': self._batch_ports
+            })
+
+        # log the member information
+        for name in self._batch_ports.keys():
+            self._logger.info(f"[batch:{name}] identity={self._batch_identities[name].id} ports: {self._batch_ports[name]}")
 
     def _store_value_input_data_objects(self) -> None:
         for item in self._job.task.input:
@@ -773,6 +834,11 @@ class JobRunner(CLICommand, ProgressListener):
             self._logger.info("END initialising job runner.")
             self._status_handler.update(state=JobStatus.State.INITIALISED)
             self._logger.info(f"BEGIN processing job {self._job.id}...")
+
+            # do we have a batch status? if so this means this job is part of a batch and we need to wait for
+            # all batch members to be initialised
+            if self._batch_status is not None:
+                self._await_batch()
 
             # fetch the user identity
             self._user: Optional[Identity] = asyncio.run(
