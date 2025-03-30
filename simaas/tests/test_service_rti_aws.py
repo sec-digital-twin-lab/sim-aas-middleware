@@ -626,7 +626,7 @@ def test_provenance(
 
 def test_job_concurrency(
         docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor
+        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, n: int = 50
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -706,7 +706,6 @@ def test_job_concurrency(
             logprint(idx, f"[{idx}] failed: {trace}")
 
     # submit jobs
-    n = 20
     threads = []
     for i in range(n):
         thread = threading.Thread(target=do_a_job, kwargs={'idx': i})
