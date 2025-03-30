@@ -235,8 +235,7 @@ class RTIProcShow(CLICommand):
 class RTIJobSubmit(CLICommand):
     def __init__(self) -> None:
         super().__init__('submit', 'submit a new job', arguments=[
-            Argument('--task', dest='task', action='store',
-                     help="path to the task descriptor")
+            Argument('task', metavar='task', type=str, nargs='?', help="path to a task descriptor")
         ])
 
     def _prepare(self, args: dict) -> None:
@@ -383,50 +382,96 @@ class RTIJobSubmit(CLICommand):
         # do some preparation
         self._prepare(args)
 
+        tasks: List[Task] = []
+
         # do we have a task descriptor?
         if args['task']:
-            # does the file exist?
-            if not os.path.isfile(args['task']):
-                raise CLIRuntimeError(f"No task descriptor at '{args['task']}'. Aborting.")
+            for task_path in args['task']:
+                # does the file exist?
+                if not os.path.isfile(task_path):
+                    raise CLIRuntimeError(f"No task descriptor at '{task_path}'. Aborting.")
 
-            # read the job descriptor
-            try:
-                with open(args['task'], 'r') as f:
-                    task = Task.model_validate(json.load(f))
-            except ValidationError as e:
-                raise CLIRuntimeError(f"Invalid task descriptor: {e.errors()}. Aborting.")
+                # read the job descriptor
+                try:
+                    with open(task_path, 'r') as f:
+                        task = Task.model_validate(json.load(f))
+                except ValidationError as e:
+                    raise CLIRuntimeError(f"Invalid task descriptor: {e.errors()}. Aborting.")
 
-            # is the processor deployed?
-            if task.proc_id not in self._proc_choices:
-                raise CLIRuntimeError(f"Processor {task.proc_id} is not deployed at {args['address']}. "
-                                      f"Aborting.")
+                # is the processor deployed?
+                if task.proc_id not in self._proc_choices:
+                    raise CLIRuntimeError(f"Processor {task.proc_id} is not deployed at {args['address']}. "
+                                          f"Aborting.")
+
+                tasks.append(task)
 
         # if we don't have a job descriptor then we obtain all the information interactively
         else:
-            # select the processor
-            proc: Processor = prompt_for_selection(choices=list(self._proc_choices.values()),
-                                                   message="Select the processor for the job:",
-                                                   allow_multiple=False)
+            while True:
+                # select the processor
+                proc: Processor = prompt_for_selection(choices=list(self._proc_choices.values()),
+                                                       message="Select the processor for this task:",
+                                                       allow_multiple=False)
 
-            # create the task
-            task = Task(
-                proc_id=proc.id,
-                user_iid=keystore.identity.id,
-                input=self._create_job_input(proc.gpp.proc_descriptor),
-                output=self._create_job_output(proc.gpp.proc_descriptor),
-                name=None,
-                description=None,
-                budget=None
-            )
+                # configure input/output for the task
+                task_input = self._create_job_input(proc.gpp.proc_descriptor)
+                task_output = self._create_job_output(proc.gpp.proc_descriptor)
+
+                # ask for a task name
+                name = prompt_for_string(message="Give the task a name:", allow_empty=False)
+
+                # ask for a budget
+                budgets = [
+                    (1, 2048),
+                    (2, 2*2048),
+                    (4, 4*2048),
+                    (8, 8*2048),
+                ]
+
+                budget_idx = prompt_for_selection(
+                    choices=[
+                        Choice(i, f"{budgets[i][0]} vCPUs, {budgets[i][1]} GB RAM memory") for i in range(len(budgets))
+                    ],
+                    message="Select a budget for this task:",
+                    allow_multiple=False
+                )
+
+                # create the task
+                tasks.append(Task(
+                    proc_id=proc.id,
+                    user_iid=keystore.identity.id,
+                    input=task_input,
+                    output=task_output,
+                    name=name,
+                    description=None,
+                    budget=Task.Budget(vcpus=budgets[budget_idx][0], memory=budgets[budget_idx][1])
+                ))
+
+                if not prompt_for_confirmation(
+                    "Add another task? Note: multiple tasks submitted together will be executed as batch.",
+                    default=False
+                ):
+                    break
 
         # submit the job
-        result = self._rti.submit([task], with_authorisation_by=keystore)
-        job: Job = result[0]
-        print(f"Job submitted: {job.id}")
+        result = self._rti.submit(tasks, with_authorisation_by=keystore)
+        batch_id: Optional[str] = result[0].batch_id
+        if batch_id:
+            print(f"Batch submitted: {batch_id}")
+            for job in result:
+                print(f"- Task '{job.task.name}' executed by job {job.id}")
 
-        return {
-            'job': job
-        }
+            return {
+                'jobs': result
+            }
+
+        else:
+            job: Job = result[0]
+            print(f"Job submitted: {job.id}")
+
+            return {
+                'job': job
+            }
 
 
 class RTIJobList(CLICommand):
