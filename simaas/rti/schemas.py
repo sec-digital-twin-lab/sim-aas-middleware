@@ -117,15 +117,21 @@ class JobStatus(BaseModel):
 
 class BatchStatus(BaseModel):
     class Member(BaseModel):
-        name: str
-        job_id: str
-        state: JobStatus.State
-        identity: Optional[Identity]
-        ports: Dict[str, Optional[str]]
+        """
+        Information about a batch member.
+        """
+        name: str = Field(..., title="Name", description="The name of the job/member.")
+        job_id: str = Field(..., title="Job Id", description="The id of the member job.")
+        state: JobStatus.State = Field(..., title="State", description="The state of the member job.")
+        identity: Optional[Identity] = Field(title="Identity", description="The identity of the member job (if known).")
+        ports: Dict[str, Optional[str]] = Field(..., title="Ports", description="The ports of the member job and their mapping to addresses.")
 
-    batch_id: str
-    user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns this batch.")
-    members: List[Member]
+    """
+    Information about a batch of jobs.
+    """
+    batch_id: str = Field(..., title="Batch Id", description="The id of batch.")
+    user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns the batch.")
+    members: List[Member] = Field(..., title="Members", description="A list with information about all members of the batch.")
 
 
 class Processor(BaseModel):
@@ -144,7 +150,7 @@ class Processor(BaseModel):
     id: str = Field(..., title="Processor Id", description="The processor id.", examples=["d01d069675bcaaeb90b46273ccc4ae9818a2667957045d0f0f15901ffcf807de"])
     state: Literal[State.BUSY_DEPLOY, State.BUSY_UNDEPLOY, State.READY, State.FAILED] = Field(..., title="State", description="The state of the processor.")
     image_name: Optional[str] = Field(title="Image Name", description="The name of the docker image that contains the processor.")
-    ports: Optional[List[Tuple[int, str]]]
+    ports: Optional[List[Tuple[int, str]]] = Field(..., title="Ports", description="The ports exposed/used by this processor.")
     gpp: Optional[GitProcessorPointer] = Field(title="GPP", description="The Git Processor Pointer information.")
     error: Optional[str] = Field(..., title="Error", description="Information about the error encountered (only if state is 'failed').")
 
