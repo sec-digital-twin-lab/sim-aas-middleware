@@ -3,16 +3,17 @@ import json
 import os
 import threading
 import traceback
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 
 from fastapi.requests import Request
+
 from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
 from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
-from simaas.rti.schemas import JobStatus, Processor, Task, Job
+from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
@@ -32,6 +33,7 @@ class DBDeployedProcessor(Base):
     id = Column(String(64), primary_key=True)
     state = Column(String, nullable=False)
     image_name = Column(String, nullable=True)
+    ports = Column(NestedMutableJson, nullable=False)
     gpp = Column(NestedMutableJson, nullable=True)
     error = Column(String, nullable=True)
 
@@ -78,11 +80,11 @@ class RTIServiceBase(RTIRESTService):
         ...
 
     @abc.abstractmethod
-    def perform_submit_single(self, job: Job, proc: Processor) -> dict:
+    def perform_submit_single(self, job: Job, proc: Processor) -> None:
         ...
 
     @abc.abstractmethod
-    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> None:
         ...
 
     @abc.abstractmethod
@@ -93,22 +95,32 @@ class RTIServiceBase(RTIRESTService):
     def perform_purge(self, job_record: DBJobInfo) -> None:
         ...
 
-    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Tuple[Job, Optional[str]]:
-        with self._session_maker() as session:
-            # get the DB record for the job (if any)
-            record = session.query(DBJobInfo).get(job_id)
-            if record is None:
-                raise RTIException(f"Job {job_id} does not exist")
+    @abc.abstractmethod
+    def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
+        ...
 
-            # update the runner information
-            record.runner['identity'] = runner_identity.model_dump()
-            record.runner['address'] = runner_address
-            session.commit()
+    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Job:
+        with self._mutex:
+            with self._session_maker() as session:
+                # get the DB record for the job (if any)
+                record = session.query(DBJobInfo).get(job_id)
+                if record is None:
+                    raise RTIException(f"Job {job_id} does not exist")
 
-            # make the runner identity known to the node
-            self._node.db.update_identity(runner_identity)
+                # update the runner information
+                record.runner['identity'] = runner_identity.model_dump()
+                record.runner['address'] = runner_address
 
-            return Job.model_validate(record.job), record.batch_id
+                # resolve the port mapping
+                resolved_ports = self._node.rti.resolve_port_mapping(job_id, dict(record.runner))
+                record.runner['ports'] = resolved_ports
+
+                session.commit()
+
+                # make the runner identity known to the node
+                self._node.db.update_identity(runner_identity)
+
+                return Job.model_validate(record.job)
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
@@ -124,7 +136,7 @@ class RTIServiceBase(RTIRESTService):
             result = []
             for record in records:
                 result.append(Processor(id=record.id, state=Processor.State(record.state),
-                                        image_name=record.image_name,
+                                        image_name=record.image_name, ports=list(record.ports),
                                         gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                         error=record.error))
 
@@ -138,7 +150,7 @@ class RTIServiceBase(RTIRESTService):
             record = session.query(DBDeployedProcessor).get(proc_id)
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
-                                 image_name=record.image_name,
+                                 image_name=record.image_name, ports=list(record.ports),
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
             else:
@@ -157,7 +169,9 @@ class RTIServiceBase(RTIRESTService):
         # begin deployment
         with self._mutex:
             # create a placeholder processor object
-            proc = Processor(id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, gpp=None, error=None)
+            proc = Processor(
+                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None, gpp=None, error=None
+            )
 
             # update or create db record
             with self._session_maker() as session:
@@ -165,12 +179,14 @@ class RTIServiceBase(RTIRESTService):
                 if record:
                     record.state = proc.state.value
                     record.image_name = proc.image_name
+                    record.ports = proc.ports
                     record.gpp = proc.gpp.model_dump()
                     record.error = proc.error
 
                 else:
                     session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                    gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
+                                                    ports=[], gpp=proc.gpp.model_dump() if proc.gpp else None,
+                                                    error=None))
                 session.commit()
 
             # start the deployment worker
@@ -191,7 +207,7 @@ class RTIServiceBase(RTIRESTService):
 
                 # create the processor object
                 proc = Processor(id=record.id, state=Processor.State(record.state),
-                                 image_name=record.image_name,
+                                 image_name=record.image_name, ports=list(record.ports),
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
 
@@ -247,10 +263,18 @@ class RTIServiceBase(RTIRESTService):
         to facilitate co-execution.
         """
 
-        # if we run these tasks in-sync then it has to be the same user.
+        # perform a few checks
         user_iids: List[str] = list(set([task.user_iid for task in tasks]))
-        if len(user_iids) != 1:
-            raise RTIException(f"Multiple users for job submission: {', '.join(user_iids)}")
+        if len(tasks) > 1:
+            # if we run these tasks in-sync then it has to be the same user.
+            if len(user_iids) != 1:
+                raise RTIException(f"Multiple users for job submission: {', '.join(user_iids)}")
+
+            # job names are mandatory for easier distinction between jobs in a batch
+            missing_names: List[Task] = [task for task in tasks if task.name is None]
+            if missing_names:
+                raise RTIException(f"Job name missing in {len(missing_names)} of {len(tasks)} tasks "
+                                   f"(job names are mandatory for batch submission")
 
         # get the identity of the user
         user: Identity = self._node.db.get_identity(user_iids[0])
@@ -274,8 +298,9 @@ class RTIServiceBase(RTIRESTService):
             os.makedirs(job_path, exist_ok=True)
 
             # create the initial job descriptor and write to file
-            job = Job(id=job_id, task=task, retain=self._retain_job_history, custodian=self._node.info,
-                      proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
+            job = Job(id=job_id, batch_id=batch_id, task=task, retain=self._retain_job_history,
+                      custodian=self._node.info, proc_name=proc.gpp.proc_descriptor.name,
+                      t_submitted=get_timestamp_now())
             descriptor_path = os.path.join(job_path, 'job.descriptor')
             with open(descriptor_path, 'w') as f:
                 # noinspection PyTypeChecker
@@ -291,8 +316,16 @@ class RTIServiceBase(RTIRESTService):
 
             # create initial job info record and write to database
             with self._session_maker() as session:
-                record = DBJobInfo(id=job.id, batch_id=batch_id, proc_id=task.proc_id, user_iid=user.id,
-                                   status=status.model_dump(), job=job.model_dump(), runner={})
+                record = DBJobInfo(
+                    id=job.id,
+                    batch_id=batch_id,
+                    proc_id=task.proc_id,
+                    user_iid=user.id,
+                    status=status.model_dump(),
+                    job=job.model_dump(),
+                    runner={
+                        'ports': {f"{port}/{protocol}": None for port, protocol in proc.ports}
+                    })
                 session.add(record)
                 session.commit()
 
@@ -437,6 +470,43 @@ class RTIServiceBase(RTIRESTService):
                     raise RTIException(f"Job {job_id} does not exist.")
 
         return JobStatus.model_validate(record.status)
+
+    def get_batch_status(self, batch_id: str) -> BatchStatus:
+        """
+        Retrieves detailed information about the status of a batch of jobs. Authorisation is required by the owner of
+        the batch (i.e., the user that has created the batch by submitting the tasks in the first place).
+        """
+        members: List[BatchStatus.Member] = []
+        with self._mutex:
+            with self._session_maker() as session:
+                # get the records
+                records = session.query(DBJobInfo).filter_by(batch_id=batch_id).all()
+                if records is None:
+                    raise RTIException(f"Batch {batch_id} does not exist.")
+
+                # determine the batch user iid (all jobs have the same user iid)
+                user_iid = records[0].user_iid
+
+                # create member items
+                for record in records:
+                    job = Job.model_validate(record.job)
+                    status = JobStatus.model_validate(record.status)
+                    identity = Identity.model_validate(
+                        record.runner['identity']
+                    ) if 'identity' in record.runner else None
+                    members.append(BatchStatus.Member(
+                        name=job.task.name,
+                        job_id=job.id,
+                        state=status.state,
+                        identity=identity,
+                        ports=record.runner['ports']
+                    ))
+
+        return BatchStatus(
+            batch_id=batch_id,
+            user_iid=user_iid,
+            members=members
+        )
 
     def job_cancel(self, job_id: str) -> JobStatus:
         """

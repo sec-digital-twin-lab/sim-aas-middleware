@@ -6,12 +6,13 @@ from typing import List, Tuple, Optional
 from fastapi import Request
 
 from simaas.decorators import requires_proc_deployed, requires_authentication, requires_job_or_node_ownership, \
-    requires_proc_not_busy, requires_node_ownership_if_strict, requires_tasks_supported
+    requires_proc_not_busy, requires_node_ownership_if_strict, requires_tasks_supported, \
+    requires_batch_or_node_ownership
 from simaas.rest.schemas import EndpointDefinition
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 
 from simaas.core.keystore import Keystore
-from simaas.rti.schemas import Job, JobStatus, Processor, Task
+from simaas.rti.schemas import Job, JobStatus, Processor, Task, BatchStatus
 
 RTI_ENDPOINT_PREFIX = "/api/v1/rti"
 JOB_ENDPOINT_PREFIX = "/api/v1/job"
@@ -86,6 +87,14 @@ class RTIInterface(abc.ABC):
         """
 
     @abc.abstractmethod
+    @requires_batch_or_node_ownership
+    def get_batch_status(self, batch_id: str) -> BatchStatus:
+        """
+        Retrieves detailed information about the status of a batch of jobs. Authorisation is required by the owner of
+        the batch (i.e., the user that has created the batch by submitting the tasks in the first place).
+        """
+
+    @abc.abstractmethod
     @requires_job_or_node_ownership
     def job_cancel(self, job_id: str) -> JobStatus:
         """
@@ -143,7 +152,9 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
             EndpointDefinition('POST', RTI_ENDPOINT_PREFIX, 'job', self.rest_submit, List[Job]),
             EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'job/{job_id}/status', self.get_job_status, JobStatus),
             EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/cancel', self.job_cancel, JobStatus),
-            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge', self.job_purge, JobStatus)
+            EndpointDefinition('DELETE', RTI_ENDPOINT_PREFIX, 'job/{job_id}/purge', self.job_purge, JobStatus),
+
+            EndpointDefinition('GET', RTI_ENDPOINT_PREFIX, 'batch/{batch_id}/status', self.get_batch_status, BatchStatus),
         ]
 
 
@@ -189,6 +200,10 @@ class RTIProxy(EndpointProxy):
     def get_job_status(self, job_id: str, with_authorisation_by: Keystore) -> JobStatus:
         result = self.get(f"job/{job_id}/status", with_authorisation_by=with_authorisation_by)
         return JobStatus.model_validate(result)
+
+    def get_batch_status(self, batch_id: str, with_authorisation_by: Keystore) -> BatchStatus:
+        result = self.get(f"batch/{batch_id}/status", with_authorisation_by=with_authorisation_by)
+        return BatchStatus.model_validate(result)
 
     def cancel_job(self, job_id: str, with_authorisation_by: Keystore) -> JobStatus:
         result = self.delete(f"job/{job_id}/cancel", with_authorisation_by=with_authorisation_by)

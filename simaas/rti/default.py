@@ -104,9 +104,13 @@ class DefaultRTIService(RTIServiceBase):
                     # build the image
                     build_processor_image(proc_path, image_name, credentials=credentials)
 
+            # find out what ports are exposed
+            ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
+
             # update processor object
             proc.state = Processor.State.READY
             proc.image_name = image_name
+            proc.ports = ports
             proc.gpp = GitProcessorPointer(
                 repository=proc_obj.tags['repository'], commit_id=proc_obj.tags['commit_id'],
                 proc_path=proc_obj.tags['proc_path'], proc_descriptor=proc_obj.tags['proc_descriptor']
@@ -119,6 +123,7 @@ class DefaultRTIService(RTIServiceBase):
                     if record:
                         record.state = proc.state.value
                         record.image_name = proc.image_name
+                        record.ports = proc.ports
                         record.gpp = proc.gpp.model_dump()
                         record.error = proc.error
 
@@ -126,6 +131,7 @@ class DefaultRTIService(RTIServiceBase):
                         logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
                                        f"{proc.image_name} expected to exist but not found -> creating now.")
                         session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
+                                                        ports=proc.ports,
                                                         gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
                     session.commit()
 
@@ -160,24 +166,33 @@ class DefaultRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
+    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+        # get the runner address and custom port mappings (if any)
+        runner_p2p_address, custom_ports, ports = self._map_ports(proc.ports)
+
+        # start the job container and keep the container id
+        container_id = docker_run_job_container(
+            proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
+            budget=job.task.budget, custom_ports=custom_ports
+        )
+
+        if submitted:
+            # keep information to terminate if necessary
+            submitted.append((job, container_id))
+
+        # update the runner information
+        with self._session_maker() as session:
+            record = session.get(DBJobInfo, job.id)
+            record.runner['container_id'] = container_id
+            record.runner['__ports'] = ports
+            session.commit()
+
+        return container_id
+
     def perform_submit_single(self, job: Job, proc: Processor) -> None:
         container_id = None
         try:
-            # get the runner address and custom port mappings (if any)
-            runner_p2p_address, custom_ports = self._map_ports(proc.image_name)
-
-            # start the job container and keep the container id
-            container_id = docker_run_job_container(
-                proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
-                budget=job.task.budget, custom_ports=custom_ports
-            )
-
-            # update the runner information
-            with self._session_maker() as session:
-                record = session.get(DBJobInfo, job.id)
-                record.runner['container_id'] = container_id
-                session.commit()
-
+            container_id = self._perform_submit(job, proc)
             logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> container {container_id}")
 
         except Exception as e:
@@ -188,8 +203,23 @@ class DefaultRTIService(RTIServiceBase):
 
             raise e
 
-    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
-        raise RTIException("Not implemented yet.")
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> None:
+        submitted: List[Tuple[Job, str]] = []
+        for job, status, proc in batch:
+            try:
+                container_id = self._perform_submit(job, proc, submitted=submitted)
+                logger.info(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] successful"
+                            f" -> container {container_id}")
+
+            except Exception as e:
+                logger.error(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] failed")
+
+                # Something went wrong, kill already existing containers so there are no zombies from this batch.
+                for job, container_id in submitted:
+                    logger.info(f"[submit:batch:{batch_id}] [job:{job.id}] kill zombie container {container_id}")
+                    docker_kill_job_container(container_id)
+
+                raise e
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job
@@ -240,6 +270,16 @@ class DefaultRTIService(RTIServiceBase):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
 
+    def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
+        # in case the of the default RTI the port mapping is actually already known during submission time.
+        # so we just need to extract it here...
+        ports_ref: Dict[str, str] = runner_details['__ports']
+        ports: Dict[str, Optional[str]] = runner_details['ports']
+        for local in ports.keys():
+            ref = ports_ref[local]
+            ports[local] = ref
+        return ports
+
     def _find_available_address(self, max_attempts: int = 100) -> Tuple[str, int]:
         def is_port_free(_address: Tuple[str, int]) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -267,11 +307,11 @@ class DefaultRTIService(RTIServiceBase):
 
         raise RuntimeError("No free ports found in the specified range.")
 
-    def _map_ports(self, image_name: str) -> Tuple[Tuple[str, int], List[Tuple[int, str, str, int]]]:
+    def _map_ports(self, exposed_ports: List[Tuple[int, str]]) -> Tuple[Tuple[str, int], List[Tuple[int, str, str, int]], Dict[str, str]]:
         # create a mapping of ports exposed by the Docket image to P2P addresses
         custom_ports: List[Tuple[int, str, str, int]] = []
         runner_p2p_address: Optional[Tuple[str, int]] = None
-        for port, protocol in docker_get_exposed_ports(image_name):
+        for port, protocol in exposed_ports:
             address = self._find_available_address()
             if port == 6000 and protocol == 'tcp':
                 runner_p2p_address = address
@@ -282,4 +322,12 @@ class DefaultRTIService(RTIServiceBase):
         if runner_p2p_address is None:
             raise RTIException(f"Processor docker image invalid: runner P2P port not exposed")
 
-        return runner_p2p_address, custom_ports
+        # create the ports mapping information
+        ports: Dict[str, str] = {
+            # P2P protocol port is 6000/tcp by convention
+            "6000/tcp": f"tcp://{runner_p2p_address[0]}:{runner_p2p_address[1]}",
+        }
+        for port, protocol, ext_host, ext_port in custom_ports:
+            ports[f"{port}/{protocol}"] = f"{protocol}://{ext_host}:{ext_port}"
+
+        return runner_p2p_address, custom_ports, ports

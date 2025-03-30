@@ -24,7 +24,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
-from simaas.rti.schemas import Task, JobStatus, Processor, Job
+from simaas.rti.schemas import Task, JobStatus, Processor, Job, BatchStatus
 from simaas.tests.conftest import REPOSITORY_URL, add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
@@ -592,3 +592,91 @@ def test_job_concurrency(
     assert (len(failed) == 0)
     assert (len(results) == n)
 
+
+def test_rest_submit_batch(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_abc_processor, known_user
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    proc_id = deployed_abc_processor.obj_id
+    wrong_user = known_user
+    owner = session_node.keystore
+
+    def create_task(name: str, a: int, b: int) -> Task:
+        return Task(
+            proc_id=proc_id,
+            user_iid=owner.identity.id,
+            input=[
+                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
+                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
+            ],
+            output=[
+                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                            'restricted_access': False, 'content_encrypted': False,
+                                            'target_node_iid': None})
+            ],
+            name=name,
+            description=None,
+            budget=Task.Budget(vcpus=1, memory=1024)
+        )
+
+    # create the tasks
+    tasks = [create_task(f'task_{i}', 1, 5) for i in range(20)]
+
+    # submit the job
+    jobs = rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert len(jobs) == len(tasks)
+
+    # determine batch id
+    batch_id = jobs[0].batch_id
+
+    # try to get the batch info as the wrong user
+    try:
+        rti_proxy.get_batch_status(batch_id, wrong_user)
+        assert False
+
+    except UnsuccessfulRequestError as e:
+        assert (e.details['reason'] == 'user is not the batch owner or the node owner')
+
+    while True:
+        # get information about the running job
+        try:
+            status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert (status is not None)
+
+            all_finished = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    all_finished = False
+                    break
+
+            if all_finished:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # we should have an object id for output object 'c' for each member of the batch
+    for member in status.members:
+        job_status: JobStatus = rti_proxy.get_job_status(member.job_id, owner)
+        assert ('c' in job_status.output)
+
+        # get the contents of the output data object
+        download_path = os.path.join(test_context.testing_dir, 'c.json')
+        dor_proxy.get_content(job_status.output['c'].obj_id, owner, download_path)
+        assert (os.path.isfile(download_path))
+
+        with open(download_path, 'r') as f:
+            content = json.load(f)
+            print(content)
+            assert (content['v'] == 6)

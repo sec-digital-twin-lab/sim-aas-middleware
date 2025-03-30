@@ -551,10 +551,10 @@ class JobRunner(CLICommand, ProgressListener):
 
         # members need to wait for all other members to be ready (i.e., they must have completed the handshake).
         # how do we know that's the case? members may perform handshake with the custodian in any order. each
-        # member informs the custodian about it's own address. the custodian then updates the batch status and
-        # uses that to return the latest batch status whenever a handshake is performed. the last member will
-        # thus receive a batch status has COMPLETE port mappings of all members. this last member is now
-        # responsible to perform the release the barrier.
+        # member informs the custodian about its own address. the custodian then updates the batch status and
+        # uses that for the next handshake. with each handshake, the batch status becomes incrementally completed.
+        # the last member will thus receive a batch status that has COMPLETE port mappings of all members. this last
+        # member is responsible to release the barrier.
 
         # are we the one with complete mappings?
         if mappings_complete:

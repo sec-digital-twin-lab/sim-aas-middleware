@@ -118,28 +118,37 @@ def test_abc_submit_list_get_job_no_secret(
     if 'SECRET_ABC_KEY' in os.environ:
         os.environ.pop('SECRET_ABC_KEY')
 
-    # submit the job
-    job = rti_proxy.submit(proc_id, [
-        Task.InputValue.model_validate({
-            'name': 'a', 'type': 'value', 'value': {
-                'v': 1
-            }
-        }),
-        Task.InputValue.model_validate({
-            'name': 'b', 'type': 'value', 'value': {
-                'v': 2
-            }
-        }),
-    ], [
-        Task.Output.model_validate({
-            'name': 'c',
-            'owner_iid': owner.identity.id,
-            'restricted_access': False,
-            'content_encrypted': False,
-            'target_node_iid': None
-        })
-    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
-    assert (job is not None)
+    # submit the task
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'a', 'type': 'value', 'value': {
+                    'v': 1
+                }
+            }),
+            Task.InputValue.model_validate({
+                'name': 'b', 'type': 'value', 'value': {
+                    'v': 2
+                }
+            }),
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'c',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
+    result = rti_proxy.submit([task], with_authorisation_by=owner)
+    job = result[0]
 
     job_id = job.id
 
@@ -190,28 +199,37 @@ def test_abc_submit_list_get_job_with_secret(
     # define the secret
     os.environ['SECRET_ABC_KEY'] = '123'
 
-    # submit the job
-    job = rti_proxy.submit(proc_id, [
-        Task.InputValue.model_validate({
-            'name': 'a', 'type': 'value', 'value': {
-                'v': 1
-            }
-        }),
-        Task.InputValue.model_validate({
-            'name': 'b', 'type': 'value', 'value': {
-                'v': 2
-            }
-        }),
-    ], [
-        Task.Output.model_validate({
-            'name': 'c',
-            'owner_iid': owner.identity.id,
-            'restricted_access': False,
-            'content_encrypted': False,
-            'target_node_iid': None
-        })
-    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
-    assert (job is not None)
+    # submit the task
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'a', 'type': 'value', 'value': {
+                    'v': 1
+                }
+            }),
+            Task.InputValue.model_validate({
+                'name': 'b', 'type': 'value', 'value': {
+                    'v': 2
+                }
+            }),
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'c',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
+    result = rti_proxy.submit([task], with_authorisation_by=owner)
+    job = result[0]
 
     job_id = job.id
 

@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import List, Union, Any
+from typing import List, Union, Any, Optional
 
 import pytest
 from docker.errors import ImageNotFound
@@ -813,7 +813,8 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 async def execute_job(
         wd_parent_path: str, custodian: Node, job_id: str,
         a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
-        user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
+        user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False,
+        batch_id: Optional[str] = None
 ) -> JobStatus:
     # convenience variable
     rti: DefaultRTIService = custodian.rti
@@ -858,26 +859,33 @@ async def execute_job(
 
     # create job
     job = Job(
-        id=job_id, task=task, retain=False, custodian=custodian.info, proc_name=gpp.proc_descriptor.name,
-        t_submitted=0
+        id=job_id, batch_id=batch_id, task=task, retain=False, custodian=custodian.info,
+        proc_name=gpp.proc_descriptor.name, t_submitted=0
     )
     status = JobStatus(
         state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
     )
 
+    # determine P2P address of the job runner
+    service_address = PortMaster.generate_p2p_address()
+
     # manually create a DB entry for that job
     with rti._session_maker() as session:
         record = DBJobInfo(
-            id=job.id, proc_id=task.proc_id, user_iid=user.id, status=status.model_dump(),
-            job=job.model_dump(), runner={}
+            id=job.id, batch_id=batch_id, proc_id=task.proc_id, user_iid=user.id, status=status.model_dump(),
+            job=job.model_dump(), runner={
+                '__ports': {
+                    '6000/tcp': service_address
+                },
+                'ports': {
+                    '6000/tcp': service_address
+                }
+            }
         )
         session.add(record)
         session.commit()
 
     ##########
-
-    # determine P2P address
-    service_address = PortMaster.generate_p2p_address()
 
     # execute the job runner command
     threading.Thread(
@@ -1254,6 +1262,18 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
         # shutdown the target node
         target_node.shutdown()
         time.sleep(1)
+
+
+@pytest.mark.asyncio
+async def test_cli_runner_coupled_success_by_value(temp_dir, session_node):
+    a: int = 1
+    b: int = 1
+    job_id = '398h36g3_100'
+    batch_id = 'batch001'
+
+    # execute the job
+    status = await execute_job(temp_dir, session_node, job_id, a, b, batch_id=batch_id)
+    assert status.progress == 100
 
 
 def test_find_open_port():

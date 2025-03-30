@@ -10,7 +10,7 @@ from simaas.namespace.api import Namespace
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIInterface
-from simaas.rti.schemas import JobStatus, Task, Job, Processor
+from simaas.rti.schemas import JobStatus, Task, Job, Processor, BatchStatus
 
 
 class NamespaceDOR(DORInterface):
@@ -197,6 +197,15 @@ class NamespaceRTI(RTIInterface):
             }
         ))
         reply: JobStatus = JobStatus.model_validate(reply)
+        return reply
+
+    def get_batch_status(self, batch_id: str) -> BatchStatus:
+        reply: dict = asyncio.run(P2PNamespaceServiceCall.perform(
+            self._peer_address, self._authority, 'rti', 'get_batch_status', args={
+                'batch_id': batch_id
+            }
+        ))
+        reply: BatchStatus = BatchStatus.model_validate(reply)
         return reply
 
     def job_cancel(self, job_id: str) -> JobStatus:

@@ -20,7 +20,7 @@ from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.cli.cmd_proc_builder import clone_repository
-from simaas.core.helpers import get_timestamp_now, hash_json_object
+from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
@@ -33,12 +33,12 @@ from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy, RTIInterface
 from simaas.rti.aws import get_default_aws_config
-from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity
+from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
 
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'd823367b2b3ba02ebd3aa05aca6f64ec4db180d1'
+REPOSITORY_COMMIT_ID = '1c56f09a6461f2b7ff222841c4effc8e66545f3f'
 PROC_ABC_PATH = "examples/simple/abc"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -457,6 +457,7 @@ class DummyNamespace(Namespace):
                     id="factor_search",
                     state=Processor.State.READY,
                     image_name='proc-factor-search',
+                    ports=None,
                     gpp=None,
                     error=None
                 ),
@@ -464,6 +465,7 @@ class DummyNamespace(Namespace):
                     id="factorisation",
                     state=Processor.State.READY,
                     image_name='proc-factorisation',
+                    ports=None,
                     gpp=None,
                     error=None
                 )
@@ -507,11 +509,13 @@ class DummyNamespace(Namespace):
                     print(e)
 
             result: List[Job] = []
+            batch_id: Optional[str] = generate_random_string(8) if len(tasks) > 1 else None
             for task in tasks:
                 job_id = str(self._next_job_id)
                 self._next_job_id += 1
                 job = Job(
                     id=job_id,
+                    batch_id=batch_id,
                     task=task,
                     retain=True,
                     custodian=NodeInfo(
@@ -552,6 +556,9 @@ class DummyNamespace(Namespace):
 
         def get_job_status(self, job_id: str) -> JobStatus:
             return self._status[job_id]
+
+        def get_batch_status(self, batch_id: str) -> BatchStatus:
+            raise RuntimeError("Not implemented")
 
         def job_cancel(self, job_id: str) -> JobStatus:
             self._instances[job_id].interrupt()

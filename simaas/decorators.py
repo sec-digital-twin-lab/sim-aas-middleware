@@ -38,3 +38,8 @@ def requires_job_or_node_ownership(func):
     return func
 
 
+def requires_batch_or_node_ownership(func):
+    func._rti_batch_or_node_ownership = True
+    return func
+
+

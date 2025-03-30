@@ -114,6 +114,15 @@ class VerifyUserIsJobOwnerOrNodeOwner:
         self.node.check_rti_job_or_node_owner(job_id, identity)
 
 
+class VerifyUserIsBatchOwnerOrNodeOwner:
+    def __init__(self, node):
+        self.node = node
+
+    async def __call__(self, batch_id: str, request: Request):
+        identity, _ = await VerifyAuthorisation(self.node).__call__(request)
+        self.node.check_rti_batch_or_node_owner(batch_id, identity)
+
+
 class VerifyUserIsNodeOwner:
     def __init__(self, node):
         self.node = node
@@ -160,6 +169,9 @@ def make_depends(method, node) -> List[Any]:
 
             if getattr(interface_method, "_rti_job_or_node_ownership", False):
                 result.append(VerifyUserIsJobOwnerOrNodeOwner)
+
+            if getattr(interface_method, "_rti_batch_or_node_ownership", False):
+                result.append(VerifyUserIsBatchOwnerOrNodeOwner)
 
             if getattr(interface_method, "_rti_requires_proc_not_busy", False):
                 result.append(VerifyProcessorNotBusy)
