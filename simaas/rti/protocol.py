@@ -41,21 +41,32 @@ class P2PRunnerPerformHandshake(P2PProtocol):
     @classmethod
     async def perform(
             cls, peer_address: P2PAddress, runner_identity: Identity, runner_address: str, job_id: str,
-            gpp: GitProcessorPointer
+            gpp: GitProcessorPointer, max_attempts: int = 3
     ) -> Tuple[Optional[Job], Identity, Optional[str]]:
-        response = await p2p_request(
-            peer_address, cls.NAME, RunnerHandshakeRequest(
-                runner_identity=runner_identity, runner_address=runner_address, job_id=job_id, gpp=gpp
-            ), RunnerHandshakeResponse
-        )
-        response: RunnerHandshakeResponse = response[0]
+        for attempt in range(max_attempts):
+            try:
+                # send the request and await a response
+                response = await p2p_request(
+                    peer_address, cls.NAME, RunnerHandshakeRequest(
+                        runner_identity=runner_identity, runner_address=runner_address, job_id=job_id, gpp=gpp
+                    ), RunnerHandshakeResponse
+                )
+                response: RunnerHandshakeResponse = response[0]
 
-        # set the secret environment variables (if any)
-        for key, value in response.secrets.items():
-            if value is not None:
-                os.environ[key] = value
+                # set the secret environment variables (if any)
+                for key, value in response.secrets.items():
+                    if value is not None:
+                        os.environ[key] = value
 
-        return response.job, response.custodian_identity, response.join_batch
+                return response.job, response.custodian_identity, response.join_batch
+
+            except PeerUnavailableError:
+                delay = attempt + 1
+                logger.warning(f"Failed for perform handshake with custodian ({attempt+1}/{max_attempts}) -> "
+                               f"Trying again in {delay} seconds...")
+                await asyncio.sleep(delay)
+
+        raise RTIException(f"Handshake with custodian failed after {max_attempts} attempts")
 
     async def handle(
             self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
