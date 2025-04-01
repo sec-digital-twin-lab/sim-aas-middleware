@@ -12,6 +12,9 @@ from typing import List, Tuple, Optional, Dict, Union
 
 import pytest
 from dotenv import load_dotenv
+
+from examples.cosim.room.processor import RoomProcessor
+from examples.cosim.thermostat.processor import ThermostatProcessor
 from simaas.core.processor import ProcessorBase, ProgressListener
 
 from examples.prime.factor_search.processor import ProcessorFactorSearch
@@ -468,15 +471,34 @@ class DummyNamespace(Namespace):
                     ports=None,
                     gpp=None,
                     error=None
+                ),
+                'room': Processor(
+                    id="room",
+                    state=Processor.State.READY,
+                    image_name='proc-room',
+                    ports=None,
+                    gpp=None,
+                    error=None
+                ),
+                'thermostat': Processor(
+                    id="thermostat",
+                    state=Processor.State.READY,
+                    image_name='proc-thermostat',
+                    ports=None,
+                    gpp=None,
+                    error=None
                 )
             }
             self._procs_classes: Dict[str, type] = {
                 'factor_search': ProcessorFactorSearch,
-                'factorisation': ProcessorFactorisation
+                'factorisation': ProcessorFactorisation,
+                'room': RoomProcessor,
+                'thermostat': ThermostatProcessor
             }
             self._instances: Dict[str, ProcessorBase] = {}
             self._jobs: Dict[str, Job] = {}
             self._status: Dict[str, JobStatus] = {}
+            self._batch: Dict[str, BatchStatus] = {}
             self._next_job_id: int = 0
             self._keystore = Keystore.new('dummy')
 
@@ -557,8 +579,11 @@ class DummyNamespace(Namespace):
         def get_job_status(self, job_id: str) -> JobStatus:
             return self._status[job_id]
 
+        def put_batch_status(self, batch_status: BatchStatus):
+            self._batch[batch_status.batch_id] = batch_status
+
         def get_batch_status(self, batch_id: str) -> BatchStatus:
-            raise RuntimeError("Not implemented")
+            return self._batch.get(batch_id)
 
         def job_cancel(self, job_id: str) -> JobStatus:
             self._instances[job_id].interrupt()
