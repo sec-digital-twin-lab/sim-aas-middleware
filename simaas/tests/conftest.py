@@ -41,7 +41,7 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchS
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '5dc84822138edbadc3b2b5193e79a7eae5172746'
+REPOSITORY_COMMIT_ID = '029f028248223c2ac828071a8ced95686d50f5f4'
 PROC_ABC_PATH = "examples/simple/abc"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -598,6 +598,9 @@ class DummyNamespace(Namespace):
 
     def id(self) -> str:
         return 'dummy'
+
+    def custodian_address(self) -> str:
+        pass
 
     def name(self) -> str:
         return 'dummy'
