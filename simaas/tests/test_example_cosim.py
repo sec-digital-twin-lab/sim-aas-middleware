@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import time
+import traceback
 
 import pytest
 from simaas.core.identity import Identity
@@ -342,23 +343,35 @@ def test_cosim_search_submit_list_get_job(
                 break
 
         except Exception as e:
-            pass
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            print(trace)
 
         time.sleep(1)
 
-    # check if we have an object id for output object 'c'
-    assert ('result' in status.output)
-    #
-    # # get the contents of the output data object
-    # download_path = os.path.join(test_context.testing_dir, 'result.json')
-    # dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
-    # assert (os.path.isfile(download_path))
-    #
-    # # read the result
-    # with open(download_path, 'r') as f:
-    #     result: dict = json.load(f)
-    #     result: Result = Result.model_validate(result)
-    #
-    # # print the result
-    # print(result.factors)
-    # assert (result.factors == [2, 4, 5, 10, 20, 25, 50])
+    # get the result of the 'room' and the 'thermostat'
+    job_status0: JobStatus = rti_proxy.get_job_status(jobs[0].id, with_authorisation_by=owner)
+    job_status1: JobStatus = rti_proxy.get_job_status(jobs[1].id, with_authorisation_by=owner)
+    assert ('result' in job_status0.output)
+    assert ('result' in job_status1.output)
+
+    # get the contents of the output data object
+    download_path0 = os.path.join(test_context.testing_dir, 'result0.json')
+    dor_proxy.get_content(job_status0.output['result'].obj_id, owner, download_path0)
+    assert (os.path.isfile(download_path0))
+
+    download_path1 = os.path.join(test_context.testing_dir, 'result1.json')
+    dor_proxy.get_content(job_status1.output['result'].obj_id, owner, download_path1)
+    assert (os.path.isfile(download_path1))
+
+    # read the results
+    with open(download_path0, 'r') as f:
+        result0: dict = json.load(f)
+        result0: RResult = RResult.model_validate(result0)
+
+    with open(download_path1, 'r') as f:
+        result1: dict = json.load(f)
+        result1: TResult = TResult.model_validate(result1)
+
+    # print the result
+    print(result0.temp)
+    print(result1.state)
