@@ -641,7 +641,7 @@ def test_rest_submit_batch(
         assert False
 
     except UnsuccessfulRequestError as e:
-        assert (e.details['reason'] == 'user is not the batch owner or the node owner')
+        assert (e.details['reason'] == 'user is not the batch owner, batch member or the node owner')
 
     while True:
         # get information about the running job
