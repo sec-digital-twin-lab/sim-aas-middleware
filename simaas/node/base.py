@@ -277,10 +277,15 @@ class Node(abc.ABC):
         batch_status: BatchStatus = self.rti.get_batch_status(batch_id)
         batch_owner_iid = batch_status.user_iid
 
+        # check if the identity is part of the batch
+        for member in batch_status.members:
+            if member.identity and member.identity.id == identity.id:
+                return
+
         # get the job user (i.e., owner) and check if the caller user ids check out
         if batch_owner_iid != identity.id and identity.id != self.identity.id:
             raise AuthorisationFailedError({
-                'reason': 'user is not the batch owner or the node owner',
+                'reason': 'user is not the batch owner, batch member or the node owner',
                 'batch_id': batch_id,
                 'batch_owner_iid': batch_owner_iid,
                 'request_user_iid': identity.id,

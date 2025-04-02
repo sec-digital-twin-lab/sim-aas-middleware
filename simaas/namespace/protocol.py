@@ -121,8 +121,8 @@ class P2PNamespaceServiceCall(P2PProtocol):
                     self._node.check_rti_job_or_node_owner(job_id, identity)
 
                 if getattr(interface_method, "_rti_batch_or_node_ownership", False):
-                    job_id: str = args['job_id']
-                    self._node.check_rti_batch_or_node_owner(job_id, identity)
+                    batch_id: str = args['batch_id']
+                    self._node.check_rti_batch_or_node_owner(batch_id, identity)
 
                 if getattr(interface_method, "_rti_requires_proc_not_busy", False):
                     proc_id: str = args['proc_id']
