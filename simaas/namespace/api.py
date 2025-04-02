@@ -16,6 +16,10 @@ class Namespace(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def custodian_address(self) -> str:
+        ...
+
+    @abc.abstractmethod
     def name(self) -> str:
         ...
 

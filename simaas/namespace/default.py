@@ -234,11 +234,15 @@ class DefaultNamespace(Namespace):
             NamespaceRTI(custodian_identity, custodian_address, authority)
         )
         self._id = generate_random_string(16)
+        self._custodian_address = custodian_address
         self._name = name
         self._authority = authority
 
     def id(self) -> str:
         return self._id
+
+    def custodian_address(self) -> P2PAddress:
+        return self._custodian_address
 
     def name(self) -> str:
         return self._name

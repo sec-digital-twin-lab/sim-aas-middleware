@@ -324,12 +324,10 @@ def test_cosim_search_submit_list_get_job(
     jobs = result
 
     batch_id = jobs[0].batch_id
-    job_id0 = jobs[0].id
-    job_id1 = jobs[1].id
 
     while True:
         try:
-            status: BatchStatus = rti_proxy.get_batch_status(batch_id)
+            status: BatchStatus = rti_proxy.get_batch_status(batch_id, with_authorisation_by=owner)
 
             from pprint import pprint
             pprint(status.model_dump())

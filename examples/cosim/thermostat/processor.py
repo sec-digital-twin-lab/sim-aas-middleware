@@ -36,11 +36,15 @@ class ThermostatProcessor(ProcessorBase):
         listener.on_progress_update(10)
 
         # get information about the batch
-        batch_status: BatchStatus = namespace.rti.get_batch_status(job.batch_id)
-        members: Dict[str, BatchStatus.Member] = {member.name: member for member in batch_status.members}
-        room_info: BatchStatus.Member = members.get('room')
+        try:
+            batch_status: BatchStatus = namespace.rti.get_batch_status(job.batch_id)
+        except Exception as e:
+            logger.error(f"getting batch status from {namespace.custodian_address()}: {e}")
+            raise e
 
         # obtain the address for the custom port (should be something like this 'tcp://host:port'
+        members: Dict[str, BatchStatus.Member] = {member.name: member for member in batch_status.members}
+        room_info: BatchStatus.Member = members.get('room')
         address: str = room_info.ports['7001/tcp']
         host, port = address.split("://", 1)[-1].rsplit(":", 1)
         port: int = int(port)
