@@ -343,7 +343,7 @@ def test_cosim_search_submit_list_get_job(
             if is_done:
                 break
 
-        except Exception:
+        except Exception as e:
             pass
 
         time.sleep(1)

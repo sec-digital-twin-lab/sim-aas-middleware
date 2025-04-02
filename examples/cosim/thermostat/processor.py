@@ -36,9 +36,7 @@ class ThermostatProcessor(ProcessorBase):
         listener.on_progress_update(10)
 
         # get information about the batch
-        from simaas.tests.conftest import DummyNamespace
-        rti: DummyNamespace.DummyRTI = namespace.rti
-        batch_status: BatchStatus = rti.get_batch_status(job.batch_id)
+        batch_status: BatchStatus = namespace.rti.get_batch_status(job.batch_id)
         members: Dict[str, BatchStatus.Member] = {member.name: member for member in batch_status.members}
         room_info: BatchStatus.Member = members.get('room')
 
