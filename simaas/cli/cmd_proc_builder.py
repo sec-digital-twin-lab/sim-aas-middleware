@@ -144,6 +144,9 @@ class ProcBuilderLocal(CLICommand):
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
                           "image being replaced with the newly created one."),
+            Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
+            Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
+
             Argument('location', metavar='location', type=str, nargs=1,
                      help="the location of the processor")
 
