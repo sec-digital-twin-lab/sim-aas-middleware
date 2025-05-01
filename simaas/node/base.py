@@ -11,7 +11,7 @@ from simaas.rest.exceptions import AuthorisationFailedError
 from simaas.dor.exceptions import DataObjectNotFoundError
 from simaas.dor.api import DORRESTService
 from simaas.namespace.protocol import P2PNamespaceServiceCall
-from simaas.rti.schemas import Processor
+from simaas.rti.schemas import Processor, BatchStatus
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -216,7 +216,6 @@ class Node(abc.ABC):
 
             return identity
 
-
     def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
         meta = self.dor.get_meta(obj_id)
@@ -269,6 +268,26 @@ class Node(abc.ABC):
                 'reason': 'user is not the job owner or the node owner',
                 'job_id': job_id,
                 'job_owner_iid': job_owner_iid,
+                'request_user_iid': identity.id,
+                'node_iid': self.identity.id
+            })
+
+    def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
+        # get the batch status to determine the owner iid
+        batch_status: BatchStatus = self.rti.get_batch_status(batch_id)
+        batch_owner_iid = batch_status.user_iid
+
+        # check if the identity is part of the batch
+        for member in batch_status.members:
+            if member.identity and member.identity.id == identity.id:
+                return
+
+        # get the job user (i.e., owner) and check if the caller user ids check out
+        if batch_owner_iid != identity.id and identity.id != self.identity.id:
+            raise AuthorisationFailedError({
+                'reason': 'user is not the batch owner, batch member or the node owner',
+                'batch_id': batch_id,
+                'batch_owner_iid': batch_owner_iid,
                 'request_user_iid': identity.id,
                 'node_iid': self.identity.id
             })

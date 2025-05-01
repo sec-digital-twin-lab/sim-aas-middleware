@@ -57,7 +57,7 @@ class ProcessorFactorisation(ProcessorBase):
             start = 2 + i * step
             end = (i + 1) * step
 
-            job: Job = namespace.rti.submit(proc_id, Task(
+            task = Task(
                 proc_id=proc_id,
                 user_iid=namespace.keystore().identity.id,
                 input=[Task.InputValue(
@@ -75,11 +75,13 @@ class ProcessorFactorisation(ProcessorBase):
                     restricted_access=False,
                     content_encrypted=False,
                     target_node_iid=None
-            )],
+                )],
                 name=None,
                 description=None,
                 budget=None
-            ))
+            )
+            result = namespace.rti.submit([task])
+            job: Job = result[0]
 
             pending.append(job)
 

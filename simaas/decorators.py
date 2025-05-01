@@ -13,6 +13,11 @@ def requires_access(func):
     return func
 
 
+def requires_tasks_supported(func):
+    func._rti_requires_tasks_supported = True
+    return func
+
+
 def requires_proc_deployed(func):
     func._rti_requires_proc_deployed = True
     return func
@@ -30,6 +35,11 @@ def requires_node_ownership_if_strict(func):
 
 def requires_job_or_node_ownership(func):
     func._rti_job_or_node_ownership = True
+    return func
+
+
+def requires_batch_or_node_ownership(func):
+    func._rti_batch_or_node_ownership = True
     return func
 
 

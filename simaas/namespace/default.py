@@ -10,7 +10,7 @@ from simaas.namespace.api import Namespace
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIInterface
-from simaas.rti.schemas import JobStatus, Task, Job, Processor
+from simaas.rti.schemas import JobStatus, Task, Job, Processor, BatchStatus
 
 
 class NamespaceDOR(DORInterface):
@@ -181,14 +181,13 @@ class NamespaceRTI(RTIInterface):
         reply: Optional[Processor] = Processor.model_validate(reply) if reply else None
         return reply
 
-    def submit(self, proc_id: str, task: Task) -> Job:
-        reply: dict = asyncio.run(P2PNamespaceServiceCall.perform(
+    def submit(self, tasks: List[Task]) -> List[Job]:
+        reply: List[dict] = asyncio.run(P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'submit', args={
-                'proc_id': proc_id,
-                'task': task.model_dump()
+                'tasks': [task.model_dump() for task in tasks]
             }
         ))
-        reply: Job = Job.model_validate(reply)
+        reply: List[Job] = [Job.model_validate(job) for job in reply]
         return reply
 
     def get_job_status(self, job_id: str) -> JobStatus:
@@ -198,6 +197,15 @@ class NamespaceRTI(RTIInterface):
             }
         ))
         reply: JobStatus = JobStatus.model_validate(reply)
+        return reply
+
+    def get_batch_status(self, batch_id: str) -> BatchStatus:
+        reply: dict = asyncio.run(P2PNamespaceServiceCall.perform(
+            self._peer_address, self._authority, 'rti', 'get_batch_status', args={
+                'batch_id': batch_id
+            }
+        ))
+        reply: BatchStatus = BatchStatus.model_validate(reply)
         return reply
 
     def job_cancel(self, job_id: str) -> JobStatus:
@@ -226,11 +234,15 @@ class DefaultNamespace(Namespace):
             NamespaceRTI(custodian_identity, custodian_address, authority)
         )
         self._id = generate_random_string(16)
+        self._custodian_address = custodian_address
         self._name = name
         self._authority = authority
 
     def id(self) -> str:
         return self._id
+
+    def custodian_address(self) -> P2PAddress:
+        return self._custodian_address
 
     def name(self) -> str:
         return self._name

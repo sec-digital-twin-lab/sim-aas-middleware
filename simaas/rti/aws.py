@@ -6,7 +6,7 @@ import subprocess
 import time
 
 import traceback
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
 import boto3
 from pydantic import BaseModel
@@ -18,12 +18,13 @@ from simaas.cli.cmd_rti import shorten_id
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
-from simaas.helpers import docker_load_image, docker_delete_image, docker_find_image, docker_check_image_platform
+from simaas.helpers import docker_load_image, docker_delete_image, docker_find_image, docker_check_image_platform, \
+    docker_get_exposed_ports
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBJobInfo, DBDeployedProcessor
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job, Task
+from simaas.rti.schemas import Processor, Job, Task, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -343,68 +344,74 @@ class AWSRTIService(RTIServiceBase):
             if image_name is None:
                 raise RTIException("Malformed processor data object -> image_name not found.")
 
-            # do we already have this docker image deployed? if not fetch and load from DOR
-            if not ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
-                require_build = True
+            # find out first if we require a build or not
+            require_build = True
+            if docker_find_image(image_name):
+                # check if the existing image matches the required platform
+                if docker_check_image_platform(image_name, 'linux/amd64'):
+                    require_build = False
+                else:
+                    # remove the existing image before rebuilding
+                    docker_delete_image(image_name)
 
-                # check if we already have that image locally
-                if docker_find_image(image_name):
-                    # check if the existing image matches the required platform
-                    if docker_check_image_platform(image_name, 'linux/amd64'):
-                        require_build = False
-                    else:
-                        # remove the existing image before rebuilding
-                        docker_delete_image(image_name)
+            # if we require a build -> build it now and push to ECR
+            if require_build:
+                # is the processor data object and image or a GPP?
+                if proc_obj.data_format == 'tar':
+                    # fetch the data object
+                    image_path = os.path.join(self._procs_path, f"{proc.id}.content")
+                    meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
+                    protocol = P2PFetchDataObject(self._node)
+                    loop.run_until_complete(
+                        protocol.perform(custodian, proc.id, meta_path, image_path)
+                    )
 
-                if require_build:
-                    # is the processor data object and image or a GPP?
-                    if proc_obj.data_format == 'tar':
-                        # fetch the data object
-                        image_path = os.path.join(self._procs_path, f"{proc.id}.content")
-                        meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
-                        protocol = P2PFetchDataObject(self._node)
-                        loop.run_until_complete(
-                            protocol.perform(custodian, proc.id, meta_path, image_path)
-                        )
+                    # load the image
+                    docker_load_image(image_path, image_name)
 
-                        # load the image
-                        docker_load_image(image_path, image_name)
+                else:
+                    # do we have credentials for this repo?
+                    repository = proc_obj.tags['repository']
+                    credentials: Optional[GithubCredentials] = self._node.keystore.github_credentials.get(repository)
+                    credentials: Optional[Tuple[str, str]] = \
+                        (credentials.login, credentials.personal_access_token) if credentials else None
 
-                    else:
-                        # do we have credentials for this repo?
-                        repository = proc_obj.tags['repository']
-                        credentials: Optional[GithubCredentials] = self._node.keystore.github_credentials.get(repository)
-                        credentials: Optional[Tuple[str, str]] = \
-                            (credentials.login, credentials.personal_access_token) if credentials else None
+                    # clone the repository and checkout the specified commit
+                    repo_path = os.path.join(self._procs_path, proc.id)
+                    commit_id = proc_obj.tags['commit_id']
+                    clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
-                        # clone the repository and checkout the specified commit
-                        repo_path = os.path.join(self._procs_path, proc.id)
-                        commit_id = proc_obj.tags['commit_id']
-                        clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
+                    proc_path = proc_obj.tags['proc_path']
+                    proc_path = os.path.join(repo_path, proc_path)
 
-                        proc_path = proc_obj.tags['proc_path']
-                        proc_path = os.path.join(repo_path, proc_path)
+                    # create the GPP descriptor
+                    gpp: GitProcessorPointer = GitProcessorPointer(
+                        repository=proc_obj.tags['repository'],
+                        commit_id=proc_obj.tags['commit_id'],
+                        proc_path=proc_obj.tags['proc_path'],
+                        proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
+                    )
+                    gpp_path = os.path.join(proc_path, 'gpp.json')
+                    with open(gpp_path, 'w') as f:
+                        json.dump(gpp.model_dump(), f, indent=2)
 
-                        # create the GPP descriptor
-                        gpp: GitProcessorPointer = GitProcessorPointer(
-                            repository=proc_obj.tags['repository'],
-                            commit_id=proc_obj.tags['commit_id'],
-                            proc_path=proc_obj.tags['proc_path'],
-                            proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
-                        )
-                        gpp_path = os.path.join(proc_path, 'gpp.json')
-                        with open(gpp_path, 'w') as f:
-                            json.dump(gpp.model_dump(), f, indent=2)
+                    # build the image
+                    build_processor_image(proc_path, image_name, credentials=credentials, platform='linux/amd64')
 
-                        # build the image
-                        build_processor_image(proc_path, image_name, credentials=credentials, platform='linux/amd64')
+                    # push to ECR
+                    ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
 
-                # push to ECR
+            # if it's not in the ECR yet -> push it now
+            elif not ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
                 ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
+
+            # find out what ports are exposed
+            ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
 
             # update processor object
             proc.state = Processor.State.READY
             proc.image_name = image_name
+            proc.ports = ports
             proc.gpp = GitProcessorPointer(
                 repository=proc_obj.tags['repository'], commit_id=proc_obj.tags['commit_id'],
                 proc_path=proc_obj.tags['proc_path'], proc_descriptor=proc_obj.tags['proc_descriptor']
@@ -417,6 +424,7 @@ class AWSRTIService(RTIServiceBase):
                     if record:
                         record.state = proc.state.value
                         record.image_name = proc.image_name
+                        record.ports = proc.ports
                         record.gpp = proc.gpp.model_dump()
                         record.error = proc.error
 
@@ -424,6 +432,7 @@ class AWSRTIService(RTIServiceBase):
                         logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
                                        f"{proc.image_name} expected to exist but not found -> creating now.")
                         session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
+                                                        ports=proc.ports,
                                                         gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
                     session.commit()
 
@@ -471,7 +480,7 @@ class AWSRTIService(RTIServiceBase):
             proc.state = Processor.State.FAILED
             proc.error = str(e)
 
-    def perform_submit(self, proc: Processor, job: Job) -> dict:
+    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
         # determine the custodian address and curve public key
         custodian_pubkey: str = self._node.identity.c_public_key
         if "SIMAAS_CUSTODIAN_HOST" in os.environ:
@@ -482,25 +491,56 @@ class AWSRTIService(RTIServiceBase):
             custodian_address: str = self._node.p2p.fq_address()
 
         # submit the job to AWS Batch
-        logger.info(f"[submit:{shorten_id(proc.id)}] [job:{job.id}] submit job to AWS Batch "
-                    f"with custodian at {custodian_address}")
+        aws_job_id = batch_run_job(
+            self._aws_repository_name, proc, custodian_address, custodian_pubkey, job.id, job.task.budget,
+            config=self._aws_config
+        )
 
+        if submitted:
+            # keep information to terminate if necessary
+            submitted.append((job, aws_job_id))
+
+        # update the runner information
+        with self._session_maker() as session:
+            record = session.get(DBJobInfo, job.id)
+            record.runner['aws_job_id'] = aws_job_id
+            session.commit()
+
+        return aws_job_id
+
+    def perform_submit_single(self, job: Job, proc: Processor) -> None:
+        aws_job_id = None
         try:
-            aws_job_id: str = batch_run_job(
-                self._aws_repository_name, proc, custodian_address, custodian_pubkey, job.id, job.task.budget,
-                config=self._aws_config
-            )
-
-            return {
-                'aws_job_id': aws_job_id
-            }
+            aws_job_id = self._perform_submit(job, proc)
+            logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> aws_job_id={aws_job_id}")
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[submit:{shorten_id(proc.id)}] failed: {trace}")
+            msg = f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] failed -> "
+            logger.error(
+                msg + (f"terminating AWS Batch job {aws_job_id}" if aws_job_id else "no AWS Batch job to terminate")
+            )
+            if aws_job_id:
+                batch_terminate_job(aws_job_id, config=self._aws_config, reason=f"Issue during submit_single: {e}")
 
-            proc.state = Processor.State.FAILED
-            proc.error = str(e)
+            raise e
+
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
+        submitted: List[Tuple[Job, str]] = []
+        for job, status, proc in batch:
+            try:
+                aws_job_id = self._perform_submit(job, proc)
+                logger.info(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] successful"
+                            f" -> AWS job {aws_job_id}")
+
+            except Exception as e:
+                logger.error(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] failed")
+
+                # Something went wrong, kill already existing AWS jobs so there are no zombies from this batch.
+                for job, aws_job_id in submitted:
+                    logger.info(f"[submit:batch:{batch_id}] [job:{job.id}] kill zombie AWS job {aws_job_id}")
+                    batch_terminate_job(aws_job_id, config=self._aws_config, reason=f"Issue during submit_single: {e}")
+
+                raise e
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job
@@ -550,3 +590,16 @@ class AWSRTIService(RTIServiceBase):
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {aws_job_id} failed: {trace}")
+
+    def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
+        # update missing port mappings by using the same host as the runner address. this makes some assumptions
+        # about external ports being the same as the ones exposed by the Docker image - which seems to be the case
+        # for AWS environments.
+        ports: Dict[str, Optional[str]] = runner_details['ports']
+        ext_host = runner_details['address'].split("://", 1)[-1].split(":", 1)[0]
+        for local, external in ports.items():
+            if external is None:
+                port, protocol = local.split("/")
+                ports[local] = f"{protocol}://{ext_host}:{port}"
+        return ports
+

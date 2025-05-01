@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import List, Union, Any
+from typing import List, Union, Any, Optional
 
 import pytest
 from docker.errors import ImageNotFound
@@ -813,7 +813,8 @@ def prepare_plain_job_folder(jobs_root_path: str, job_id: str, a: Any = 1, b: An
 async def execute_job(
         wd_parent_path: str, custodian: Node, job_id: str,
         a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
-        user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False
+        user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False,
+        batch_id: Optional[str] = None
 ) -> JobStatus:
     # convenience variable
     rti: DefaultRTIService = custodian.rti
@@ -858,26 +859,33 @@ async def execute_job(
 
     # create job
     job = Job(
-        id=job_id, task=task, retain=False, custodian=custodian.info, proc_name=gpp.proc_descriptor.name,
-        t_submitted=0
+        id=job_id, batch_id=batch_id, task=task, retain=False, custodian=custodian.info,
+        proc_name=gpp.proc_descriptor.name, t_submitted=0
     )
     status = JobStatus(
         state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
     )
 
+    # determine P2P address of the job runner
+    service_address = PortMaster.generate_p2p_address()
+
     # manually create a DB entry for that job
     with rti._session_maker() as session:
         record = DBJobInfo(
-            id=job.id, proc_id=task.proc_id, user_iid=user.id, status=status.model_dump(),
-            job=job.model_dump(), runner={}
+            id=job.id, batch_id=batch_id, proc_id=task.proc_id, user_iid=user.id, status=status.model_dump(),
+            job=job.model_dump(), runner={
+                '__ports': {
+                    '6000/tcp': service_address
+                },
+                'ports': {
+                    '6000/tcp': service_address
+                }
+            }
         )
         session.add(record)
         session.commit()
 
     ##########
-
-    # determine P2P address
-    service_address = PortMaster.generate_p2p_address()
 
     # execute the job runner command
     threading.Thread(
@@ -1256,6 +1264,18 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
         time.sleep(1)
 
 
+@pytest.mark.asyncio
+async def test_cli_runner_coupled_success_by_value(temp_dir, session_node):
+    a: int = 1
+    b: int = 1
+    job_id = '398h36g3_100'
+    batch_id = 'batch001'
+
+    # execute the job
+    status = await execute_job(temp_dir, session_node, job_id, a, b, batch_id=batch_id)
+    assert status.progress == 100
+
+
 def test_find_open_port():
     # block port 5995
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1620,7 +1640,9 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
         assert False
 
 
-def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_rti_job_submit_single_list_status_cancel(
+        docker_available, github_credentials_available, session_node, temp_dir
+):
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1733,7 +1755,7 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credenti
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'task': task_path
+            'task': [task_path]
         }
 
         cmd = RTIJobSubmit()
@@ -1812,6 +1834,230 @@ def test_cli_rti_job_submit_list_status_cancel(docker_available, github_credenti
 
         except CLIRuntimeError:
             assert False
+
+    time.sleep(1)
+
+    # undeploy the processor
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'proc-id': [obj.obj_id],
+            'force': True
+        }
+
+        cmd = RTIProcUndeploy()
+        result = cmd.execute(args)
+        assert result is not None
+        assert obj.obj_id in result
+
+    except CLIRuntimeError:
+        assert False
+
+    time.sleep(1)
+
+
+def test_cli_rti_job_submit_batch_list_status_cancel(
+        docker_available, github_credentials_available, session_node, temp_dir, n=2
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    address = session_node.rest.address()
+
+    # define arguments
+    args = {
+        'repository': REPOSITORY_URL,
+        'commit_id':  REPOSITORY_COMMIT_ID,
+        'proc_path': PROC_ABC_PATH,
+        'address': f"{address[0]}:{address[1]}",
+        'store_image': True
+    }
+
+    # create keystore
+    password = 'password'
+    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
+    args['keystore-id'] = keystore.identity.id
+    args['keystore'] = temp_dir
+    args['password'] = password
+
+    # ensure the node knows about this identity
+    session_node.db.update_identity(keystore.identity)
+
+    try:
+        cmd = ProcBuilderGithub()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi' in result
+        assert result['pdi'] is not None
+        pdi: DataObject = result['pdi']
+
+        obj = session_node.dor.get_meta(pdi.obj_id)
+        assert obj is not None
+        assert obj.data_type == 'ProcessorDockerImage'
+        assert obj.data_format == 'tar'
+
+    except CLIRuntimeError:
+        assert False
+
+    # deploy the processor
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'proc-id': obj.obj_id,
+        }
+
+        cmd = RTIProcDeploy()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'proc' in result
+        assert result['proc'] is not None
+
+    except CLIRuntimeError:
+        assert False
+
+    # wait for processor to be deployed
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'proc-id': obj.obj_id,
+        }
+
+        while True:
+            cmd = RTIProcShow()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'processor' in result
+            assert result['processor'] is not None
+            proc: Processor = result['processor']
+            if proc.state in [Processor.State.READY, Processor.State.FAILED]:
+                break
+
+            time.sleep(1)
+
+    except CLIRuntimeError:
+        assert False
+
+    # create tasks
+    tasks: List[str] = []
+    for i in range(n):
+        task_path = os.path.join(temp_dir, f'task_{i}.json')
+        tasks.append(task_path)
+        with open(task_path, 'w') as f:
+            task = Task(
+                proc_id=proc.id, user_iid=keystore.identity.id, name=f'test-task-{i}', description='',
+                input=[
+                    Task.InputValue(name='a', type='value', value={'v': 10}),
+                    Task.InputValue(name='b', type='value', value={'v': 10})
+                ],
+                output=[
+                    Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
+                                content_encrypted=False, target_node_iid=session_node.identity.id)
+                ],
+                budget=None
+            )
+            # noinspection PyTypeChecker
+            json.dump(task.model_dump(), f, indent=2)
+
+    # submit job
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'task': tasks
+        }
+
+        cmd = RTIJobSubmit()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'jobs' in result
+        assert len(result['jobs']) == n
+        jobs = result['jobs']
+
+    except CLIRuntimeError:
+        assert False
+
+    # get a list of all jobs
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}"
+        }
+
+        cmd = RTIJobList()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'jobs' in result
+        assert result['jobs'] is not None
+        assert len(result['jobs']) == n
+
+    except CLIRuntimeError:
+        assert False
+
+    time.sleep(2)
+
+    # cancel the jobs
+    for job in jobs:
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}",
+                'job-id': job.id
+            }
+
+            cmd = RTIJobCancel()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'status' in result
+            assert result['status'] is not None
+
+        except CLIRuntimeError:
+            assert False
+
+    for job in jobs:
+        while True:
+            # get the status of the job
+            try:
+                args = {
+                    'keystore': temp_dir,
+                    'keystore-id': keystore.identity.id,
+                    'password': 'password',
+                    'address': f"{address[0]}:{address[1]}",
+                    'job-id': job.id
+                }
+
+                cmd = RTIJobStatus()
+                result = cmd.execute(args)
+                assert result is not None
+                assert 'status' in result
+                assert result['status'] is not None
+
+                status: JobStatus = result['status']
+                if status.state == JobStatus.State.CANCELLED:
+                    break
+
+                elif status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.FAILED]:
+                    assert False
+
+            except CLIRuntimeError:
+                assert False
 
     time.sleep(1)
 

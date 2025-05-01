@@ -106,7 +106,7 @@ def test_proc_factorisation_cancel(dummy_namespace):
     N = 987654321987
     num_sub_jobs = 2
 
-    job: Job = dummy_namespace.rti.submit('factorisation', Task(
+    task = Task(
         proc_id='factorisation',
         user_iid='someone',
         input=[Task.InputValue(
@@ -127,7 +127,9 @@ def test_proc_factorisation_cancel(dummy_namespace):
         name=None,
         description=None,
         budget=None
-    ))
+    )
+    result = dummy_namespace.rti.submit([task])
+    job: Job = result[0]
 
     # wait for a bit...
     time.sleep(5)
@@ -262,25 +264,35 @@ def test_factor_search_submit_list_get_job(
     proc_id = deployed_factor_search_processor.obj_id
     owner = session_node.keystore
 
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'start': 2,
+                    'end': 100,
+                    'number': 100
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
+
     # submit the job
-    job = rti_proxy.submit_job(proc_id, [
-        Task.InputValue.model_validate({
-            'name': 'parameters', 'type': 'value', 'value': {
-                'start': 2,
-                'end': 100,
-                'number': 100
-            }
-        }),
-    ], [
-        Task.Output.model_validate({
-            'name': 'result',
-            'owner_iid': owner.identity.id,
-            'restricted_access': False,
-            'content_encrypted': False,
-            'target_node_iid': None
-        })
-    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
-    assert (job is not None)
+    result = rti_proxy.submit([task], with_authorisation_by=owner)
+    job = result[0]
 
     job_id = job.id
 
@@ -332,23 +344,32 @@ def test_factorisation_submit_list_get_job(
     owner = session_node.keystore
 
     # submit the job
-    job = rti_proxy.submit_job(proc_id, [
-        Task.InputValue.model_validate({
-            'name': 'parameters', 'type': 'value', 'value': {
-                'N': 100,
-                'num_sub_jobs': 2
-            }
-        }),
-    ], [
-        Task.Output.model_validate({
-            'name': 'result',
-            'owner_iid': owner.identity.id,
-            'restricted_access': False,
-            'content_encrypted': False,
-            'target_node_iid': None
-        })
-    ], owner, budget=Task.Budget(vcpus=1, memory=1024))
-    assert (job is not None)
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'N': 100,
+                    'num_sub_jobs': 2
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=1024)
+    )
+    result = rti_proxy.submit([task], with_authorisation_by=owner)
+    job = result[0]
 
     job_id = job.id
 

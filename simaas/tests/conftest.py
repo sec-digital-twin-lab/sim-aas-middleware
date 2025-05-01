@@ -12,6 +12,9 @@ from typing import List, Tuple, Optional, Dict, Union
 
 import pytest
 from dotenv import load_dotenv
+
+from examples.cosim.room.processor import RoomProcessor
+from examples.cosim.thermostat.processor import ThermostatProcessor
 from simaas.core.processor import ProcessorBase, ProgressListener
 
 from examples.prime.factor_search.processor import ProcessorFactorSearch
@@ -20,7 +23,7 @@ from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.cli.cmd_proc_builder import clone_repository
-from simaas.core.helpers import get_timestamp_now, hash_json_object
+from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
@@ -33,12 +36,12 @@ from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy, RTIInterface
 from simaas.rti.aws import get_default_aws_config
-from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity
+from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
 
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'e55b40c1c4c0bb527b51f2543c57abad2e46589d'
+REPOSITORY_COMMIT_ID = '029f028248223c2ac828071a8ced95686d50f5f4'
 PROC_ABC_PATH = "examples/simple/abc"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -457,6 +460,7 @@ class DummyNamespace(Namespace):
                     id="factor_search",
                     state=Processor.State.READY,
                     image_name='proc-factor-search',
+                    ports=None,
                     gpp=None,
                     error=None
                 ),
@@ -464,17 +468,37 @@ class DummyNamespace(Namespace):
                     id="factorisation",
                     state=Processor.State.READY,
                     image_name='proc-factorisation',
+                    ports=None,
+                    gpp=None,
+                    error=None
+                ),
+                'room': Processor(
+                    id="room",
+                    state=Processor.State.READY,
+                    image_name='proc-room',
+                    ports=None,
+                    gpp=None,
+                    error=None
+                ),
+                'thermostat': Processor(
+                    id="thermostat",
+                    state=Processor.State.READY,
+                    image_name='proc-thermostat',
+                    ports=None,
                     gpp=None,
                     error=None
                 )
             }
             self._procs_classes: Dict[str, type] = {
                 'factor_search': ProcessorFactorSearch,
-                'factorisation': ProcessorFactorisation
+                'factorisation': ProcessorFactorisation,
+                'room': RoomProcessor,
+                'thermostat': ThermostatProcessor
             }
             self._instances: Dict[str, ProcessorBase] = {}
             self._jobs: Dict[str, Job] = {}
             self._status: Dict[str, JobStatus] = {}
+            self._batch: Dict[str, BatchStatus] = {}
             self._next_job_id: int = 0
             self._keystore = Keystore.new('dummy')
 
@@ -484,45 +508,9 @@ class DummyNamespace(Namespace):
         def get_proc(self, proc_id: str) -> Optional[Processor]:
             return self._procs.get(proc_id, None)
 
-        def submit(self, proc_id: str, task: Task) -> Job:
-            job_id = str(self._next_job_id)
-            self._next_job_id += 1
-            job = Job(
-                id=job_id,
-                task=task,
-                retain=True,
-                custodian=NodeInfo(
-                    identity=self._keystore.identity,
-                    last_seen=get_timestamp_now(),
-                    dor_service=True,
-                    rti_service=True,
-                    p2p_address='in-memory',
-                    rest_address=None,
-                    retain_job_history=True,
-                    strict_deployment=False
-                ),
-                proc_name=task.proc_id,
-                t_submitted=get_timestamp_now()
-            )
-            self._jobs[job_id] = job
-
-            status = JobStatus(
-                state=JobStatus.State.INITIALISED,
-                progress=0,
-                output={},
-                notes={},
-                errors=[],
-                message=None
-            )
-            self._status[job_id] = status
-
-            # create instance
-            proc_type = self._procs_classes[proc_id]
-            self._instances[job_id] = proc_type(os.path.join(BASE_DIR, 'examples', 'prime', proc_id))
-
+        def submit(self, tasks: List[Task]) -> List[Job]:
             def execute() -> None:
                 try:
-
                     with tempfile.TemporaryDirectory() as wd_path:
                         status.state = JobStatus.State.RUNNING
                         in0: Task.InputValue = task.input[0]
@@ -542,13 +530,60 @@ class DummyNamespace(Namespace):
                     status.state = JobStatus.State.FAILED
                     print(e)
 
-            thread = threading.Thread(target=execute, args=())
-            thread.start()
+            result: List[Job] = []
+            batch_id: Optional[str] = generate_random_string(8) if len(tasks) > 1 else None
+            for task in tasks:
+                job_id = str(self._next_job_id)
+                self._next_job_id += 1
+                job = Job(
+                    id=job_id,
+                    batch_id=batch_id,
+                    task=task,
+                    retain=True,
+                    custodian=NodeInfo(
+                        identity=self._keystore.identity,
+                        last_seen=get_timestamp_now(),
+                        dor_service=True,
+                        rti_service=True,
+                        p2p_address='in-memory',
+                        rest_address=None,
+                        retain_job_history=True,
+                        strict_deployment=False
+                    ),
+                    proc_name=task.proc_id,
+                    t_submitted=get_timestamp_now()
+                )
+                self._jobs[job_id] = job
 
-            return self._jobs[job_id]
+                status = JobStatus(
+                    state=JobStatus.State.INITIALISED,
+                    progress=0,
+                    output={},
+                    notes={},
+                    errors=[],
+                    message=None
+                )
+                self._status[job_id] = status
+
+                # create instance
+                proc_type = self._procs_classes[task.proc_id]
+                self._instances[job_id] = proc_type(os.path.join(BASE_DIR, 'examples', 'prime', task.proc_id))
+
+                thread = threading.Thread(target=execute, args=())
+                thread.start()
+
+                result.append(job)
+
+            return result
 
         def get_job_status(self, job_id: str) -> JobStatus:
             return self._status[job_id]
+
+        def put_batch_status(self, batch_status: BatchStatus):
+            self._batch[batch_status.batch_id] = batch_status
+
+        def get_batch_status(self, batch_id: str) -> BatchStatus:
+            return self._batch.get(batch_id)
 
         def job_cancel(self, job_id: str) -> JobStatus:
             self._instances[job_id].interrupt()
@@ -563,6 +598,9 @@ class DummyNamespace(Namespace):
 
     def id(self) -> str:
         return 'dummy'
+
+    def custodian_address(self) -> str:
+        pass
 
     def name(self) -> str:
         return 'dummy'

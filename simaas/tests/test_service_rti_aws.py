@@ -10,6 +10,9 @@ import traceback
 from typing import Union
 
 import pytest
+
+from examples.cosim.room.processor import Result as RResult
+from examples.cosim.thermostat.processor import Result as TResult
 from simaas.core.helpers import generate_random_string
 
 from simaas.nodedb.schemas import NodeInfo
@@ -25,7 +28,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.base import RTIServiceBase
-from simaas.rti.schemas import Task, JobStatus, Processor, Job
+from simaas.rti.schemas import Task, JobStatus, Processor, Job, BatchStatus
 from simaas.tests.conftest import REPOSITORY_URL, add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
@@ -321,24 +324,28 @@ def test_rest_submit_list_get_job(
     wrong_user = known_user
     owner = aws_session_node.keystore
 
-    task_input = [
-        Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-        Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-    ]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                               'restricted_access': False, 'content_encrypted': False,
-                               'target_node_iid': None})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
 
     # submit the job
-    result = aws_rti_proxy.submit_job(
-        proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=2048)
-    )
-    assert (result is not None)
+    result = aws_rti_proxy.submit([task], owner)
+    assert result is not None
 
-    job_id = result.id
+    job_id = result[0].id
 
     # get list of all jobs by correct user
     result = aws_rti_proxy.get_jobs_by_user(owner)
@@ -533,19 +540,23 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
     b = Task.InputReference(name='b', type='reference', obj_id=b.obj_id, user_signature=None, c_hash=None) \
         if isinstance(b, DataObject) else Task.InputValue(name='b', type='value', value={'v': b})
 
-    task_input = [a, b]
-
-    task_output = [
-        Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                    'restricted_access': False, 'content_encrypted': False,
-                                    'target_node_iid': target_node.identity.id})
-    ]
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[a, b],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': target_node.identity.id})
+        ],
+        name=None,
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
 
     # submit the job
-    job = rti_proxy.submit_job(
-        proc_id, task_input, task_output, owner, budget=Task.Budget(vcpus=1, memory=2048)
-    )
-    return job
+    result = rti_proxy.submit([task], owner)
+    return result[0]
 
 
 def test_provenance(
@@ -618,7 +629,7 @@ def test_provenance(
 
 def test_job_concurrency(
         docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor
+        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, n: int = 50
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -698,7 +709,6 @@ def test_job_concurrency(
             logprint(idx, f"[{idx}] failed: {trace}")
 
     # submit jobs
-    n = 20
     threads = []
     for i in range(n):
         thread = threading.Thread(target=do_a_job, kwargs={'idx': i})
@@ -723,4 +733,331 @@ def test_job_concurrency(
     logger.info(failed)
     assert (len(failed) == 0)
     assert (len(results) == n)
+
+
+def test_rest_submit_batch(
+        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
+        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, known_user
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    proc_id = aws_deployed_test_processor.obj_id
+    wrong_user = known_user
+    owner = aws_session_node.keystore
+
+    def create_task(name: str, a: int, b: int) -> Task:
+        return Task(
+            proc_id=proc_id,
+            user_iid=owner.identity.id,
+            input=[
+                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
+                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
+            ],
+            output=[
+                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                            'restricted_access': False, 'content_encrypted': False,
+                                            'target_node_iid': None})
+            ],
+            name=name,
+            description=None,
+            budget=Task.Budget(vcpus=1, memory=2048)
+        )
+
+    # create the tasks
+    tasks = [create_task(f'task_{i}', 1, 5) for i in range(20)]
+
+    # submit the job
+    jobs = aws_rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert len(jobs) == len(tasks)
+
+    # determine batch id
+    batch_id = jobs[0].batch_id
+
+    # try to get the batch info as the wrong user
+    try:
+        aws_rti_proxy.get_batch_status(batch_id, wrong_user)
+        assert False
+
+    except UnsuccessfulRequestError as e:
+        assert (e.details['reason'] == 'user is not the batch owner, batch member or the node owner')
+
+    while True:
+        # get information about the running job
+        try:
+            status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert (status is not None)
+
+            all_finished = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    all_finished = False
+                    break
+
+            if all_finished:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # we should have an object id for output object 'c' for each member of the batch
+    for member in status.members:
+        job_status: JobStatus = aws_rti_proxy.get_job_status(member.job_id, owner)
+        assert ('c' in job_status.output)
+
+        # get the contents of the output data object
+        download_path = os.path.join(test_context.testing_dir, 'c.json')
+        aws_dor_proxy.get_content(job_status.output['c'].obj_id, owner, download_path)
+        assert (os.path.isfile(download_path))
+
+        with open(download_path, 'r') as f:
+            content = json.load(f)
+            print(content)
+            assert (content['v'] == 6)
+
+
+@pytest.fixture(scope="session")
+def aws_deployed_room_processor(
+        docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
+) -> DataObject:
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
+    else:
+        # add test processor
+        meta = add_test_processor(
+            aws_dor_proxy, aws_session_node.keystore, 'proc-room', 'examples/cosim/room'
+        )
+        proc_id = meta.obj_id
+
+        if not docker_available:
+            yield meta
+
+        else:
+            # deploy it
+            aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
+            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+                logger.info(f"Waiting for processor to be ready: {proc}")
+                time.sleep(1)
+
+            assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
+            try:
+                while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
+
+
+@pytest.fixture(scope="session")
+def aws_deployed_thermostat_processor(
+        docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
+) -> DataObject:
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
+    else:
+        # add test processor
+        meta = add_test_processor(
+            aws_dor_proxy, aws_session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
+        )
+        proc_id = meta.obj_id
+
+        if not docker_available:
+            yield meta
+
+        else:
+            # deploy it
+            aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
+            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+                logger.info(f"Waiting for processor to be ready: {proc}")
+                time.sleep(1)
+
+            assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
+            try:
+                while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
+
+
+def test_rest_submit_cosim(
+        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
+        aws_dor_proxy, aws_rti_proxy, aws_deployed_room_processor, aws_deployed_thermostat_processor
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    proc_id0 = aws_deployed_room_processor.obj_id
+    proc_id1 = aws_deployed_thermostat_processor.obj_id
+    owner = aws_session_node.keystore
+
+    task0 = Task(
+        proc_id=proc_id0,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'initial_temp': 20,
+                    'heating_rate': 0.5,
+                    'cooling_rate': -0.2,
+                    'max_steps': 100
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name='room',
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
+
+    task1 = Task(
+        proc_id=proc_id1,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'threshold_low': 18.0,
+                    'threshold_high': 22.0
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name='thermostat',
+        description=None,
+        budget=Task.Budget(vcpus=1, memory=2048)
+    )
+
+    # submit the job
+    result = aws_rti_proxy.submit([task0, task1], with_authorisation_by=owner)
+    jobs = result
+
+    batch_id = jobs[0].batch_id
+    while True:
+        try:
+            status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, with_authorisation_by=owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert (status is not None)
+
+            is_done = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    is_done = False
+
+            if is_done:
+                break
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            print(trace)
+
+        time.sleep(1)
+
+    # get the result of the 'room' and the 'thermostat'
+    job_status0: JobStatus = aws_rti_proxy.get_job_status(jobs[0].id, with_authorisation_by=owner)
+    job_status1: JobStatus = aws_rti_proxy.get_job_status(jobs[1].id, with_authorisation_by=owner)
+    assert ('result' in job_status0.output)
+    assert ('result' in job_status1.output)
+
+    # get the contents of the output data object
+    download_path0 = os.path.join(test_context.testing_dir, 'result0.json')
+    aws_dor_proxy.get_content(job_status0.output['result'].obj_id, owner, download_path0)
+    assert (os.path.isfile(download_path0))
+
+    download_path1 = os.path.join(test_context.testing_dir, 'result1.json')
+    aws_dor_proxy.get_content(job_status1.output['result'].obj_id, owner, download_path1)
+    assert (os.path.isfile(download_path1))
+
+    # read the results
+    with open(download_path0, 'r') as f:
+        result0: dict = json.load(f)
+        result0:RResult = RResult.model_validate(result0)
+
+    with open(download_path1, 'r') as f:
+        result1: dict = json.load(f)
+        result1: TResult = TResult.model_validate(result1)
+
+    # print the result
+    print(result0.temp)
+    print(result1.state)
 

@@ -1,8 +1,8 @@
 from enum import Enum
-from typing import Literal, Optional, List, Union, Dict
+from typing import Literal, Optional, List, Union, Dict, Tuple
 
 from pydantic import BaseModel, Field
-
+from simaas.core.identity import Identity
 from simaas.core.exceptions import ExceptionContent
 from simaas.dor.schemas import GitProcessorPointer, DataObject
 from simaas.nodedb.schemas import NodeInfo
@@ -50,6 +50,7 @@ class Job(BaseModel):
     Information about a job.
     """
     id: str = Field(..., title="Id", description="The job id.", examples=["Ikn7dPv6"])
+    batch_id: Optional[str] = Field( title="Batch Id", description="The (optional) batch id in case the job belongs to a batch.", examples=["Ikn7dPv6"])
     task: Task = Field(..., title="Task", description="The task of this job")
     retain: bool = Field(..., title="Retain", description="Indicates if the RTI should retain the working directory of this job. This is only used for debugging and testing purposes.", examples=[False])
     custodian: NodeInfo = Field(..., title='Custodian', description="Information about the node that hosts this job.")
@@ -114,6 +115,25 @@ class JobStatus(BaseModel):
     message: Optional[Message] = Field(title="Message", description="A message providing more details about its current status (if any)")
 
 
+class BatchStatus(BaseModel):
+    class Member(BaseModel):
+        """
+        Information about a batch member.
+        """
+        name: str = Field(..., title="Name", description="The name of the job/member.")
+        job_id: str = Field(..., title="Job Id", description="The id of the member job.")
+        state: JobStatus.State = Field(..., title="State", description="The state of the member job.")
+        identity: Optional[Identity] = Field(title="Identity", description="The identity of the member job (if known).")
+        ports: Dict[str, Optional[str]] = Field(..., title="Ports", description="The ports of the member job and their mapping to addresses.")
+
+    """
+    Information about a batch of jobs.
+    """
+    batch_id: str = Field(..., title="Batch Id", description="The id of batch.")
+    user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns the batch.")
+    members: List[Member] = Field(..., title="Members", description="A list with information about all members of the batch.")
+
+
 class Processor(BaseModel):
     class State(str, Enum):
         """
@@ -130,6 +150,7 @@ class Processor(BaseModel):
     id: str = Field(..., title="Processor Id", description="The processor id.", examples=["d01d069675bcaaeb90b46273ccc4ae9818a2667957045d0f0f15901ffcf807de"])
     state: Literal[State.BUSY_DEPLOY, State.BUSY_UNDEPLOY, State.READY, State.FAILED] = Field(..., title="State", description="The state of the processor.")
     image_name: Optional[str] = Field(title="Image Name", description="The name of the docker image that contains the processor.")
+    ports: Optional[List[Tuple[int, str]]] = Field(..., title="Ports", description="The ports exposed/used by this processor.")
     gpp: Optional[GitProcessorPointer] = Field(title="GPP", description="The Git Processor Pointer information.")
     error: Optional[str] = Field(..., title="Error", description="Information about the error encountered (only if state is 'failed').")
 
