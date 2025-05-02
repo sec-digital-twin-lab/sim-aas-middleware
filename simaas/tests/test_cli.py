@@ -12,6 +12,7 @@ from typing import List, Union, Any, Optional
 
 import pytest
 from docker.errors import ImageNotFound
+from simaas.cli.cmd_service import Service
 
 from examples.simple.abc.processor import write_value
 
@@ -2081,3 +2082,53 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
         assert False
 
     time.sleep(1)
+
+
+def test_cli_service(temp_dir):
+    password = 'password'
+
+    # create an identity
+    try:
+        args = {
+            'keystore': temp_dir,
+            'name': 'name',
+            'email': 'email',
+            'password': password
+        }
+
+        cmd = IdentityCreate()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'keystore' in result
+
+        keystore: Keystore = result['keystore']
+        keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
+        assert os.path.isfile(keystore_path)
+
+    except CLIRuntimeError:
+        assert False
+
+    # start the service
+    try:
+        args = {
+            'use-defaults': None,
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': password,
+            'datastore': temp_dir,
+            'rest-address': '127.0.0.1:5100',
+            'p2p-address': 'tcp://127.0.0.1:4100',
+            'boot-node': '127.0.0.1:4100',
+            'dor_type': 'basic',
+            'rti_type': 'docker',
+            'retain-job-history': False,
+            'strict-deployment': False,
+            'bind-all-address': False,
+        }
+
+        cmd = Service()
+        cmd.execute(args, wait_for_termination=False)
+
+    except CLIRuntimeError:
+        assert False
+    

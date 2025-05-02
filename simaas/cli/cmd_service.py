@@ -107,7 +107,7 @@ class Service(CLICommand):
                           "machine i.e. 0.0.0.0 (useful for docker)")
         ])
 
-    def execute(self, args: dict) -> None:
+    def execute(self, args: dict, wait_for_termination: bool = True) -> None:
         if args['use-defaults']:
             default_if_missing(args, 'datastore', self.default_datastore)
             default_if_missing(args, 'rest-address', self.default_rest_address)
@@ -169,8 +169,8 @@ class Service(CLICommand):
                                   p2p_address=p2p_service_address,
                                   rest_address=rest_service_address,
                                   boot_node_address=boot_node_address,
-                                  dor_type=DORType[args['dor_type']],
-                                  rti_type=RTIType[args['rti_type']],
+                                  dor_type=DORType[args['dor_type'].upper()],
+                                  rti_type=RTIType[args['rti_type'].upper()],
                                   retain_job_history=args['retain-job-history'],
                                   strict_deployment=args['strict-deployment'],
                                   bind_all_address=args['bind-all-address'])
@@ -190,4 +190,9 @@ class Service(CLICommand):
             )
 
         # wait for termination...
-        WaitForTermination(node).wait_for_termination()
+        if wait_for_termination:
+            WaitForTermination(node).wait_for_termination()
+        else:
+            time.sleep(2)
+            node.shutdown()
+
