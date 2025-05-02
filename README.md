@@ -56,7 +56,7 @@ standardized execution interface for computational models and external applicati
 them to run as jobs within a containerized, managed runtime environment. Both are used 
 exactly the same way but differ semantically.
 
-## Processor vs Processor Adapter: What's the Difference?
+### Processor vs Processor Adapter: What's the Difference?
 
 | Feature                    | **Processor**                                          | **Processor Adapter**                                     |
 |----------------------------|--------------------------------------------------------|-----------------------------------------------------------|
@@ -69,7 +69,7 @@ exactly the same way but differ semantically.
 > Both types must expose a common interface to the RTI through a descriptor and standard file layout, but their internal purpose is distinct.
 > For simplicity, for the remainder of this documentation, we will use the term processor to refer to both, processors and processor adapters.
 
-## Directory Structure
+### Directory Structure
 Every processor or adapter must follow a standardized folder layout, regardless of whether 
 it implements custom logic or wraps an external program.
 ```
@@ -80,9 +80,8 @@ processor/
 ```
 > 💡 See the examples at `/examples/...` in this repository.
 
-## Related Topics
+### Related Topics
 Learn more about related topics:
 - [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
 - [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
 - [Processor Dockerfile](docs/processor_dockerfile.md)
-
