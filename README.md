@@ -42,7 +42,7 @@ user is prompted for input. The following sections explain how to use the CLI fo
 use-cases.
 
 - [Create Identity](docs/usage_create_identity.md)
-- [Running a Sim-aaS Node Instance](docs/usage_run_simass_node.md)
+- [Running a Sim-aaS Node Instance](docs/usage_run_simaas_node.md)
 - [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
 - [Granting/Revoking Access to Data Objects](docs/usage_grant_revoke_access.md)
 - [Building a Processor Docker Image](docs/usage_build_processor_docker_image.md)
