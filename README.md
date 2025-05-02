@@ -21,7 +21,7 @@ source venv/bin/activate
 
 Install the Sim-aaS Middleware:
 ```shell
-pip install sim-aas-middleware
+pip install ./sim-aas-middleware
 ```
 
 Once done, you may deactivate the virtual environment - or keep it activated if you want
