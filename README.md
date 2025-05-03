@@ -93,3 +93,9 @@ Learn more about related topics:
 - [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
 - [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
 - [Processor Dockerfile](docs/processor_dockerfile.md)
+
+### Examples
+Learn more about developing processors by looking at example implementations:
+- [Basic processor](examples/simple/README.md)
+- [Processor creating child jobs](examples/prime/README.md)
+- [Co-simulation example](examples/cosim/README.md)
