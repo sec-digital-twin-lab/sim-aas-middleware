@@ -41,6 +41,10 @@ arguments. In addition, commands also allow interactive use of the CLI in which 
 user is prompted for input. The following sections explain how to use the CLI for common 
 use-cases.
 
+> If you are new to using the Sim-aaS Middleware, it is recommended you work through 
+> each of the following topics in sequence. It should give you a basic understanding
+> of how to use the various commands.
+
 - [Create Identity](docs/usage_create_identity.md)
 - [Running a Sim-aaS Node Instance](docs/usage_run_simaas_node.md)
 - [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
