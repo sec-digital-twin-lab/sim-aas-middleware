@@ -1,5 +1,6 @@
 import inspect
 import os
+import platform
 import socket
 import sys
 from contextlib import contextmanager
@@ -271,6 +272,18 @@ def docker_check_image_platform(image_name: str, platform: str) -> bool:
 
         return os_type == os_ref and arch_type == arch_ref
 
+def docker_local_arch() -> str:
+    system = platform.system().lower()  # "Linux", "Darwin", "Windows" → "linux", etc.
+    machine = platform.machine().lower()
+
+    # Normalize architecture to Docker's naming
+    arch_map = {
+        "x86_64": "amd64",
+        "aarch64": "arm64"
+    }
+    arch = arch_map.get(machine, machine)
+
+    return f"{system}/{arch}"
 
 def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
     """
