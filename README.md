@@ -96,6 +96,6 @@ Learn more about related topics:
 
 ### Examples
 Learn more about developing processors by looking at example implementations:
-- [Basic processor](examples/simple/README.md)
-- [Processor creating child jobs](examples/prime/README.md)
-- [Co-simulation example](examples/cosim/README.md)
+- [Simple Example: Basic Input/Output Processor](examples/simple/README.md)
+- [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
+- [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
