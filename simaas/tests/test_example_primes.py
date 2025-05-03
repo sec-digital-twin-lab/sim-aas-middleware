@@ -18,6 +18,12 @@ logger = Logging.get(__name__)
 
 
 def test_proc_factor_search(dummy_namespace):
+    """
+    Test the `ProcessorFactorSearch` processor by computing all non-trivial factors of a given number (N).
+
+    This test sets up a job to search for factors of 100 in a specified range, writes the input
+    parameters to a file, executes the processor, and then validates the results against known factors.
+    """
     N = 100
     num_sub_jobs = 1
     step = N // num_sub_jobs
@@ -45,14 +51,13 @@ def test_proc_factor_search(dummy_namespace):
         proc = ProcessorFactorSearch(proc_path)
         proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
-        # read the result
+        # read and validate the result
         result_path = os.path.join(temp_dir, 'result')
         assert os.path.isfile(result_path)
         with open(result_path, 'r') as f:
             result: dict = json.load(f)
             result: Result = Result.model_validate(result)
 
-        # print the result
         print(result.factors)
         assert(result.factors == [2, 4, 5, 10, 20, 25, 50])
         if len(result.factors) == 0:
@@ -62,6 +67,12 @@ def test_proc_factor_search(dummy_namespace):
 
 
 def test_proc_factorisation(dummy_namespace):
+    """
+    Test the `ProcessorFactorisation` processor by running a full factorisation job with multiple sub-jobs.
+
+    This test prepares a factorisation task for the number 100 with two sub-jobs, runs the processor,
+    and verifies that the correct set of factors is returned.
+    """
     N = 100
     num_sub_jobs = 2
 
@@ -86,14 +97,13 @@ def test_proc_factorisation(dummy_namespace):
         proc = ProcessorFactorisation(proc_path)
         proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
 
-        # read the result
+        # read and validate the result
         result_path = os.path.join(temp_dir, 'result')
         assert os.path.isfile(result_path)
         with open(result_path, 'r') as f:
             result: dict = json.load(f)
             result: Result = Result.model_validate(result)
 
-        # print the result
         print(result.factors)
         assert(result.factors == [2, 4, 5, 10, 20, 25, 50])
         if len(result.factors) == 2 and 1 in result.factors and N in result.factors:
@@ -103,6 +113,12 @@ def test_proc_factorisation(dummy_namespace):
 
 
 def test_proc_factorisation_cancel(dummy_namespace):
+    """
+    Test cancelling a long-running factorisation job via the RTI.
+
+    This test submits a job to factor a large number, waits briefly, cancels it, and verifies
+    that the job's final state is CANCELLED.
+    """
     N = 987654321987
     num_sub_jobs = 2
 
@@ -131,12 +147,13 @@ def test_proc_factorisation_cancel(dummy_namespace):
     result = dummy_namespace.rti.submit([task])
     job: Job = result[0]
 
-    # wait for a bit...
+    # wait for a bit to simulate processing time
     time.sleep(5)
 
-    # cancel it
+    # cancel the job
     dummy_namespace.rti.job_cancel(job.id)
 
+    # check that the job was cancelled
     status: JobStatus = dummy_namespace.rti.get_job_status(job.id)
     assert status.state == JobStatus.State.CANCELLED
 
