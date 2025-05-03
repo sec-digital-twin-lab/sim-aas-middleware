@@ -1,3 +1,4 @@
+import asyncio
 import os.path
 import traceback
 
@@ -7,6 +8,9 @@ from typing import Optional, Tuple, Any
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from pydantic import BaseModel
+from simaas.rti.exceptions import RTIException
+
+from simaas.p2p.exceptions import PeerUnavailableError
 
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -131,27 +135,40 @@ class P2PNamespaceServiceCall(P2PProtocol):
     @classmethod
     async def perform(
             cls, peer_address: P2PAddress, authority: Keystore, service: str, method: str,
-            args: Optional[dict] = None, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            args: Optional[dict] = None, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            max_attempts: int = 3
     ) -> Optional[Any]:
-        # generate an authorised request
-        request = generate_authorised_request(authority, service, method, args)
+        for attempt in range(max_attempts):
+            try:
+                # generate an authorised request
+                request = generate_authorised_request(authority, service, method, args)
 
-        # send the request
-        reply, _ = await p2p_request(
-            peer_address, cls.NAME, request, reply_type=NamespaceServiceResponse, attachment_path=attachment_path,
-            download_path=download_path
-        )
-        reply: NamespaceServiceResponse = reply  # casting for PyCharm
+                # send the request
+                reply, _ = await p2p_request(
+                    peer_address, cls.NAME, request, reply_type=NamespaceServiceResponse,
+                    attachment_path=attachment_path,
+                    download_path=download_path
+                )
+                reply: NamespaceServiceResponse = reply  # casting for PyCharm
 
-        # check if there was an exception
-        if reply.exception is not None:
-            raise SaaSRuntimeException(
-                reason=reply.exception.reason,
-                details=reply.exception.details,
-                eid=reply.exception.id
-            )
+                # check if there was an exception
+                if reply.exception is not None:
+                    raise SaaSRuntimeException(
+                        reason=reply.exception.reason,
+                        details=reply.exception.details,
+                        eid=reply.exception.id
+                    )
 
-        return reply.result
+                return reply.result
+
+            except PeerUnavailableError:
+                delay = attempt + 1
+                logger.warning(f"Failed for perform namespace service call ({attempt+1}/{max_attempts}) -> "
+                               f"Trying again in {delay} seconds...")
+                await asyncio.sleep(delay)
+
+        raise RTIException(f"Namespace service call failed after {max_attempts} attempts")
+
 
     async def handle(
             self, request: NamespaceServiceRequest, attachment_path: Optional[str] = None,
