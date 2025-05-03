@@ -53,8 +53,12 @@ use-cases.
 - [Deploying/Undeploying of Processors](docs/usage_deploy_undeploy_processors.md)
 - [Job Submission and Monitoring](docs/usage_job_submission_and_monitoring.md)
 
+## Concepts
+Learn more about important concepts used by the Sim-aaS Middleware.
 
-## Processors and Processor Adapters
+- [Keystores and Identities](docs/concept_keystore_and_identities.md)
+
+## Building Processors and Processor Adapters
 In the Sim-aaS Middleware framework, **processors** and **processor adapters** serve as the 
 standardized execution interface for computational models and external applications, enabling 
 them to run as jobs within a containerized, managed runtime environment. Both are used 
