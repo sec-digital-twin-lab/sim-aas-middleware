@@ -1,6 +1,7 @@
 import logging
 import os
 import signal
+import subprocess
 import time
 import traceback
 
@@ -108,6 +109,8 @@ class Service(CLICommand):
         ])
 
     def execute(self, args: dict, wait_for_termination: bool = True) -> None:
+        use_ssh_tunneling = False
+
         if args['use-defaults']:
             default_if_missing(args, 'datastore', self.default_datastore)
             default_if_missing(args, 'rest-address', self.default_rest_address)
@@ -123,15 +126,6 @@ class Service(CLICommand):
             prompt_if_missing(args, 'datastore', prompt_for_string,
                               message="Enter path to datastore:",
                               default=self.default_datastore)
-            prompt_if_missing(args, 'rest-address', prompt_for_string,
-                              message="Enter address for REST service:",
-                              default=self.default_rest_address)
-            prompt_if_missing(args, 'p2p-address', prompt_for_string,
-                              message="Enter address for P2P service:",
-                              default=self.default_p2p_address)
-            prompt_if_missing(args, 'boot-node', prompt_for_string,
-                              message="Enter REST address of boot node:",
-                              default=self.default_boot_node_address)
 
             if args['dor_type'] is None:
                 args['dor_type'] = prompt_for_selection([
@@ -153,6 +147,29 @@ class Service(CLICommand):
                                   message='Bind service to all network addresses?', default=False)
                 prompt_if_missing(args, 'strict-deployment', prompt_for_confirmation,
                                   message='Strict processor deployment?', default=True)
+
+            # determine if SSH tunneling requires
+            required = ['SSH_TUNNEL_HOST', 'SSH_TUNNEL_USER', 'SSH_TUNNEL_KEY_PATH', 'SIMAAS_CUSTODIAN_HOST']
+            use_ssh_tunneling = args['rti_type'] == RTIType.AWS.value and all(var in os.environ for var in required)
+            if use_ssh_tunneling:
+                print("AWS SSH Tunneling information found? YES")
+                args['rest-address'] = "localhost:5999"
+                args['p2p-address'] = "tcp://localhost:4999"
+                args['boot-node'] = "localhost:5999"
+            else:
+                print("AWS SSH Tunneling information found? NO")
+
+            if not use_ssh_tunneling:
+                prompt_if_missing(args, 'rest-address', prompt_for_string,
+                                  message="Enter address for REST service:",
+                                  default=self.default_rest_address)
+                prompt_if_missing(args, 'p2p-address', prompt_for_string,
+                                  message="Enter address for P2P service:",
+                                  default=self.default_p2p_address)
+
+                prompt_if_missing(args, 'boot-node', prompt_for_string,
+                                  message="Enter REST address of boot node:",
+                                  default=self.default_boot_node_address)
 
         keystore = load_keystore(args, ensure_publication=False)
 
@@ -189,10 +206,53 @@ class Service(CLICommand):
                 f"(strict: {'Yes' if args['strict-deployment'] else 'No'}) "
             )
 
+        # do we need to establish an AWS SSH tunnel?
+        ssh_process = None
+        if use_ssh_tunneling:
+            print("Trying to establish SSH tunnel...")
+
+            # get the environment variables need to establish tunnel
+            ssh_host = os.environ.get("SSH_TUNNEL_HOST")
+            ssh_user = os.environ.get("SSH_TUNNEL_USER")
+            ssh_key_path = os.environ.get("SSH_TUNNEL_KEY_PATH")
+
+            # determine the ports
+            rest_port = 5999
+            p2p_port = 4999
+            # rest_port: int = rest_service_address[1]
+            # p2p_port: str = p2p_service_address.split(':')[-1]
+            print(f"Using the following REST/P2P ports for AWS SSH tunneling: {rest_port}/{p2p_port}")
+
+            # SSH tunnel command (runs in the background)
+            ssh_command = [
+                "ssh",
+                "-N",  # Do not execute remote commands
+                "-R", f"0.0.0.0:{rest_port}:localhost:{rest_port}",  # Forward remote port 5999 to local port 5999
+                "-R", f"0.0.0.0:{p2p_port}:localhost:{p2p_port}",  # Forward remote port 4999 to local port 4999
+                "-i", ssh_key_path,  # Private key authentication
+                f"{ssh_user}@{ssh_host}"  # Remote SSH target
+            ]
+
+            # Start the SSH tunnel as a subprocess
+            ssh_process = subprocess.Popen(
+                ssh_command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            time.sleep(2)
+            print("AWS SSH tunnel should be established now!")
+
         # wait for termination...
         if wait_for_termination:
             WaitForTermination(node).wait_for_termination()
         else:
             time.sleep(2)
             node.shutdown()
+
+        # need to shut down SSH tunnel?
+        if ssh_process is not None:
+            print(f"Terminating SSH tunnel process...")
+            ssh_process.terminate()
+            ssh_process.wait()
 
