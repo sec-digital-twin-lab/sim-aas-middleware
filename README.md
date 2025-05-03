@@ -45,7 +45,7 @@ use-cases.
 > each of the following topics in sequence. It should give you a basic understanding
 > of how to use the various commands.
 
-- [Create Identity](docs/usage_create_identity.md)
+- [Manage Identities](docs/usage_manage_identities.md)
 - [Running a Sim-aaS Node Instance](docs/usage_run_simaas_node.md)
 - [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
 - [Granting/Revoking Access to Data Objects](docs/usage_grant_revoke_access.md)
