@@ -7,6 +7,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 
 from simaas.dor.schemas import DataObject
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, Processor
 from simaas.core.processor import ProcessorBase, ProgressListener, Namespace, ProcessorRuntimeError
 
@@ -125,9 +126,10 @@ class ProcessorFactorisation(ProcessorBase):
                     content_encrypted=False,
                     target_node_iid=None
                 )],
+                budget=ResourceDescriptor(vcpus=1, memory=2048),
+                namespace=namespace.name(),
                 name=None,
                 description=None,
-                budget=None
             )
             result = namespace.rti.submit([task])
             job: Job = result[0]
