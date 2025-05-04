@@ -37,6 +37,11 @@ class AWSConfiguration(BaseModel):
     aws_role_arn: str
 
 
+REQUIRED_ENV = [
+    'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN',
+    'SIMAAS_AWS_JOB_QUEUE'
+]
+
 def get_default_aws_config() -> Optional[AWSConfiguration]:
     required = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN']
     if all(var in os.environ for var in required):
@@ -306,6 +311,11 @@ class AWSRTIService(RTIServiceBase):
         super().__init__(
             node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
         )
+
+        # check if all required env variables are available
+        if not all(var in os.environ for var in REQUIRED_ENV):
+            raise RTIException(f"Missing/incomplete AWS configuration. The following environment variables "
+                               f"need to be defined: {REQUIRED_ENV}.")
 
         # determine AWS parameters
         self._aws_repository_name = 'simaas-processors'

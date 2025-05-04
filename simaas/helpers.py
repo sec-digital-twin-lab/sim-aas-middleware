@@ -1,7 +1,9 @@
 import inspect
 import os
+import platform
 import socket
 import sys
+from contextlib import contextmanager
 from importlib.util import spec_from_file_location, module_from_spec
 from threading import Lock
 
@@ -109,160 +111,179 @@ def find_available_port(host: str = 'localhost', port_range: (int, int) = (6000,
     return None
 
 
-def docker_find_image(image_name: str) -> List[Image]:
+@contextmanager
+def docker_client():
     client = docker.from_env()
-    available: List[Image] = client.images.list()
-    result: List[Image] = []
-    for image in available:
-        for tag in image.tags:
-            if image_name in tag:
-                result.append(image)
-    return result
+    try:
+        yield client
+    finally:
+        client.close()
+
+
+def docker_find_image(image_name: str) -> List[Image]:
+    with docker_client() as client:
+        available: List[Image] = client.images.list()
+        result: List[Image] = []
+        for image in available:
+            for tag in image.tags:
+                if image_name in tag:
+                    result.append(image)
+        return result
 
 
 def docker_delete_image(image_name: str) -> None:
-    client = docker.from_env()
-    image = client.images.get(image_name)
-    client.images.remove(image.id, force=True)
-
-
-def docker_export_image(image_name: str, output_path: str, keep_image: bool = True) -> None:
-    client = docker.from_env()
-
-    # save the docker image
-    image = client.images.get(image_name)
-    with open(output_path, 'wb') as f:
-        for chunk in image.save(named=True):
-            f.write(chunk)
-
-    # delete the image (if applicable)
-    if not keep_image:
+    with docker_client() as client:
+        client = docker.from_env()
+        image = client.images.get(image_name)
         client.images.remove(image.id, force=True)
 
 
+def docker_export_image(image_name: str, output_path: str, keep_image: bool = True) -> None:
+    with docker_client() as client:
+        # save the docker image
+        image = client.images.get(image_name)
+        with open(output_path, 'wb') as f:
+            for chunk in image.save(named=True):
+                f.write(chunk)
+
+        # delete the image (if applicable)
+        if not keep_image:
+            client.images.remove(image.id, force=True)
+
+
 def docker_load_image(image_path: str, image_name: str, undo_if_no_match: bool = True) -> Optional[Image]:
-    client = docker.from_env()
-    with open(image_path, 'rb') as f:
-        loaded_images = client.images.load(f.read())
+    with docker_client() as client:
+        with open(image_path, 'rb') as f:
+            loaded_images = client.images.load(f.read())
 
-        # does the image name match?
-        found = None
-        for image in loaded_images:
-            if image_name in image.tags:
-                found = image
-                break
-
-        # if not found, undo?
-        if undo_if_no_match and not found:
+            # does the image name match?
+            found = None
             for image in loaded_images:
-                client.images.remove(image.id, force=True)
+                if image_name in image.tags:
+                    found = image
+                    break
 
-        return found
+            # if not found, undo?
+            if undo_if_no_match and not found:
+                for image in loaded_images:
+                    client.images.remove(image.id, force=True)
+
+            return found
 
 
 def docker_get_exposed_ports(image_name) -> List[Tuple[int, str]]:
-    client = docker.from_env()
-    image = client.images.get(image_name)
-    exposed_ports = image.attrs.get('Config', {}).get('ExposedPorts', {})
-    return [(int(port), protocol) for port, protocol in (item.split('/') for item in exposed_ports)]
+    with docker_client() as client:
+        image = client.images.get(image_name)
+        exposed_ports = image.attrs.get('Config', {}).get('ExposedPorts', {})
+        return [(int(port), protocol) for port, protocol in (item.split('/') for item in exposed_ports)]
 
 
 def docker_run_job_container(
         image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_pubkey: str, job_id: str,
         budget: Optional[Task.Budget] = None, custom_ports: List[Tuple[int, str, str, int]] = None
 ) -> str:
-    client = docker.from_env()
+    with docker_client() as client:
+        volumes = {
+            # job_path: {'bind': '/job', 'mode': 'rw'}
+        }
 
-    volumes = {
-        # job_path: {'bind': '/job', 'mode': 'rw'}
-    }
+        ports = {
+            '6000/tcp': p2p_address,
+        }
 
-    ports = {
-        '6000/tcp': p2p_address,
-    }
+        environment = {
+            'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
+            'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
+            'JOB_ID': job_id,
+            'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
+        }
 
-    environment = {
-        'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
-        'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
-        'JOB_ID': job_id,
-        'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
-    }
+        # do we have custom ports that need to be exposed?
+        if custom_ports:
+            for port, protocol, ext_host, ext_port in custom_ports:
+                ports[f"{port}/{protocol}"] = (ext_host, ext_port)
+                environment[f"EXTERNAL_CUSTOM_{protocol.upper()}_{port}"] = f"{protocol}://{ext_host}:{ext_port}"
 
-    # do we have custom ports that need to be exposed?
-    if custom_ports:
-        for port, protocol, ext_host, ext_port in custom_ports:
-            ports[f"{port}/{protocol}"] = (ext_host, ext_port)
-            environment[f"EXTERNAL_CUSTOM_{protocol.upper()}_{port}"] = f"{protocol}://{ext_host}:{ext_port}"
+        if budget is None:
+            container = client.containers.run(
+                image=image_name,
+                volumes=volumes,
+                ports=ports,
+                detach=True,
+                stderr=True, stdout=True,
+                auto_remove=False,
+                environment=environment
+            )
+        else:
+            # determine CPU quota
+            cpu_period = 100000
+            cpu_quota = cpu_period * budget.vcpus
 
-    if budget is None:
-        container = client.containers.run(
-            image=image_name,
-            volumes=volumes,
-            ports=ports,
-            detach=True,
-            stderr=True, stdout=True,
-            auto_remove=False,
-            environment=environment
-        )
-    else:
-        # determine CPU quota
-        cpu_period = 100000
-        cpu_quota = cpu_period * budget.vcpus
+            container = client.containers.run(
+                image=image_name,
+                volumes=volumes,
+                ports=ports,
+                detach=True,
+                stderr=True, stdout=True,
+                auto_remove=False,
+                environment=environment,
+                mem_limit=f"{budget.memory}m",
+                cpu_period=cpu_period,
+                cpu_quota=cpu_quota
+            )
 
-        container = client.containers.run(
-            image=image_name,
-            volumes=volumes,
-            ports=ports,
-            detach=True,
-            stderr=True, stdout=True,
-            auto_remove=False,
-            environment=environment,
-            mem_limit=f"{budget.memory}m",
-            cpu_period=cpu_period,
-            cpu_quota=cpu_quota
-        )
-
-    return container.id
+        return container.id
 
 
 def docker_kill_job_container(container_id: str) -> None:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    container.kill()
+    with docker_client() as client:
+        container = client.containers.get(container_id)
+        container.kill()
 
 
 def docker_delete_container(container_id: str) -> None:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    container.remove()
+    with docker_client() as client:
+        container = client.containers.get(container_id)
+        container.remove()
 
 
 def docker_container_running(container_id: str) -> bool:
-    client = docker.from_env()
-    container = client.containers.get(container_id)
-    return container.status == "running"
+    with docker_client() as client:
+        container = client.containers.get(container_id)
+        return container.status == "running"
 
 
 def docker_container_list() -> Dict[str, Container]:
-    client = docker.from_env()
-    return {
-        container.id: container for container in client.containers.list()
-    }
+    with docker_client() as client:
+        return {
+            container.id: container for container in client.containers.list()
+        }
 
 
 def docker_check_image_platform(image_name: str, platform: str) -> bool:
-    client = docker.from_env()
+    with docker_client() as client:
+        # extract OS and architecture
+        os_ref, arch_ref = platform.split('/')
 
-    # extract OS and architecture
-    os_ref, arch_ref = platform.split('/')
+        # get the image and its OS and arch types
+        image = client.images.get(image_name)
+        os_type = image.attrs.get("Os", "")
+        arch_type = image.attrs.get("Architecture", "")
 
-    # get the image and its OS and arch types
-    image = client.images.get(image_name)
-    os_type = image.attrs.get("Os", "")
-    arch_type = image.attrs.get("Architecture", "")
+        return os_type == os_ref and arch_type == arch_ref
 
-    return os_type == os_ref and arch_type == arch_ref
+def docker_local_arch() -> str:
+    system = platform.system().lower()  # "Linux", "Darwin", "Windows" → "linux", etc.
+    machine = platform.machine().lower()
 
+    # Normalize architecture to Docker's naming
+    arch_map = {
+        "x86_64": "amd64",
+        "aarch64": "arm64"
+    }
+    arch = arch_map.get(machine, machine)
+
+    return f"{system}/{arch}"
 
 def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
     """
