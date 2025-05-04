@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict
 
 from pydantic import BaseModel, Field
 
@@ -22,3 +22,14 @@ class NodeInfo(BaseModel):
 class ResourceDescriptor(BaseModel):
     vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs.")
     memory: int = Field(..., title="Memory", description="The amount of memory (in megabytes).")
+
+
+class NamespaceInfo(BaseModel):
+    """
+    Information about a namespace.
+    """
+    name: str = Field(..., title="Name", description="The name of the namespace.")
+    budget: ResourceDescriptor = Field(..., title="Budget", description="The resource budget allocated to this namespace.")
+    reservations: Dict[str, ResourceDescriptor] = Field(..., title="Reservations", description="Reserved resources that have not yet been claimed.")
+    claims: Dict[str, ResourceDescriptor] = Field(..., title="Claims", description="Current resource claims by active jobs.")
+    jobs: List[str] = Field(..., title="Job Ids", description="A list of job ids that are associated with this namespace.")
