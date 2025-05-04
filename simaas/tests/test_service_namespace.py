@@ -8,6 +8,8 @@ import traceback
 from typing import Optional, List
 
 import pytest
+
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
 from simaas.core.exceptions import SaaSRuntimeException
@@ -229,9 +231,10 @@ def test_namespace_rti_job_submit_status(
                                         'restricted_access': False, 'content_encrypted': False,
                                         'target_node_iid': None})
         ],
+        budget=None,
+        namespace=None,
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
     )
 
     # submit the job

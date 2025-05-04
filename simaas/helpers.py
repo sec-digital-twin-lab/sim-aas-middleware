@@ -17,6 +17,7 @@ from docker.models.images import Image
 from simaas.core.logging import Logging
 
 from simaas.core.processor import ProcessorBase
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import Task
 
 logger = Logging.get(__name__)
@@ -180,7 +181,7 @@ def docker_get_exposed_ports(image_name) -> List[Tuple[int, str]]:
 
 def docker_run_job_container(
         image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_pubkey: str, job_id: str,
-        budget: Optional[Task.Budget] = None, custom_ports: List[Tuple[int, str, str, int]] = None
+        budget: Optional[ResourceDescriptor] = None, custom_ports: List[Tuple[int, str, str, int]] = None
 ) -> str:
     with docker_client() as client:
         volumes = {

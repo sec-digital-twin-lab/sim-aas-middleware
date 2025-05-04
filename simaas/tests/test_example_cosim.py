@@ -5,7 +5,7 @@ import tempfile
 import threading
 
 from simaas.core.identity import Identity
-from simaas.nodedb.schemas import NodeInfo
+from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.core.logging import Logging
 from examples.cosim.room.processor import Parameters as RParameters, RoomProcessor, Result as RResult
 from examples.cosim.thermostat.processor import Parameters as TParameters, ThermostatProcessor, Result as TResult
@@ -87,7 +87,8 @@ def test_cosim(dummy_namespace):
                 output=[],
                 name='room',
                 description=None,
-                budget=None
+                budget=None,
+                namespace=None
             ),
             retain=False,
             custodian=custodian,
@@ -104,7 +105,8 @@ def test_cosim(dummy_namespace):
                 output=[],
                 name='thermostat',
                 description=None,
-                budget=None
+                budget=None,
+                namespace=None
             ),
             retain=False,
             custodian=custodian,

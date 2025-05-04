@@ -855,7 +855,8 @@ async def execute_job(
     )
 
     task = Task(
-        proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='', budget=None
+        proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='',
+        budget=None, namespace=None,
     )
 
     # create job
@@ -1744,7 +1745,7 @@ def test_cli_rti_job_submit_single_list_status_cancel(
                 Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
                             content_encrypted=False, target_node_iid=session_node.identity.id)
             ],
-            budget=None
+            budget=None, namespace=None,
         )
         # noinspection PyTypeChecker
         json.dump(task.model_dump(), f, indent=2)
@@ -1966,7 +1967,8 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
                     Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
                                 content_encrypted=False, target_node_iid=session_node.identity.id)
                 ],
-                budget=None
+                budget=None,
+                namespace=None
             )
             # noinspection PyTypeChecker
             json.dump(task.model_dump(), f, indent=2)

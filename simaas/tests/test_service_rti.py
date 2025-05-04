@@ -22,7 +22,7 @@ from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
 from simaas.nodedb.api import NodeDBProxy
-from simaas.nodedb.schemas import NodeInfo
+from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Task, JobStatus, Processor, Job, BatchStatus
@@ -186,7 +186,8 @@ def test_rest_submit_list_get_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job
@@ -278,7 +279,8 @@ def test_rest_submit_cancel_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job
@@ -338,7 +340,8 @@ def test_rest_submit_cancel_kill_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job
@@ -406,7 +409,8 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job
@@ -622,7 +626,8 @@ def test_rest_submit_batch(
             ],
             name=name,
             description=None,
-            budget=Task.Budget(vcpus=1, memory=1024)
+            budget=ResourceDescriptor(vcpus=1, memory=1024),
+            namespace=None
         )
 
     # create the tasks
@@ -830,7 +835,8 @@ def test_rest_submit_cosim(
         ],
         name='room',
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     task1 = Task(
@@ -855,7 +861,8 @@ def test_rest_submit_cosim(
         ],
         name='thermostat',
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job

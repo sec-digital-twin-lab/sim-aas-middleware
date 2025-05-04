@@ -10,6 +10,7 @@ from examples.prime.factor_search.processor import Parameters as FactorSearchPar
     Result
 from examples.prime.factorisation.processor import Parameters as FactorisationParameters, ProcessorFactorisation
 from simaas.dor.schemas import DataObject
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, Job, Processor
 from simaas.tests.conftest import add_test_processor, BASE_DIR, DummyProgressListener
 
@@ -142,7 +143,8 @@ def test_proc_factorisation_cancel(dummy_namespace):
         )],
         name=None,
         description=None,
-        budget=None
+        budget=None,
+        namespace=None
     )
     result = dummy_namespace.rti.submit([task])
     job: Job = result[0]
@@ -304,7 +306,8 @@ def test_factor_search_submit_list_get_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
 
     # submit the job
@@ -383,7 +386,8 @@ def test_factorisation_submit_list_get_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]

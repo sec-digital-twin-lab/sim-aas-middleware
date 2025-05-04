@@ -20,11 +20,12 @@ from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_load_image, docker_delete_image, docker_find_image, docker_check_image_platform, \
     docker_get_exposed_ports
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBJobInfo, DBDeployedProcessor
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job, Task, JobStatus
+from simaas.rti.schemas import Processor, Job, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -254,7 +255,7 @@ def batch_deregister_job_def(proc: Processor, config: Optional[AWSConfiguration]
 
 def batch_run_job(
         repository_name: str, proc: Processor, custodian_address: str, custodian_pubkey: str, job_id: str,
-        budget: Task.Budget, config: Optional[AWSConfiguration] = None
+        budget: ResourceDescriptor, config: Optional[AWSConfiguration] = None
 ) -> str:
     # get the client
     client, config = get_batch_client(config)
