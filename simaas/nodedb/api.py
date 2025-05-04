@@ -4,7 +4,7 @@ import abc
 from typing import Optional, List, Dict, Tuple
 
 from simaas.core.identity import Identity
-from simaas.nodedb.schemas import NodeInfo
+from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 
@@ -28,6 +28,15 @@ class NodeDBService(abc.ABC):
 
             EndpointDefinition('POST', DB_ENDPOINT_PREFIX, 'identity',
                                self.update_identity, Identity),
+
+            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'namespace/{name}',
+                               self.get_namespace, Optional[NamespaceInfo]),
+
+            EndpointDefinition('GET', DB_ENDPOINT_PREFIX, 'namespace',
+                               self.get_namespaces, List[NamespaceInfo]),
+
+            EndpointDefinition('POST', DB_ENDPOINT_PREFIX, 'namespace/{name}',
+                               self.update_namespace_budget, NamespaceInfo),
         ]
 
     @abc.abstractmethod
@@ -67,6 +76,23 @@ class NodeDBService(abc.ABC):
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
         """
 
+    @abc.abstractmethod
+    def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
+        """
+        Returns information of a specific namespace.
+        """
+
+    @abc.abstractmethod
+    def get_namespaces(self) -> List[NamespaceInfo]:
+        """
+        Returns a list of all namespaces.
+        """
+
+    @abc.abstractmethod
+    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+        """
+        Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
+        """
 
 class NodeDBProxy(EndpointProxy):
     @classmethod
@@ -98,3 +124,16 @@ class NodeDBProxy(EndpointProxy):
     def update_identity(self, identity: Identity) -> Optional[Identity]:
         serialised_identity = self.post('identity', body=identity.model_dump())
         return Identity.model_validate(serialised_identity) if serialised_identity else None
+
+    def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
+        serialised_namespace = self.get(f"namespace/{name}")
+        return NamespaceInfo.model_validate(serialised_namespace) if serialised_namespace else None
+
+    def get_namespaces(self) -> Dict[str, NamespaceInfo]:
+        return {
+            item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespaces")
+        }
+
+    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+        serialised_namespace = self.post(f'namespace/{name}', body=budget.model_dump())
+        return NamespaceInfo.model_validate(serialised_namespace) if serialised_namespace else None

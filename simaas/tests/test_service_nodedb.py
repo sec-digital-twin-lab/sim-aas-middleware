@@ -14,7 +14,9 @@ from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
-from simaas.nodedb.schemas import NodeInfo
+from simaas.nodedb.protocol import P2PReserveNamespaceResources, P2PCancelNamespaceReservation, \
+    P2PClaimNamespaceResources, P2PReleaseNamespaceResources
+from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -336,3 +338,161 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
     # get the identity last seen
     identity: Identity = module_nodedb_proxy.get_identity(module_node.identity.id)
     assert identity.last_seen > last_seen
+
+
+def test_namespace_get_update(module_node, module_nodedb_proxy):
+    name = 'my_namespace'
+    budget = ResourceDescriptor(vcpus=2, memory=4096)
+
+    # try to get a namespace that doesn't exist
+    namespace: Optional[NamespaceInfo] = module_nodedb_proxy.get_namespace(name)
+    assert namespace is None
+
+    # update the namespace (create it)
+    namespace: NamespaceInfo = module_nodedb_proxy.update_namespace_budget(name=name, budget=budget)
+    assert namespace.name == name
+    assert namespace.budget.vcpus == budget.vcpus
+    assert namespace.budget.memory == budget.memory
+
+    # try to get a namespace that should exist now
+    namespace: Optional[NamespaceInfo] = module_nodedb_proxy.get_namespace(name)
+    assert namespace is not None
+
+@pytest.mark.asyncio
+async def test_namespace_reserve_cancel(module_node, module_nodedb_proxy):
+    name = 'my_namespace2'
+    budget = ResourceDescriptor(vcpus=2, memory=4096)
+
+    # update the namespace (create it)
+    namespace: NamespaceInfo = module_nodedb_proxy.update_namespace_budget(name=name, budget=budget)
+    assert namespace.name == name
+    assert namespace.budget.vcpus == budget.vcpus
+    assert namespace.budget.memory == budget.memory
+
+    module_node: Node = module_node
+    peer = module_node.info
+
+    # make reservation with too much CPUs
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation1", ResourceDescriptor(vcpus=4, memory=4096)
+    )
+    assert not accepted
+
+    # make reservation with too much memory
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation2", ResourceDescriptor(vcpus=2, memory=8192)
+    )
+    assert not accepted
+
+    # make reservation that succeeds
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation3", ResourceDescriptor(vcpus=2, memory=4096)
+    )
+    assert accepted
+
+    # make reservation that fails
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation4", ResourceDescriptor(vcpus=2, memory=4096)
+    )
+    assert not accepted
+
+    # cancel reservation that doesn't exist
+    await P2PCancelNamespaceReservation.perform(
+        module_node, peer, name, "reservation55"
+    )
+
+    # cancel reservation3
+    await P2PCancelNamespaceReservation.perform(
+        module_node, peer, name, "reservation3"
+    )
+
+    # make reservation that should now succeed
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation4", ResourceDescriptor(vcpus=2, memory=4096)
+    )
+    assert accepted
+
+@pytest.mark.asyncio
+async def test_namespace_reserve_claim_release(module_node, module_nodedb_proxy):
+    name = 'my_namespace3'
+    budget = ResourceDescriptor(vcpus=2, memory=4096)
+
+    # update the namespace (create it)
+    namespace: NamespaceInfo = module_nodedb_proxy.update_namespace_budget(name=name, budget=budget)
+    assert namespace.name == name
+    assert namespace.budget.vcpus == budget.vcpus
+    assert namespace.budget.memory == budget.memory
+
+    module_node: Node = module_node
+    peer = module_node.info
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 0
+    assert len(namespace.claims) == 0
+    assert len(namespace.jobs) == 0
+
+    # make reservation
+    accepted, reason = await P2PReserveNamespaceResources.perform(
+        module_node, peer, name, "reservation", ResourceDescriptor(vcpus=2, memory=4096)
+    )
+    assert accepted
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 1
+    assert len(namespace.claims) == 0
+    assert len(namespace.jobs) == 0
+
+    # claim a reservation that doesn't exist
+    job_id = 'job123'
+    accepted, reason = await P2PClaimNamespaceResources.perform(
+        module_node, peer, name, "reservation55", job_id
+    )
+    assert not accepted
+    assert reason == f"Reservation 'reservation55' not found in namespace '{name}'"
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 1
+    assert len(namespace.claims) == 0
+    assert len(namespace.jobs) == 0
+
+    # claim the existing reservation
+    job_id = 'job123'
+    accepted, reason = await P2PClaimNamespaceResources.perform(
+        module_node, peer, name, "reservation", job_id
+    )
+    assert accepted
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 0
+    assert len(namespace.claims) == 1
+    assert len(namespace.jobs) == 1
+
+    # release a claim that doesn't exist
+    wrong_job_id = 'job555'
+    accepted, reason = await P2PReleaseNamespaceResources.perform(
+        module_node, peer, name, wrong_job_id
+    )
+    assert not accepted
+    assert reason == f"Resource claim for job '{wrong_job_id}' not found in namespace '{name}'"
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 0
+    assert len(namespace.claims) == 1
+    assert len(namespace.jobs) == 1
+
+    # release the existing claim that doesn't exist
+    accepted, reason = await P2PReleaseNamespaceResources.perform(
+        module_node, peer, name, job_id
+    )
+    assert accepted
+
+    namespace: NamespaceInfo = module_node.db.get_namespace(name)
+    print(namespace)
+    assert len(namespace.reservations) == 0
+    assert len(namespace.claims) == 0
+    assert len(namespace.jobs) == 1

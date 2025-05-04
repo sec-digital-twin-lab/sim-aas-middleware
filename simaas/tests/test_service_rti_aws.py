@@ -14,11 +14,8 @@ import pytest
 from examples.cosim.room.processor import Result as RResult
 from examples.cosim.thermostat.processor import Result as TResult
 from simaas.core.helpers import generate_random_string
-
-from simaas.nodedb.schemas import NodeInfo
-
+from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.node.default import DefaultNode, DORType, RTIType
-
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
@@ -338,7 +335,8 @@ def test_rest_submit_list_get_job(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=2048)
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
     )
 
     # submit the job
@@ -551,7 +549,8 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=2048)
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
     )
 
     # submit the job
@@ -767,7 +766,8 @@ def test_rest_submit_batch(
             ],
             name=name,
             description=None,
-            budget=Task.Budget(vcpus=1, memory=2048)
+            budget=ResourceDescriptor(vcpus=1, memory=2048),
+            namespace=None
         )
 
     # create the tasks
@@ -978,7 +978,8 @@ def test_rest_submit_cosim(
         ],
         name='room',
         description=None,
-        budget=Task.Budget(vcpus=1, memory=2048)
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
     )
 
     task1 = Task(
@@ -1003,7 +1004,8 @@ def test_rest_submit_cosim(
         ],
         name='thermostat',
         description=None,
-        budget=Task.Budget(vcpus=1, memory=2048)
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
     )
 
     # submit the job

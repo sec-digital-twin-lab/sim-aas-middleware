@@ -9,6 +9,7 @@ import pytest
 
 from examples.simple.abc.processor import ProcessorABC, write_value
 from simaas.core.logging import Logging
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
 from simaas.tests.conftest import BASE_DIR, DummyProgressListener
 
@@ -145,7 +146,8 @@ def test_abc_submit_list_get_job_no_secret(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None
     )
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]
@@ -226,7 +228,8 @@ def test_abc_submit_list_get_job_with_secret(
         ],
         name=None,
         description=None,
-        budget=Task.Budget(vcpus=1, memory=1024)
+        budget=ResourceDescriptor(vcpus=1, memory=1024),
+        namespace=None,
     )
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]

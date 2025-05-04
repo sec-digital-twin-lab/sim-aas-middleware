@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import List, Union, Any, Optional
+from typing import List, Union, Any, Optional, Tuple
 
 import pytest
 from docker.errors import ImageNotFound
@@ -855,7 +855,8 @@ async def execute_job(
     )
 
     task = Task(
-        proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='', budget=None
+        proc_id='fake_proc_id', user_iid=user.id, input=[a, b], output=[c], name='test', description='',
+        budget=None, namespace=None,
     )
 
     # create job
@@ -1744,7 +1745,7 @@ def test_cli_rti_job_submit_single_list_status_cancel(
                 Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
                             content_encrypted=False, target_node_iid=session_node.identity.id)
             ],
-            budget=None
+            budget=None, namespace=None,
         )
         # noinspection PyTypeChecker
         json.dump(task.model_dump(), f, indent=2)
@@ -1966,7 +1967,8 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
                     Task.Output(name='c', owner_iid=keystore.identity.id, restricted_access=False,
                                 content_encrypted=False, target_node_iid=session_node.identity.id)
                 ],
-                budget=None
+                budget=None,
+                namespace=None
             )
             # noinspection PyTypeChecker
             json.dump(task.model_dump(), f, indent=2)
@@ -2109,6 +2111,11 @@ def test_cli_service(temp_dir):
         assert False
 
     # start the service
+    rest_address: Tuple[str, int] = PortMaster.generate_rest_address('127.0.0.1')
+    host = rest_address[0]
+    rest_port = rest_address[1]
+    p2p_address: str = PortMaster.generate_p2p_address(host=host)
+    p2p_port = p2p_address.split(':')[-1]
     try:
         args = {
             'use-defaults': None,
@@ -2116,9 +2123,9 @@ def test_cli_service(temp_dir):
             'keystore-id': keystore.identity.id,
             'password': password,
             'datastore': temp_dir,
-            'rest-address': '127.0.0.1:5100',
-            'p2p-address': 'tcp://127.0.0.1:4100',
-            'boot-node': '127.0.0.1:4100',
+            'rest-address': f'{host}:{rest_port}',
+            'p2p-address': p2p_address,
+            'boot-node': f'{host}:{p2p_port}',
             'dor_type': 'basic',
             'rti_type': 'docker',
             'retain-job-history': False,

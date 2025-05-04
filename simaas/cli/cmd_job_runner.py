@@ -574,14 +574,14 @@ class JobRunner(CLICommand, ProgressListener):
                 asyncio.run(BatchBarrier.perform(member_p2p_address, 'initial_barrier', self._batch_status))
 
         # wait for the barrier to be released
-        self._logger.info(f"[barrier] waiting for barrier release 'initial_barrier'...")
+        self._logger.info("[barrier] waiting for barrier release 'initial_barrier'...")
         result: dict = self._barrier.wait_for_release('initial_barrier')
-        self._logger.info(f"[barrier] barrier release 'initial_barrier' received.")
+        self._logger.info("[barrier] barrier release 'initial_barrier' received.")
 
         # update batch status and extract it
         self._batch_status = BatchStatus.model_validate(result)
         if not self._extract_batch_status():
-            raise RTIException(f"Incomplete port mappings after barrier", details={
+            raise RTIException("Incomplete port mappings after barrier", details={
                 'ports': self._batch_ports
             })
 

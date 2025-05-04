@@ -22,3 +22,18 @@ class IdentityNotFoundError(NodeDBException):
         super().__init__('Identity not found', details={
             'iid': iid
         })
+
+class NamespaceNotFoundError(NodeDBException):
+    def __init__(self, namespace: str) -> None:
+        super().__init__(f"Namespace '{namespace}' not found", details={})
+
+
+class ReservationNotFoundError(NodeDBException):
+    def __init__(self, namespace: str, reservation_id: str) -> None:
+        super().__init__(f"Reservation '{reservation_id}' not found in namespace '{namespace}'", details={})
+
+
+class ClaimNotFoundError(NodeDBException):
+    def __init__(self, namespace: str, job_id: str) -> None:
+        super().__init__(f"Resource claim for job '{job_id}' not found in namespace '{namespace}'", details={})
+

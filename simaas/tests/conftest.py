@@ -41,7 +41,7 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchS
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '029f028248223c2ac828071a8ced95686d50f5f4'
+REPOSITORY_COMMIT_ID = '104d0161562e7a3ef6d3fb5c75d63b7adc9fc285'
 PROC_ABC_PATH = "examples/simple/abc"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent

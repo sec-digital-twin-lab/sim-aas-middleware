@@ -1,6 +1,5 @@
 import asyncio
 import os.path
-import traceback
 
 import canonicaljson
 from typing import Optional, Tuple, Any
@@ -247,7 +246,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            # trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             return NamespaceServiceResponse(
                 result=None, exception=ExceptionContent(id="unknown", reason=str(e), details=None)
             ), None

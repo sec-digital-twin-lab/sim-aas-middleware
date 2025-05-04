@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict
 
 from pydantic import BaseModel, Field
 
@@ -17,3 +17,19 @@ class NodeInfo(BaseModel):
     rest_address: Optional[Tuple[str, int]] = Field(title="REST Address", description="The address of the REST service (if applicable - not all nodes have the REST interface enabled).", examples=[('127.0.0.1', 5001)])
     retain_job_history: Optional[bool] = Field(title="Retain History", description="Indicates if the node retains the job history (only applicable to full or execution nodes that offer RTI services).", examples=[True])
     strict_deployment: Optional[bool] = Field(title="Strict Deployment", description="Indicates if the node restricts (un)deployment of processors to the node owner only (only applicable to full or execution nodes that offer RTI services).", examples=[True])
+
+
+class ResourceDescriptor(BaseModel):
+    vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs.")
+    memory: int = Field(..., title="Memory", description="The amount of memory (in megabytes).")
+
+
+class NamespaceInfo(BaseModel):
+    """
+    Information about a namespace.
+    """
+    name: str = Field(..., title="Name", description="The name of the namespace.")
+    budget: ResourceDescriptor = Field(..., title="Budget", description="The resource budget allocated to this namespace.")
+    reservations: Dict[str, ResourceDescriptor] = Field(..., title="Reservations", description="Reserved resources that have not yet been claimed.")
+    claims: Dict[str, ResourceDescriptor] = Field(..., title="Claims", description="Current resource claims by active jobs.")
+    jobs: List[str] = Field(..., title="Job Ids", description="A list of job ids that are associated with this namespace.")
