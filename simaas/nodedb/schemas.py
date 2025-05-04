@@ -17,3 +17,8 @@ class NodeInfo(BaseModel):
     rest_address: Optional[Tuple[str, int]] = Field(title="REST Address", description="The address of the REST service (if applicable - not all nodes have the REST interface enabled).", examples=[('127.0.0.1', 5001)])
     retain_job_history: Optional[bool] = Field(title="Retain History", description="Indicates if the node retains the job history (only applicable to full or execution nodes that offer RTI services).", examples=[True])
     strict_deployment: Optional[bool] = Field(title="Strict Deployment", description="Indicates if the node restricts (un)deployment of processors to the node owner only (only applicable to full or execution nodes that offer RTI services).", examples=[True])
+
+
+class ResourceDescriptor(BaseModel):
+    vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs.")
+    memory: int = Field(..., title="Memory", description="The amount of memory (in megabytes).")
