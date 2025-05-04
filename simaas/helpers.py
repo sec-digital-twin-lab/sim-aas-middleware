@@ -18,7 +18,6 @@ from simaas.core.logging import Logging
 
 from simaas.core.processor import ProcessorBase
 from simaas.nodedb.schemas import ResourceDescriptor
-from simaas.rti.schemas import Task
 
 logger = Logging.get(__name__)
 

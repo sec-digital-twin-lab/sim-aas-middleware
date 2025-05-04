@@ -252,7 +252,7 @@ class Service(CLICommand):
 
         # need to shut down SSH tunnel?
         if ssh_process is not None:
-            print(f"Terminating SSH tunnel process...")
+            print("Terminating SSH tunnel process...")
             ssh_process.terminate()
             ssh_process.wait()
 

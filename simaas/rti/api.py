@@ -186,7 +186,7 @@ class RTIProxy(EndpointProxy):
 
     def submit(self, tasks: List[Task], with_authorisation_by: Keystore) -> List[Job]:
         body = [task.model_dump() for task in tasks]
-        results = self.post(f"job", body=body, with_authorisation_by=with_authorisation_by)
+        results = self.post("job", body=body, with_authorisation_by=with_authorisation_by)
         return [Job.model_validate(result) for result in results]
 
     def get_jobs_by_proc(self, proc_id: str) -> List[Job]:

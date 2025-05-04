@@ -92,7 +92,7 @@ class ThermostatProcessor(ProcessorBase):
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             time.sleep(5)  # Ensure Room Simulator starts first
             client.connect((host, port))
-            listener.on_message(Severity.INFO, f"Thermostat Controller: Connected to Room Simulator")
+            listener.on_message(Severity.INFO, "Thermostat Controller: Connected to Room Simulator")
             listener.on_progress_update(20)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

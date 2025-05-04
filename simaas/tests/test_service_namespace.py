@@ -9,7 +9,6 @@ from typing import Optional, List
 
 import pytest
 
-from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
 from simaas.core.exceptions import SaaSRuntimeException

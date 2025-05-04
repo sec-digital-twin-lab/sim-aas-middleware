@@ -320,7 +320,7 @@ class DefaultRTIService(RTIServiceBase):
 
         # do we have a runner P2P address?
         if runner_p2p_address is None:
-            raise RTIException(f"Processor docker image invalid: runner P2P port not exposed")
+            raise RTIException("Processor docker image invalid: runner P2P port not exposed")
 
         # create the ports mapping information
         ports: Dict[str, str] = {
