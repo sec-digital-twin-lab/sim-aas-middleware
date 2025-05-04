@@ -5,6 +5,7 @@ of federations of computational models.
 ## Prerequisites
 - Python 3.12
 - Linux or MacOS operating system (not tested with Windows)
+- Docker (needed to build Processor Docker Images)
 
 ## Install
 
