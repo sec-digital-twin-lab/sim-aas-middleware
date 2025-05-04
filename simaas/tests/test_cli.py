@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import List, Union, Any, Optional
+from typing import List, Union, Any, Optional, Tuple
 
 import pytest
 from docker.errors import ImageNotFound
@@ -2111,6 +2111,11 @@ def test_cli_service(temp_dir):
         assert False
 
     # start the service
+    rest_address: Tuple[str, int] = PortMaster.generate_rest_address('127.0.0.1')
+    host = rest_address[0]
+    rest_port = rest_address[1]
+    p2p_address: str = PortMaster.generate_p2p_address(host=host)
+    p2p_port = p2p_address.split(':')[-1]
     try:
         args = {
             'use-defaults': None,
@@ -2118,9 +2123,9 @@ def test_cli_service(temp_dir):
             'keystore-id': keystore.identity.id,
             'password': password,
             'datastore': temp_dir,
-            'rest-address': '127.0.0.1:5100',
-            'p2p-address': 'tcp://127.0.0.1:4100',
-            'boot-node': '127.0.0.1:4100',
+            'rest-address': f'{host}:{rest_port}',
+            'p2p-address': p2p_address,
+            'boot-node': f'{host}:{p2p_port}',
             'dor_type': 'basic',
             'rti_type': 'docker',
             'retain-job-history': False,
