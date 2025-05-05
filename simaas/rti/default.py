@@ -2,106 +2,40 @@ import asyncio
 import json
 import os
 import socket
-import threading
 import time
 
 import traceback
-from threading import Lock
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, Tuple, Dict, List
 
-from fastapi import Request
-
-from sqlalchemy import create_engine, Column, String
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy_json import NestedMutableJson
-
-from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
-from simaas.core.helpers import generate_random_string, get_timestamp_now
-from simaas.core.identity import Identity
+from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
-    docker_kill_job_container, docker_container_running
-from simaas.rti.api import RTIService, JobRESTProxy
-from simaas.rti.exceptions import RTIException, ProcessorNotDeployedError
-from simaas.rti.schemas import Processor, Job, Task, JobStatus
-from simaas.dor.schemas import GitProcessorPointer, DataObject
+    docker_kill_job_container, docker_container_running, docker_get_exposed_ports
+from simaas.p2p.base import P2PAddress
+from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
+from simaas.rti.exceptions import RTIException
+from simaas.rti.protocol import P2PInterruptJob
+from simaas.rti.schemas import Processor, Job, JobStatus
+from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
 
-Base = declarative_base()
 
-
-class DBDeployedProcessor(Base):
-    __tablename__ = 'deployed_processor'
-    id = Column(String(64), primary_key=True)
-    state = Column(String, nullable=False)
-    image_name = Column(String, nullable=True)
-    gpp = Column(NestedMutableJson, nullable=True)
-    error = Column(String, nullable=True)
-
-
-class DBJobInfo(Base):
-    __tablename__ = 'job_info'
-    id = Column(String(64), primary_key=True)
-    proc_id = Column(String(64), nullable=False)
-    user_iid = Column(String(64), nullable=False)
-    rest_address = Column(String(64), nullable=False)
-    status = Column(NestedMutableJson, nullable=False)
-    job = Column(NestedMutableJson, nullable=False)
-    container_id = Column(String(16), nullable=False)
-
-
-def run_job_cmd(job_path: str, proc_path: str, proc_name: str, rest_address: str, rti_rest_address: str) -> None:
-    try:
-        cmd = JobRunner()
-        cmd.execute({
-            'job_path': job_path,
-            'proc_path': proc_path,
-            'proc_name': proc_name,
-            'rest_address': rest_address,
-            'rti_rest_address': rti_rest_address
-        })
-    except Exception as e:
-        logger.error(e)
-
-
-class DefaultRTIService(RTIService):
-    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True,
-                 job_concurrency: bool = True):
-        super().__init__(retain_job_history=retain_job_history, strict_deployment=strict_deployment,
-                         job_concurrency=job_concurrency)
+class DefaultRTIService(RTIServiceBase):
+    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
+        super().__init__(
+            node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
+        )
 
         # initialise properties
-        self._mutex = Lock()
-        self._node = node
         self._port_range = (6000, 9000)
         self._most_recent_port = None
 
-        # initialise directories
-        self._jobs_path = os.path.join(self._node.datastore, 'jobs')
-        self._procs_path = os.path.join(self._node.datastore, 'procs')
-        logger.info(f"[init] using jobs path at {self._jobs_path}")
-        logger.info(f"[init] using procs path at {self._procs_path}")
-        os.makedirs(self._jobs_path, exist_ok=True)
-        os.makedirs(self._procs_path, exist_ok=True)
-
-        # initialise database things
-        logger.info(f"[init] using DB file at {db_path}")
-        self._engine = create_engine(db_path)
-        Base.metadata.create_all(self._engine)
-        self._session_maker = sessionmaker(bind=self._engine)
-
-    def job_descriptor_path(self, job_id: str) -> str:
-        return os.path.join(self._jobs_path, job_id, 'job_descriptor.json')
-
-    def job_status_path(self, job_id: str) -> str:
-        return os.path.join(self._jobs_path, job_id, 'job_status.json')
-
-    def _perform_deployment(self, proc: Processor) -> None:
+    def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
         try:
             # search the network for the processor docker image data object and fetch it
@@ -153,14 +87,30 @@ class DefaultRTIService(RTIService):
                     commit_id = proc_obj.tags['commit_id']
                     clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
-                    # build the image
                     proc_path = proc_obj.tags['proc_path']
                     proc_path = os.path.join(repo_path, proc_path)
+
+                    # create the GPP descriptor
+                    gpp: GitProcessorPointer = GitProcessorPointer(
+                        repository=proc_obj.tags['repository'],
+                        commit_id=proc_obj.tags['commit_id'],
+                        proc_path=proc_obj.tags['proc_path'],
+                        proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
+                    )
+                    gpp_path = os.path.join(proc_path, 'gpp.json')
+                    with open(gpp_path, 'w') as f:
+                        json.dump(gpp.model_dump(), f, indent=2)
+
+                    # build the image
                     build_processor_image(proc_path, image_name, credentials=credentials)
+
+            # find out what ports are exposed
+            ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
 
             # update processor object
             proc.state = Processor.State.READY
             proc.image_name = image_name
+            proc.ports = ports
             proc.gpp = GitProcessorPointer(
                 repository=proc_obj.tags['repository'], commit_id=proc_obj.tags['commit_id'],
                 proc_path=proc_obj.tags['proc_path'], proc_descriptor=proc_obj.tags['proc_descriptor']
@@ -173,6 +123,7 @@ class DefaultRTIService(RTIService):
                     if record:
                         record.state = proc.state.value
                         record.image_name = proc.image_name
+                        record.ports = proc.ports
                         record.gpp = proc.gpp.model_dump()
                         record.error = proc.error
 
@@ -180,6 +131,7 @@ class DefaultRTIService(RTIService):
                         logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
                                        f"{proc.image_name} expected to exist but not found -> creating now.")
                         session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
+                                                        ports=proc.ports,
                                                         gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
                     session.commit()
 
@@ -192,338 +144,88 @@ class DefaultRTIService(RTIService):
         finally:
             loop.close()
 
-    def _perform_undeployment(self, proc_id: str, image_name: str, keep_image: bool = True) -> None:
-        # remove the record from the db
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBDeployedProcessor).get(proc_id)
-                if record:
-                    session.delete(record)
-                    session.commit()
-                else:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] db record not found for removal.")
-
+    def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
         # remove the docker image (if applicable)
         if not keep_image:
             try:
-                docker_delete_image(image_name)
+                docker_delete_image(proc.image_name)
 
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(f"[undeploy:{shorten_id(proc_id)}] failed to delete docker image {image_name}: {trace}")
+                logger.error(
+                    f"[undeploy:{shorten_id(proc.id)}] failed to delete docker image {proc.image_name}: {trace}"
+                )
 
-    def _find_available_job_address(self, max_attempts: int = 100) -> Tuple[str, int]:
-        def is_port_free(_host: str, _port: int) -> bool:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
-                try:
-                    sock.connect((_host, _port))
-                    return False  # Connection succeeded, port is in use
-                except (socket.timeout, ConnectionRefusedError):
-                    return True  # Port is free
-
-        host = self._node.info.rest_address[0]
-        for i in range(max_attempts):
-            # update the most recent port
-            with self._mutex:
-                self._most_recent_port = self._most_recent_port + 1 if self._most_recent_port else self._port_range[0]
-                if self._most_recent_port >= self._port_range[1]:
-                    self._most_recent_port = self._port_range[0]
-                port = self._most_recent_port
-
-            if is_port_free(host, port):
-                return host, port
-
-        raise RuntimeError("No free ports found in the specified range.")
-
-    def is_deployed(self, proc_id: str) -> bool:
-        with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
-            return record is not None
-
-    def get_all_procs(self) -> List[Processor]:
-        """
-        Retrieves a dict of all deployed processors by their id.
-        """
-        with self._session_maker() as session:
-            records = session.query(DBDeployedProcessor).all()
-            result = []
-            for record in records:
-                result.append(Processor(id=record.id, state=Processor.State(record.state),
-                                        image_name=record.image_name,
-                                        gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
-                                        error=record.error))
-
-            return result
-
-    def get_proc(self, proc_id: str) -> Optional[Processor]:
-        """
-        Retrieves a specific processors given its id.
-        """
-        with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
-            if record:
-                return Processor(id=record.id, state=Processor.State(record.state),
-                                 image_name=record.image_name,
-                                 gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
-                                 error=record.error)
-            else:
-                return None
-
-    def deploy(self, proc_id: str) -> Processor:
-        """
-        Deploys a processor.
-        """
-
-        # is the processor already deployed?
-        proc = self.get_proc(proc_id)
-        if proc is not None:
-            return proc
-
-        # begin deployment
+        # remove the record from the db
         with self._mutex:
-            # create a placeholder processor object
-            proc = Processor(id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, gpp=None, error=None)
-
-            # update or create db record
             with self._session_maker() as session:
                 record = session.query(DBDeployedProcessor).get(proc.id)
                 if record:
-                    record.state = proc.state.value
-                    record.image_name = proc.image_name
-                    record.gpp = proc.gpp.model_dump()
-                    record.error = proc.error
-
-                else:
-                    session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                    gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
-                session.commit()
-
-            # start the deployment worker
-            threading.Thread(target=self._perform_deployment, args=(proc,)).start()
-
-            return proc
-
-    def undeploy(self, proc_id: str) -> Optional[Processor]:
-        """
-        Removes a processor from the RTI (if it exists).
-        """
-        with self._mutex:
-            with self._session_maker() as session:
-                # do we have a db record for this processor?
-                record = session.query(DBDeployedProcessor).get(proc_id)
-                if not record:
-                    return None
-
-                # create the processor object
-                proc = Processor(id=record.id, state=Processor.State(record.state),
-                                 image_name=record.image_name,
-                                 gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
-                                 error=record.error)
-
-                # is the state failed? -> delete the db record
-                if proc.state == Processor.State.FAILED:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] processor failed -> removing it. "
-                                   f"error: {record.error}")
                     session.delete(record)
                     session.commit()
+                else:
+                    logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-                # is the state ready? -> update state to 'busy' and begin undeployment
-                elif proc.state == Processor.State.READY:
-                    # update the state to busy
-                    proc.state = Processor.State.BUSY_UNDEPLOY
-                    record.state = proc.state.value
-                    session.commit()
-
-                    # start the worker
-                    threading.Thread(target=self._perform_undeployment, args=(proc.id, proc.image_name,)).start()
-
-                # is the state busy going up? -> throw error
-                elif proc.state == Processor.State.BUSY_DEPLOY:
-                    raise RTIException("Cannot undeploy a processor that is currently deploying. Try again later.")
-
-                # is the state busy going down? -> do nothing
-                elif proc.state == Processor.State.BUSY_DEPLOY:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] already undeploying.")
-
-                return proc
-
-    def submit(self, proc_id: str, task: Task, request: Request) -> Job:
-        """
-        Submits a task to a deployed processor, thereby creating a new job. Authorisation is required by the owner
-        of the task/job.
-        """
-
-        # get the user's identity and check if it's identical with that's indicated in the task
-        iid = request.headers['saasauth-iid']
-        if iid != task.user_iid:
-            raise RTIException("Mismatch between user indicated in task and user making request", details={
-                'iid': iid,
-                'task': task
-            })
-        user: Identity = self._node.db.get_identity(iid)
-
-        # get the processor
-        proc = self.get_proc(task.proc_id)
-        if proc is None:
-            raise ProcessorNotDeployedError({
-                'proc_id': proc_id
-            })
-
-        # create the job folder with a generated job id
-        job_id = generate_random_string(8)
-        job_path = os.path.join(self._jobs_path, job_id)
-        os.makedirs(job_path, exist_ok=True)
-
-        # create the initial job descriptor and write to file
-        job = Job(id=job_id, task=task, retain=self._retain_job_history, custodian=self._node.info,
-                  proc_name=proc.gpp.proc_descriptor.name, t_submitted=get_timestamp_now())
-        descriptor_path = os.path.join(job_path, 'job.descriptor')
-        with open(descriptor_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(job.model_dump(), f, indent=2)
-
-        # write the gpp descriptor
-        gpp_path = os.path.join(job_path, 'gpp.descriptor')
-        with open(gpp_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(proc.gpp.model_dump(), f, indent=2)
-
-        # create the initial job status and write to file
-        status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
-                           errors=[], message=None)
-        status_path = os.path.join(job_path, 'job.status')
-        with open(status_path, 'w') as f:
-            # noinspection PyTypeChecker
-            json.dump(status.model_dump(), f, indent=2)
-
-        # determine REST address
-        job_address = self._find_available_job_address()
+    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+        # get the runner address and custom port mappings (if any)
+        runner_p2p_address, custom_ports, ports = self._map_ports(proc.ports)
 
         # start the job container and keep the container id
-        logger.info(f"[submit:{shorten_id(proc_id)}] [job:{job.id}] start job container")
-        container_id = docker_run_job_container(proc.image_name, job_path, job_address)
+        container_id = docker_run_job_container(
+            proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
+            budget=job.task.budget, custom_ports=custom_ports
+        )
 
-        # write the initial job info database record
-        with self._mutex:
-            with self._session_maker() as session:
-                record = DBJobInfo(id=job.id, proc_id=proc_id, user_iid=user.id,
-                                   rest_address=f"{job_address[0]}:{job_address[1]}",
-                                   status=status.model_dump(), job=job.model_dump(),
-                                   container_id=container_id)
-                session.add(record)
-                session.commit()
+        if submitted:
+            # keep information to terminate if necessary
+            submitted.append((job, container_id))
 
-        return job
+        # update the runner information
+        with self._session_maker() as session:
+            record = session.get(DBJobInfo, job.id)
+            record.runner['container_id'] = container_id
+            record.runner['__ports'] = ports
+            session.commit()
 
-    def jobs_by_proc(self, proc_id: str) -> List[Job]:
-        """
-        Retrieves a list of active jobs processed by a processor. Any job that is pending execution or actively
-        executed will be included in the list.
-        """
-        # get the records
-        with self._mutex:
-            with self._session_maker() as session:
-                records = session.query(DBJobInfo).filter_by(proc_id=proc_id).all()
+        return container_id
 
-        # parse the records
-        result: List[Job] = []
-        for record in records:
-            status = JobStatus.model_validate(record.status)
-            if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                JobStatus.State.POSTPROCESSING]:
-                job = Job.model_validate(record.job)
-                result.append(job)
+    def perform_submit_single(self, job: Job, proc: Processor) -> None:
+        container_id = None
+        try:
+            container_id = self._perform_submit(job, proc)
+            logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> container {container_id}")
 
-        return result
+        except Exception as e:
+            msg = f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] failed -> "
+            logger.error(msg + (f"terminating {container_id}" if container_id else "no container to terminate"))
+            if container_id:
+                docker_kill_job_container(container_id)
 
-    def jobs_by_user(self, request: Request) -> List[Job]:
-        """
-        Retrieves a list of active jobs by a user. If the user is the node owner, all active jobs will be returned.
-        """
-        # get the records
-        user: Identity = self._node.db.get_identity(request.headers['saasauth-iid'])
-        with self._mutex:
-            with self._session_maker() as session:
-                if self._node.identity.id == user.id:
-                    records = session.query(DBJobInfo).all()
-                else:
-                    records = session.query(DBJobInfo).filter_by(user_iid=user.id).all()
+            raise e
 
-        # any time period provided?
-        result: List[Job] = []
-        if 'period' in request.query_params:
-            # collect all jobs within the time period
-            cutoff = get_timestamp_now() - int(request.query_params['period']) * 3600 * 1000
-            for record in records:
-                # within time period?
-                job = Job.model_validate(record.job)
-                if job.t_submitted > cutoff:
-                    result.append(job)
+    def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> None:
+        submitted: List[Tuple[Job, str]] = []
+        for job, status, proc in batch:
+            try:
+                container_id = self._perform_submit(job, proc, submitted=submitted)
+                logger.info(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] successful"
+                            f" -> container {container_id}")
 
-        else:
-            # collect ony active jobs
-            for record in records:
-                status = JobStatus.model_validate(record.status)
-                if status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                    JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                    JobStatus.State.POSTPROCESSING]:
-                    job = Job.model_validate(record.job)
-                    result.append(job)
+            except Exception as e:
+                logger.error(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] failed")
 
-        return result
+                # Something went wrong, kill already existing containers so there are no zombies from this batch.
+                for job, container_id in submitted:
+                    logger.info(f"[submit:batch:{batch_id}] [job:{job.id}] kill zombie container {container_id}")
+                    docker_kill_job_container(container_id)
 
-    def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
-        """
-        Updates the status of a particular job. Authorisation is required by the owner of the job
-        (i.e., the user that has created the job by submitting the task in the first place).
-        """
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the record
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                raise e
 
-                # check the status
-                status = JobStatus.model_validate(record.status)
-                if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                        JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                        JobStatus.State.POSTPROCESSING, JobStatus.State.CANCELLED]:
-                    raise RTIException(f"Job {job_id} is not active -> status cannot be updated.")
-
-                # update the status
-                record.status = job_status.model_dump()
-                session.commit()
-
-    def get_job_owner_iid(self, job_id: str) -> str:
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
-                return record.user_iid
-
-    def get_job_status(self, job_id: str) -> JobStatus:
-        """
-        Retrieves detailed information about the status of a job. Authorisation is required by the owner of the job
-        (i.e., the user that has created the job by submitting the task in the first place).
-        """
-        # get the record
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
-
-        return JobStatus.model_validate(record.status)
-
-    def _perform_cancel(self, job_id: str, rest_address: Tuple[str, int], grace_period: int = 30) -> None:
+    def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         # attempt to cancel the job
         try:
-            job_proxy = JobRESTProxy(rest_address)
-            job_proxy.job_cancel()
+            asyncio.run(P2PInterruptJob.perform(peer_address))
+
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
@@ -532,7 +234,7 @@ class DefaultRTIService(RTIService):
         with self._session_maker() as session:
             # get the record and status
             record = session.query(DBJobInfo).get(job_id)
-            container_id = record.container_id
+            container_id = record.runner['container_id']
 
             deadline = get_timestamp_now() + grace_period * 1000
             while get_timestamp_now() < deadline:
@@ -559,54 +261,73 @@ class DefaultRTIService(RTIService):
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                 logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
 
-    def job_cancel(self, job_id: str) -> JobStatus:
-        """
-        Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
-        possible.
-        """
-        # get the record
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+    def perform_purge(self, record: DBJobInfo) -> None:
+        # try to kill the container (if anything is left)
+        try:
+            container_id = record.runner['container_id']
+            docker_kill_job_container(container_id)
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
 
-        # check the status
-        status = JobStatus.model_validate(record.status)
-        if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                JobStatus.State.PREPROCESSING, JobStatus.State.RUNNING,
-                                JobStatus.State.POSTPROCESSING]:
-            raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
+    def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
+        # in case the of the default RTI the port mapping is actually already known during submission time.
+        # so we just need to extract it here...
+        ports_ref: Dict[str, str] = runner_details['__ports']
+        ports: Dict[str, Optional[str]] = runner_details['ports']
+        for local in ports.keys():
+            ref = ports_ref[local]
+            ports[local] = ref
+        return ports
 
-        # start the cancellation worker
-        rest_address = record.rest_address.split(':')
-        rest_address = (rest_address[0], int(rest_address[1]))
-        threading.Thread(target=self._perform_cancel, args=(job_id, rest_address, )).start()
-
-        return status
-
-    def job_purge(self, job_id: str) -> JobStatus:
-        """
-        Purges a running job. It will be removed regardless of its state.
-        """
-        # remove the job from database
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the record
-                record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
-
-                # try to kill the container (if anything is left)
+    def _find_available_address(self, max_attempts: int = 100) -> Tuple[str, int]:
+        def is_port_free(_address: Tuple[str, int]) -> bool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(1)  # Set timeout to avoid blocking indefinitely
                 try:
-                    docker_kill_job_container(record.container_id)
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] killing Docker container {record.container_id} failed: {trace}")
+                    sock.connect(_address)
+                    return False  # Connection succeeded, port is in use
+                except (socket.timeout, ConnectionRefusedError):
+                    return True  # Port is free
 
-                # delete the record
-                session.delete(record)
-                session.commit()
+        host: str = self._node.info.rest_address[0]
+        for i in range(max_attempts):
+            with self._mutex:
+                # update the most recent port
+                self._most_recent_port = self._most_recent_port + 1 if self._most_recent_port else self._port_range[0]
+                if self._most_recent_port >= self._port_range[1]:
+                    self._most_recent_port = self._port_range[0]
 
-                status = JobStatus.model_validate(record.status)
-                return status
+                # create the address
+                address = (host, self._most_recent_port)
+
+            # test the address
+            if is_port_free(address):
+                return address
+
+        raise RuntimeError("No free ports found in the specified range.")
+
+    def _map_ports(self, exposed_ports: List[Tuple[int, str]]) -> Tuple[Tuple[str, int], List[Tuple[int, str, str, int]], Dict[str, str]]:
+        # create a mapping of ports exposed by the Docket image to P2P addresses
+        custom_ports: List[Tuple[int, str, str, int]] = []
+        runner_p2p_address: Optional[Tuple[str, int]] = None
+        for port, protocol in exposed_ports:
+            address = self._find_available_address()
+            if port == 6000 and protocol == 'tcp':
+                runner_p2p_address = address
+            else:
+                custom_ports.append((port, protocol, address[0], address[1]))
+
+        # do we have a runner P2P address?
+        if runner_p2p_address is None:
+            raise RTIException("Processor docker image invalid: runner P2P port not exposed")
+
+        # create the ports mapping information
+        ports: Dict[str, str] = {
+            # P2P protocol port is 6000/tcp by convention
+            "6000/tcp": f"tcp://{runner_p2p_address[0]}:{runner_p2p_address[1]}",
+        }
+        for port, protocol, ext_host, ext_port in custom_ports:
+            ports[f"{port}/{protocol}"] = f"{protocol}://{ext_host}:{ext_port}"
+
+        return runner_p2p_address, custom_ports, ports

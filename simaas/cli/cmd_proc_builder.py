@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import traceback
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import docker
 from dotenv import load_dotenv
@@ -20,7 +20,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from simaas.helpers import docker_export_image, determine_default_rest_address
+from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch
 from simaas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
@@ -63,7 +63,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
 
 def build_processor_image(processor_path: str, image_name: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False) -> bool:
+                          force_build: bool = False, platform: Optional[str] = None) -> bool:
     # check if the image already exists
     client = docker.from_env()
     image_existed = False
@@ -89,7 +89,9 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
             credentials_path = os.path.join(tempdir, "credentials")
             try:
                 # assemble the command
-                command = ['docker', 'build', '--no-cache']
+                command: List[str] = ['docker', 'build', '--no-cache']
+                if platform:
+                    command.extend(['--platform', platform])
                 if credentials:
                     # write the credentials to file (temporarily)
                     with open(credentials_path, 'w') as f:
@@ -131,17 +133,23 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
 class ProcBuilderLocal(CLICommand):
     default_force_build = False
     default_keep_image = True
+    default_arch = docker_local_arch()
 
     def __init__(self):
         super().__init__('build-local', 'build a processor from local source', arguments=[
             Argument('--address', dest='address', action='store',
                      help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')"),
+            Argument('--arch', dest='arch', action='store',
+                     help=f"the architecture to be used for the image (default: {self.default_arch})"),
             Argument('--force-build', dest="force_build", action='store_const', const=True,
                      help="Force building a processor docker image even if one already exists."),
             Argument('--delete-image', dest="keep_image", action='store_const', const=False,
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
                           "image being replaced with the newly created one."),
+            Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
+            Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
+
             Argument('location', metavar='location', type=str, nargs=1,
                      help="the location of the processor")
 
@@ -166,6 +174,7 @@ class ProcBuilderLocal(CLICommand):
 
         default_if_missing(args, 'force_build', self.default_force_build)
         default_if_missing(args, 'keep_image', self.default_keep_image)
+        default_if_missing(args, 'arch', self.default_arch)
 
         # determine location
         location = args.get('location', [os.getcwd()])
@@ -231,11 +240,22 @@ class ProcBuilderLocal(CLICommand):
         user_name = getpass.getuser()
         proc_path = os.path.basename(args['location'])
         image_name = f"{user_name}/{descriptor.name}:{content_hash}"
-        print(f"Building image '{image_name}'. This may take a while...")
+        print(f"Building image '{image_name}' for platform '{args['arch']}'. This may take a while...")
+
+        # create the GPP descriptor
+        gpp: GitProcessorPointer = GitProcessorPointer(
+            repository=repo_name,
+            commit_id=f"content_hash:{content_hash}",
+            proc_path=proc_path,
+            proc_descriptor=descriptor
+        )
+        gpp_path = os.path.join(args['location'], 'gpp.json')
+        with open(gpp_path, 'w') as f:
+            json.dump(gpp.model_dump(), f, indent=2)
 
         # build the image
         image_existed = build_processor_image(args['location'], image_name, credentials=credentials,
-                                              force_build=args['force_build'])
+                                              force_build=args['force_build'], platform=args['arch'])
         if args['force_build'] or not image_existed:
             print(f"Done building image '{image_name}'.")
         else:
@@ -366,6 +386,17 @@ class ProcBuilderGithub(CLICommand):
             commit_id = repo.head.commit.hexsha
             image_name = f"{username}/{repo_name}/{descriptor.name}:{commit_id}"
             print(f"Building image '{image_name}'. This may take a while...")
+
+            # create the GPP descriptor
+            gpp: GitProcessorPointer = GitProcessorPointer(
+                repository=args['repository'],
+                commit_id=args['commit_id'],
+                proc_path=args['proc_path'],
+                proc_descriptor=descriptor
+            )
+            gpp_path = os.path.join(processor_path, 'gpp.json')
+            with open(gpp_path, 'w') as f:
+                json.dump(gpp.model_dump(), f, indent=2)
 
             # build the image
             image_existed = build_processor_image(processor_path, image_name, credentials=credentials,

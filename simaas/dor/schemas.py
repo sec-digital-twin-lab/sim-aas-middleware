@@ -33,6 +33,7 @@ class ProcessorDescriptor(BaseModel):
     name: str = Field(..., title="Processor Name", description="The name of the processor", examples=["urban-climate-sim"])
     input: List[IODataObject] = Field(..., title="Input Data Objects", description="A list of data objects that are consumed by the processor when executing a job.")
     output: List[IODataObject] = Field(..., title="Output Data Objects", description="A list of data objects that are produced by the processor when executing a job.")
+    required_secrets: List[str] = Field(..., title="Required Secrets", description="A list of environment variables that are required to be passed to the processor as secrets.")
 
 
 class GitProcessorPointer(BaseModel):
@@ -141,7 +142,7 @@ class DataObject(BaseModel):
     last_accessed: int = Field(..., title="Last Accessed", description="The timestamp (in UTC milliseconds since the beginning of the epoch) when the data object has been accessed the last time.", examples=[1664849510076])
     custodian: Optional[NodeInfo] = Field(title='Custodian', description="Information about the node that hosts this data object.")
     content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of the data object is encrypted.", examples=[False])
-    license: License = Field(..., title="License", description="The license information for this data object.")
+    license: Optional[License] = Field(title="License", description="The license information for this data object.")
     recipe: Optional[DataObjectRecipe] = Field(title="Recipe", description="If this data object has been produced by a processor, a recipe is provided. Data objects that are uploaded by users typically do not come with a recipe unless the user provides one manually when uploading the content to the DOR.")
 
 

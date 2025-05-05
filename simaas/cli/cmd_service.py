@@ -1,6 +1,7 @@
 import logging
 import os
 import signal
+import subprocess
 import time
 import traceback
 
@@ -12,7 +13,7 @@ from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode
+from simaas.node.default import DefaultNode, DORType, RTIType
 
 logger = Logging.get('cli')
 
@@ -70,10 +71,10 @@ class Service(CLICommand):
     default_rest_address = determine_default_rest_address()
     default_p2p_address = determine_default_p2p_address()
     default_boot_node_address = determine_default_rest_address()
-    default_service = 'full'
+    default_dor_service = DORType.BASIC.value
+    default_rti_service = RTIType.DOCKER.value
     default_retain_job_history = False
     default_strict_deployment = True
-    default_concurrency = True
     default_bind_all_address = False
 
     def __init__(self):
@@ -89,10 +90,12 @@ class Service(CLICommand):
             Argument('--boot-node', dest='boot-node', action='store',
                      help=f"REST address of an existing node for joining a network "
                           f"(default: '{self.default_boot_node_address}')."),
-            Argument('--type', dest='type', action='store', choices=['full', 'storage', 'execution'],
-                     help=f"indicate the type of service provided by the node: 'storage' and 'execution' "
-                          f"will only load the DOR or RTI modules, respectively; a 'full' node will provide "
-                          f"both (default: '{self.default_service}')."),
+            Argument('--dor-type', dest='dor_type', action='store', choices=[t.value for t in DORType],
+                     help=f"indicate the type of DOR service provided by the node "
+                          f"(default: '{self.default_dor_service}')."),
+            Argument('--rti-type', dest='rti_type', action='store', choices=[t.value for t in RTIType],
+                     help=f"indicate the type of RTI service provided by the node "
+                          f"(default: '{self.default_rti_service}')."),
             Argument('--retain-job-history', dest="retain-job-history", action='store_const', const=True,
                      help="[for execution/full nodes only] instructs the RTI to retain the job history (default "
                           "behaviour is to delete information of completed jobs). This flag should only be used for "
@@ -100,56 +103,73 @@ class Service(CLICommand):
             Argument('--disable-strict-deployment', dest="strict-deployment", action='store_const', const=False,
                      help="[for execution/full nodes only] instructs the RTI to disable strict processor deployment "
                           "(default: enabled, i.e., only the node owner identity can deploy/undeploy processors.)"),
-            Argument('--disable-concurrency', dest="job-concurrency", action='store_const', const=False,
-                     help="[for execution/full nodes only] instructs the RTI to disable concurrent job execution "
-                          "(default: enabled, i.e., the node processes jobs concurrently.)"),
             Argument('--bind-all-address', dest="bind-all-address", action='store_const', const=True,
                      help="allows REST and P2P service to bind and accept connections pointing to any address of the "
                           "machine i.e. 0.0.0.0 (useful for docker)")
         ])
 
-    def execute(self, args: dict) -> None:
+    def execute(self, args: dict, wait_for_termination: bool = True) -> None:
+        use_ssh_tunneling = False
+
         if args['use-defaults']:
             default_if_missing(args, 'datastore', self.default_datastore)
             default_if_missing(args, 'rest-address', self.default_rest_address)
             default_if_missing(args, 'p2p-address', self.default_p2p_address)
             default_if_missing(args, 'boot-node', self.default_boot_node_address)
-            default_if_missing(args, 'type', self.default_service)
+            default_if_missing(args, 'dor_type', self.default_dor_service)
+            default_if_missing(args, 'rti_type', self.default_rti_service)
             default_if_missing(args, 'retain-job-history', self.default_retain_job_history)
             default_if_missing(args, 'strict-deployment', self.default_strict_deployment)
-            default_if_missing(args, 'job-concurrency', self.default_concurrency)
             default_if_missing(args, 'bind-all-address', self.default_bind_all_address)
 
         else:
             prompt_if_missing(args, 'datastore', prompt_for_string,
                               message="Enter path to datastore:",
                               default=self.default_datastore)
-            prompt_if_missing(args, 'rest-address', prompt_for_string,
-                              message="Enter address for REST service:",
-                              default=self.default_rest_address)
-            prompt_if_missing(args, 'p2p-address', prompt_for_string,
-                              message="Enter address for P2P service:",
-                              default=self.default_p2p_address)
-            prompt_if_missing(args, 'boot-node', prompt_for_string,
-                              message="Enter REST address of boot node:",
-                              default=self.default_boot_node_address)
 
-            if args['type'] is None:
-                args['type'] = prompt_for_selection([
-                    Choice('full', 'Full node (i.e., DOR + RTI services)'),
-                    Choice('storage', 'Storage node (i.e., DOR service only)'),
-                    Choice('execution', 'Execution node (i.e., RTI service only)')
-                ], "Select the type of service:")
+            if args['dor_type'] is None:
+                args['dor_type'] = prompt_for_selection([
+                    Choice(DORType.NONE.value, 'None'),
+                    Choice(DORType.BASIC.value, 'Basic')
+                ], "Select the type of DOR service:")
 
-            if args['type'] == 'full' or args['type'] == 'execution':
+            if args['rti_type'] is None:
+                args['rti_type'] = prompt_for_selection([
+                    Choice(RTIType.NONE.value, 'None'),
+                    Choice(RTIType.DOCKER.value, 'Docker'),
+                    Choice(RTIType.AWS.value, 'AWS')
+                ], "Select the type of RTI service:")
+
+            if args['rti_type'] in [RTIType.DOCKER.value, RTIType.AWS.value]:
                 prompt_if_missing(args, 'retain-job-history', prompt_for_confirmation,
                                   message='Retain RTI job history?', default=False)
                 prompt_if_missing(args, 'bind-all-address', prompt_for_confirmation,
                                   message='Bind service to all network addresses?', default=False)
                 prompt_if_missing(args, 'strict-deployment', prompt_for_confirmation,
                                   message='Strict processor deployment?', default=True)
-                prompt_if_missing(args, 'job-concurrency', prompt_for_confirmation,
-                                  message='Concurrent job processing?', default=True)
+
+            # determine if SSH tunneling requires
+            required = ['SSH_TUNNEL_HOST', 'SSH_TUNNEL_USER', 'SSH_TUNNEL_KEY_PATH', 'SIMAAS_CUSTODIAN_HOST']
+            use_ssh_tunneling = args['rti_type'] == RTIType.AWS.value and all(var in os.environ for var in required)
+            if use_ssh_tunneling:
+                print("AWS SSH Tunneling information found? YES")
+                args['rest-address'] = "localhost:5999"
+                args['p2p-address'] = "tcp://localhost:4999"
+                args['boot-node'] = "localhost:5999"
+            else:
+                print("AWS SSH Tunneling information found? NO")
+
+            if not use_ssh_tunneling:
+                prompt_if_missing(args, 'rest-address', prompt_for_string,
+                                  message="Enter address for REST service:",
+                                  default=self.default_rest_address)
+                prompt_if_missing(args, 'p2p-address', prompt_for_string,
+                                  message="Enter address for P2P service:",
+                                  default=self.default_p2p_address)
+
+                prompt_if_missing(args, 'boot-node', prompt_for_string,
+                                  message="Enter REST address of boot node:",
+                                  default=self.default_boot_node_address)
 
         keystore = load_keystore(args, ensure_publication=False)
 
@@ -166,19 +186,73 @@ class Service(CLICommand):
                                   p2p_address=p2p_service_address,
                                   rest_address=rest_service_address,
                                   boot_node_address=boot_node_address,
-                                  enable_dor=args['type'] == 'full' or args['type'] == 'storage',
-                                  enable_rti=args['type'] == 'full' or args['type'] == 'execution',
+                                  dor_type=DORType[args['dor_type'].upper()],
+                                  rti_type=RTIType[args['rti_type'].upper()],
                                   retain_job_history=args['retain-job-history'],
                                   strict_deployment=args['strict-deployment'],
-                                  job_concurrency=args['job-concurrency'],
                                   bind_all_address=args['bind-all-address'])
 
         # print info message
-        if args['type'] == 'full' or args['type'] == 'execution':
-            print(f"Created '{args['type']}' node instance at {args['rest-address']}/{args['p2p-address']} "
-                  f"(keep RTI job history: {'Yes' if args['retain-job-history'] else 'No'})")
+        if args['rti_type'] == RTIType.NONE.value:
+            print(
+                f"Created '{args['dor_type']}/{args['rti_type']}' Sim-aaS node instance at "
+                f"{args['rest-address']}/{args['p2p-address']}"
+            )
         else:
-            print(f"Created '{args['type']}' node instance at {args['rest-address']}/{args['p2p-address']}")
+            print(
+                f"Created '{args['dor_type']}/{args['rti_type']}' Sim-aaS node instance at "
+                f"{args['rest-address']}/{args['p2p-address']}"
+                f"(keep RTI job history: {'Yes' if args['retain-job-history'] else 'No'}) "
+                f"(strict: {'Yes' if args['strict-deployment'] else 'No'}) "
+            )
+
+        # do we need to establish an AWS SSH tunnel?
+        ssh_process = None
+        if use_ssh_tunneling:
+            print("Trying to establish SSH tunnel...")
+
+            # get the environment variables need to establish tunnel
+            ssh_host = os.environ.get("SSH_TUNNEL_HOST")
+            ssh_user = os.environ.get("SSH_TUNNEL_USER")
+            ssh_key_path = os.environ.get("SSH_TUNNEL_KEY_PATH")
+
+            # determine the ports
+            rest_port = 5999
+            p2p_port = 4999
+            # rest_port: int = rest_service_address[1]
+            # p2p_port: str = p2p_service_address.split(':')[-1]
+            print(f"Using the following REST/P2P ports for AWS SSH tunneling: {rest_port}/{p2p_port}")
+
+            # SSH tunnel command (runs in the background)
+            ssh_command = [
+                "ssh",
+                "-N",  # Do not execute remote commands
+                "-R", f"0.0.0.0:{rest_port}:localhost:{rest_port}",  # Forward remote port 5999 to local port 5999
+                "-R", f"0.0.0.0:{p2p_port}:localhost:{p2p_port}",  # Forward remote port 4999 to local port 4999
+                "-i", ssh_key_path,  # Private key authentication
+                f"{ssh_user}@{ssh_host}"  # Remote SSH target
+            ]
+
+            # Start the SSH tunnel as a subprocess
+            ssh_process = subprocess.Popen(
+                ssh_command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            time.sleep(2)
+            print("AWS SSH tunnel should be established now!")
 
         # wait for termination...
-        WaitForTermination(node).wait_for_termination()
+        if wait_for_termination:
+            WaitForTermination(node).wait_for_termination()
+        else:
+            time.sleep(2)
+            node.shutdown()
+
+        # need to shut down SSH tunnel?
+        if ssh_process is not None:
+            print("Terminating SSH tunnel process...")
+            ssh_process.terminate()
+            ssh_process.wait()
+

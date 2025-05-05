@@ -1,5 +1,6 @@
 import socket
 import traceback
+from typing import List, Optional
 
 import uvicorn
 
@@ -7,6 +8,8 @@ from threading import Thread
 from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+
+from simaas.rest.auth import make_depends
 from starlette.responses import JSONResponse
 
 from simaas.core.exceptions import SaaSRuntimeException
@@ -65,7 +68,7 @@ class RESTApp:
             allow_headers=["*"],
         )
 
-    def register(self, endpoint: EndpointDefinition) -> None:
+    def register(self, endpoint: EndpointDefinition, dependencies: Optional[List[Depends]]) -> None:
         route = f"{endpoint.prefix}/{endpoint.rule}"
         logger.info(f"REST app is mapping {endpoint.method}:{route} to {endpoint.function}")
         if endpoint.method in ['POST', 'GET', 'PUT', 'DELETE']:
@@ -73,7 +76,7 @@ class RESTApp:
                                    endpoint.function,
                                    methods=[endpoint.method],
                                    response_model=endpoint.response_model,
-                                   dependencies=endpoint.dependencies,
+                                   dependencies=dependencies,
                                    description=endpoint.function.__doc__)
         else:
             raise UnsupportedRESTMethod(endpoint.method, route)
@@ -103,10 +106,11 @@ class RESTService:
 
     def add(self, endpoints: list[EndpointDefinition]) -> None:
         for endpoint in endpoints:
-            if endpoint.dependencies:
-                endpoint.dependencies = [Depends(d(self._node)) for d in endpoint.dependencies]
+            # determine dependencies
+            dependencies = make_depends(endpoint.function, self._node)
+            dependencies = [Depends(d(self._node)) for d in dependencies] if dependencies else None
 
-            self._app.register(endpoint)
+            self._app.register(endpoint, dependencies)
 
         # update the openapi schema
         self._app.api.openapi_schema = get_openapi(

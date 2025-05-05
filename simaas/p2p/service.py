@@ -1,10 +1,15 @@
 import json
+import os
+import socket
+import tempfile
 import threading
 import asyncio
+import traceback
+
 import zmq
 
 from threading import Lock
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 from zmq import Again
 from zmq.asyncio import Socket, Context
@@ -12,7 +17,7 @@ from zmq.asyncio import Socket, Context
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.p2p.base import P2PProtocol, P2PMessage
+from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond
 
 logger = Logging.get('p2p')
 
@@ -22,9 +27,11 @@ class P2PService:
         self._mutex = Lock()
         self._keystore = keystore
         self._address = address
+        self._port = int(address.split(':')[-1])
         self._socket: Optional[Socket] = None
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
+        self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
 
     def is_ready(self) -> bool:
         return self._socket is not None
@@ -38,7 +45,16 @@ class P2PService:
         """Returns the address (host:port) of the P2P service."""
         return self._address
 
-    def start_service(self, timeout: int = 500) -> None:
+    def port(self) -> int:
+        """Returns the port of the P2P service."""
+        return self._port
+
+    def fq_address(self) -> str:
+        """Returns the fully qualified address of the P2P service"""
+        fqdn = socket.getfqdn()
+        return f"tcp://{fqdn}:{self._port}"
+
+    def start_service(self, encrypt: bool = True, timeout: int = 5000) -> None:
         """Starts the TCP socket server at the specified address."""
         with self._mutex:
             if not self._socket:
@@ -48,9 +64,10 @@ class P2PService:
                     self._socket.setsockopt(zmq.LINGER, 0)
                     self._socket.setsockopt(zmq.RCVTIMEO, timeout)
                     self._socket.setsockopt(zmq.SNDTIMEO, timeout)
-                    self._socket.curve_secretkey = self._keystore.curve_secret_key()
-                    self._socket.curve_publickey = self._keystore.curve_public_key()
-                    self._socket.curve_server = True
+                    if encrypt:
+                        self._socket.curve_secretkey = self._keystore.curve_secret_key()
+                        self._socket.curve_publickey = self._keystore.curve_public_key()
+                        self._socket.curve_server = True
                     self._socket.bind(self._address)
                     logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
                 except Exception as e:
@@ -73,32 +90,69 @@ class P2PService:
 
     async def _handle_incoming_connections(self):
         logger.info(f"[{self._keystore.identity.name}] listening to incoming P2P connections...")
-        while not self._stop_event.is_set():
-            try:
-                cid, message = await self._socket.recv_multipart(flags=zmq.NOBLOCK)
-                await self._process_message(cid, message)
+        with tempfile.TemporaryDirectory() as tempdir:
+            while not self._stop_event.is_set():
+                try:
+                    frames = await self._socket.recv_multipart(flags=zmq.NOBLOCK)
+                    cid, rid, content = frames[:3]
 
-            except Again:
-                await asyncio.sleep(0.1)
+                    # do we have already a pending transfer?
+                    pending: Optional[Tuple[P2PProtocol, P2PMessage, str]] = self._pending.get(rid)
 
-            except Exception as e:
-                logger.warning(f"[{self._keystore.identity.name}] Exception in server loop: {e}")
+                    # if not, then treat it as a P2P message frame
+                    if pending is None:
+                        request: str = content.decode('utf-8')
+                        request: dict = json.loads(request)
+                        request: P2PMessage = P2PMessage.model_validate(request)
+
+                        # do we know the protocol?
+                        protocol = self._protocols.get(request.protocol)
+                        if protocol is None:
+                            logger.warning(
+                                f"[{self._keystore.identity.name}] unsupported protocol: {request.protocol} -> ignoring."
+                            )
+                            continue
+
+                        # does this request come with an attachment?
+                        if request.attachment_size > 0:
+                            attachment_path: str = os.path.join(tempdir, rid.decode('utf-8'))
+                            self._pending[rid] = (protocol, request, attachment_path)
+
+                        # if there is no attachment, process the message straight away
+                        else:
+                            await p2p_respond(
+                                self._socket, cid, rid, protocol, request, download_path=tempdir
+                            )
+
+                    # if it's pending, then we need to keep receiving the contents until the attachment has been
+                    # fully received.
+                    else:
+                        protocol: P2PProtocol = pending[0]
+                        request: P2PMessage = pending[1]
+                        attachment_path: str = pending[2]
+                        with open(attachment_path, 'ab') as f:
+                            f.write(content)
+
+                        # is the file size equal to the size of the attachment?
+                        file_size = os.path.getsize(attachment_path)
+                        if file_size == request.attachment_size:
+                            self._pending.pop(rid)
+                            await p2p_respond(
+                                self._socket, cid, rid, protocol, request, attachment_path, download_path=tempdir
+                            )
+
+                        elif file_size > request.attachment_size:
+                            logger.warning(
+                                f"[{self._keystore.identity.name}] attachment bigger than expected: "
+                                f"{request.protocol}:{cid} -> ignoring."
+                            )
+
+                except Again:
+                    await asyncio.sleep(0.1)
+
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    logger.warning(f"[{self._keystore.identity.name}] Exception in server loop: {trace}")
 
         logger.info(f"[{self._keystore.identity.name}] Stopped listening to incoming P2P connections.")
         self._socket.close()
-
-    async def _process_message(self, cid: bytes, message: bytes) -> None:
-        try:
-            request_str = message.decode('utf-8')
-            request_dict = json.loads(request_str)
-            request = P2PMessage.model_validate(request_dict)
-
-            protocol = self._protocols.get(request.protocol)
-            if protocol is None:
-                logger.warning(
-                    f"[{self._keystore.identity.name}] unsupported protocol: {request.protocol} -> ignoring.")
-                return
-
-            await protocol.process_and_reply(self._socket, cid, request)
-        except Exception as e:
-            logger.error(f"[{self._keystore.identity.name}] failed to process message: {e}")

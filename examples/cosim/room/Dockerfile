@@ -16,7 +16,7 @@ RUN --mount=type=secret,id=git_credentials \
     fi
 
 WORKDIR /sim-aas-middleware
-RUN git checkout dev-1.0.0
+RUN git checkout 33e81110431b5a088643f44ac0d846f080f0699b
 
 WORKDIR /processor
 COPY . .
@@ -25,6 +25,11 @@ RUN /venv/bin/pip install --upgrade pip setuptools
 RUN /venv/bin/pip install -r ./requirements.txt
 RUN /venv/bin/pip install /sim-aas-middleware
 
-EXPOSE 5000
+RUN mkdir /job
 
-ENTRYPOINT ["/venv/bin/simaas-cli", "run", "--job-path", "/job", "--proc-path", "/processor", "--rest-address", "0.0.0.0:5000"]
+EXPOSE 6000
+
+# Custom port used by the processor for the co-simulation
+EXPOSE 7001
+
+ENTRYPOINT ["/venv/bin/simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--service-address", "tcp://0.0.0.0:6000"]

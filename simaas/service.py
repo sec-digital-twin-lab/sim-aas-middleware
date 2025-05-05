@@ -11,7 +11,7 @@ from simaas.cli.helpers import CLIParser, Argument, CLICommand, default_if_missi
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.keystore import Keystore
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
-from simaas.node.default import DefaultNode
+from simaas.node.default import DefaultNode, DORType, RTIType
 
 
 class RunNode(CLICommand):
@@ -20,7 +20,8 @@ class RunNode(CLICommand):
     default_rest_address = determine_default_rest_address()
     default_p2p_address = determine_default_p2p_address()
     default_boot_node_address = determine_default_p2p_address()
-    default_service = 'full'
+    default_dor_service = DORType.BASIC.value
+    default_rti_service = RTIType.DOCKER.value
     default_retain_job_history = False
     default_strict_deployment = True
     default_bind_all_address = False
@@ -37,10 +38,12 @@ class RunNode(CLICommand):
             Argument('--boot-node', dest='boot-node', action='store',
                      help=f"address of an existing node for joining a network "
                           f"(default: '{self.default_boot_node_address}')."),
-            Argument('--type', dest='type', action='store', choices=['full', 'storage', 'execution'],
-                     help=f"indicate the type of service provided by the node: 'storage' and 'execution' "
-                          f"will only load the DOR or RTI modules, respectively; a 'full' node will provide "
-                          f"both (default: '{self.default_service}')."),
+            Argument('--dor-type', dest='dor_type', action='store', choices=[t.value for t in DORType],
+                     help=f"indicate the type of DOR service provided by the node "
+                          f"(default: '{self.default_dor_service}')."),
+            Argument('--rti-type', dest='rti_type', action='store', choices=[t.value for t in RTIType],
+                     help=f"indicate the type of RTI service provided by the node "
+                          f"(default: '{self.default_rti_service}')."),
             Argument('--retain-job-history', dest="retain-job-history", action='store_const', const=True,
                      help="[for execution/full nodes only] instructs the RTI to retain the job history (default: "
                           "disabled, i.e., delete information of completed jobs). This flag should only be used for "
@@ -48,9 +51,6 @@ class RunNode(CLICommand):
             Argument('--disable-strict-deployment', dest="strict-deployment", action='store_const', const=False,
                      help="[for execution/full nodes only] instructs the RTI to disable strict processor deployment "
                           "(default: enabled, i.e., only the node owner identity can deploy/undeploy processors.)"),
-            Argument('--disable-concurrency', dest="job-concurrency", action='store_const', const=False,
-                     help="[for execution/full nodes only] instructs the RTI to disable concurrent job execution "
-                          "(default: enabled, i.e., the node processes jobs concurrently.)"),
             Argument('--bind-all-address', dest="bind-all-address", action='store_const', const=True,
                      help="allows REST and P2P service to bind and accept connections pointing to any address of the "
                           "machine i.e. 0.0.0.0 (useful for docker)")
@@ -61,10 +61,10 @@ class RunNode(CLICommand):
         default_if_missing(args, 'rest-address', self.default_rest_address)
         default_if_missing(args, 'p2p-address', self.default_p2p_address)
         default_if_missing(args, 'boot-node', self.default_boot_node_address)
-        default_if_missing(args, 'type', self.default_service)
+        default_if_missing(args, 'dor_type', self.default_dor_service)
+        default_if_missing(args, 'rti_type', self.default_rti_service)
         default_if_missing(args, 'retain-job-history', self.default_retain_job_history)
         default_if_missing(args, 'strict-deployment', self.default_strict_deployment)
-        default_if_missing(args, 'job-concurrency', self.default_job_concurrency)
         default_if_missing(args, 'bind-all-address', self.default_bind_all_address)
 
         # do we have keystore credentials?
@@ -95,22 +95,27 @@ class RunNode(CLICommand):
                                       boot_node_address=boot_node_address,
                                       bind_all_address=args['bind-all-address'],
                                       enable_db=True,
-                                      enable_dor=args['type'] == 'full' or args['type'] == 'storage',
-                                      enable_rti=args['type'] == 'full' or args['type'] == 'execution',
+                                      dor_type=DORType[args['dor_type']],
+                                      rti_type=RTIType[args['rti_type']],
                                       retain_job_history=args['retain-job-history'],
-                                      strict_deployment=args['strict-deployment'],
-                                      job_concurrency=args['job-concurrency'])
+                                      strict_deployment=args['strict-deployment'])
 
         except SaaSRuntimeException as e:
             raise CLIRuntimeError(f"Could not start node because '{e.reason}'. Aborting.")
 
         # print info message
-        if args['type'] == 'full' or args['type'] == 'execution':
-            print(f"Created '{args['type']}' node instance at {args['rest-address']}/{args['p2p-address']} "
-                  f"(keep RTI job history: {'Yes' if args['retain-job-history'] else 'No'}) "
-                  f"(strict: {'Yes' if args['strict-deployment'] else 'No'}) ")
+        if args['rti_type'] == RTIType.NONE.value:
+            print(
+                f"Created '{args['dor_type']}/{args['rti_type']}' Sim-aaS node instance at "
+                f"{args['rest-address']}/{args['p2p-address']}"
+            )
         else:
-            print(f"Created '{args['type']}' node instance at {args['rest-address']}/{args['p2p-address']}")
+            print(
+                f"Created '{args['dor_type']}/{args['rti_type']}' Sim-aaS node instance at "
+                f"{args['rest-address']}/{args['p2p-address']}"
+                f"(keep RTI job history: {'Yes' if args['retain-job-history'] else 'No'}) "
+                f"(strict: {'Yes' if args['strict-deployment'] else 'No'}) "
+            )
 
         # wait until stop signal
         try:

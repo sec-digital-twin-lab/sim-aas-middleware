@@ -1,21 +1,14 @@
 import abc
-import inspect
 import json
 import logging
 import os
-import sys
 import threading
-from importlib.util import spec_from_file_location, module_from_spec
-
-from typing import Dict
 
 from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string
-from simaas.core.logging import Logging
 from simaas.dor.schemas import ProcessorDescriptor
-from simaas.rti.schemas import Severity
-
-logger = Logging.get(__name__)
+from simaas.namespace.api import Namespace
+from simaas.rti.schemas import Severity, Job
 
 
 class ProcessorRuntimeError(Exception):
@@ -153,7 +146,9 @@ class ProcessorBase(abc.ABC):
         return self._descriptor
 
     @abc.abstractmethod
-    def run(self, wd_path: str, listener: ProgressListener, logger: logging.Logger) -> None:
+    def run(
+            self, wd_path: str, job: Job, listener: ProgressListener, namespace: Namespace, logger: logging.Logger
+    ) -> None:
         """
         Abstract method to run the processor. Must be implemented by subclasses.
 
@@ -163,8 +158,10 @@ class ProcessorBase(abc.ABC):
             inputs and outputs must exactly match the specification in descriptor.json. The RTI is responsible to
             ensure the correct naming of inputs. Similarly, the processor implementation needs to ensure the correct
             naming of outputs.
+        :param job:
         :param listener: A callback that allows the processor to provide updates on its progress, available
             outputs and messages.
+        :param namespace:
         :param logger: A logger for logging messages.
         :return:
         """
@@ -177,42 +174,3 @@ class ProcessorBase(abc.ABC):
         :return:
         """
         pass
-
-
-def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
-    """
-    Convenient function that finds all processor implementations in a given search path (including all its
-    subdirectories) and returns a dictionary with the findings.
-
-    :param search_path: the path to search for processors.
-    :return: a dictionary that maps name of the processor to its implementation class.
-    """
-    sys.path.append(search_path)
-
-    result = {}
-    for root, dirs, files in os.walk(search_path):
-        for file in files:
-            print(file)
-            if file == "processor.py":
-                module_path = os.path.join(root, file)
-                module_name = os.path.splitext(os.path.basename(module_path))[0]
-
-                spec = spec_from_file_location(module_name, module_path)
-                module = module_from_spec(spec)
-
-                try:
-                    spec.loader.exec_module(module)
-                except Exception as e:
-                    logger.warning(f"spec loader failed: {e}")
-                    continue
-
-                # module = importlib.import_module(module_name)
-                for name, obj in inspect.getmembers(module):
-                    if inspect.isclass(obj) and obj != ProcessorBase and issubclass(obj, ProcessorBase):
-                        try:
-                            instance: ProcessorBase = obj(root)
-                            result[instance.name] = instance
-                        except Exception as e:
-                            logger.warning(f"creating instance of {obj} failed: {e}")
-
-    return result
