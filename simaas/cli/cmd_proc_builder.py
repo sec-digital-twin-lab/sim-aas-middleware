@@ -306,9 +306,7 @@ class ProcBuilderGithub(CLICommand):
             Argument('--delete-image', dest="keep_image", action='store_const', const=False,
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
-                          "image being replaced with the newly created one."),
-            Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
-            Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
+                          "image being replaced with the newly created one.")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
