@@ -44,15 +44,26 @@ use-cases.
 
 > If you are new to using the Sim-aaS Middleware, it is recommended you work through 
 > each of the following topics in sequence. It should give you a basic understanding
-> of how to use the various commands.
+> of how to use the various commands. 
 
+The following topics should be done first: creating identities and running a node.
 - [Manage Identities](docs/usage_manage_identities.md)
 - [Running a Sim-aaS Node Instance](docs/usage_run_simaas_node.md)
+
+At this point you should have an identity set up and a node running. You can either
+proceed to learn more about how to use the Sim-aaS Middleware or proceed to look at
+some of the examples (see next section): 
 - [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
 - [Granting/Revoking Access to Data Objects](docs/usage_grant_revoke_access.md)
 - [Building a Processor Docker Image](docs/usage_build_processor_docker_image.md)
 - [Deploying/Undeploying of Processors](docs/usage_deploy_undeploy_processors.md)
 - [Job Submission and Monitoring](docs/usage_job_submission_and_monitoring.md)
+
+### Examples
+Learn more about building and running processors by looking at example implementations:
+- [Simple Example: Basic Input/Output Processor](examples/simple/README.md)
+- [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
+- [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
 
 ## Concepts
 Learn more about important concepts used by the Sim-aaS Middleware.
@@ -94,9 +105,3 @@ Learn more about related topics:
 - [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
 - [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
 - [Processor Dockerfile](docs/processor_dockerfile.md)
-
-### Examples
-Learn more about developing processors by looking at example implementations:
-- [Simple Example: Basic Input/Output Processor](examples/simple/README.md)
-- [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
-- [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
