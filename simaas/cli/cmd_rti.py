@@ -17,6 +17,7 @@ from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
+from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Processor, Task, JobStatus, Job
@@ -444,7 +445,8 @@ class RTIJobSubmit(CLICommand):
                     output=task_output,
                     name=name,
                     description=None,
-                    budget=Task.Budget(vcpus=budgets[budget_idx][0], memory=budgets[budget_idx][1])
+                    budget=ResourceDescriptor(vcpus=budgets[budget_idx][0], memory=budgets[budget_idx][1]),
+                    namespace=None
                 ))
 
                 if not prompt_for_confirmation(

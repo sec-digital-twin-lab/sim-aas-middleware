@@ -20,7 +20,6 @@ sim-aas-middleware % simaas-cli build-local examples/adapters/proc_example
 ? Select the keystore: test/test@email.com/ls1v4ohq59selxhvi9mleak9lgmq6xz2irhxzje46j7nfbee2o6ssac61kg19shq
 ? Enter password: ****
 Using processor path '/Users/aydth/Desktop/repositories/sim-aas-middleware/examples/adapters/proc_example'.
-Using GitHub credentials from env for user ''.
 Processor content hash: cb9e3dceca3f4270106c3aa9fe2bcf7351fd9b8b521f748ed79fb6782022ce38
 Building image 'aydth/proc_example/example-processor:cb9e3dceca3f4270106c3aa9fe2bcf7351fd9b8b521f748ed79fb6782022ce38'. This may take a while...
 Done building image 'aydth/proc_example/example-processor:cb9e3dceca3f4270106c3aa9fe2bcf7351fd9b8b521f748ed79fb6782022ce38'.
@@ -40,13 +39,16 @@ simaas-cli build-github
 ? Enter path to the processor: examples/adapters/proc_example
 Using repository at https://github.com/sec-digital-twin-lab/sim-aas-middleware with commit id dev-1.0.0.
 Using processor path 'examples/adapters/proc_example'.
-Using GitHub credentials from env for user ''.
 Done cloning https://github.com/sec-digital-twin-lab/sim-aas-middleware.
 Building image 'sec-digital-twin-lab/sim-aas-middleware/example-processor:33d795ecbd53eae4c4f9ef3c9d7a8e90821a0053'. This may take a while...
 Done building image 'sec-digital-twin-lab/sim-aas-middleware/example-processor:33d795ecbd53eae4c4f9ef3c9d7a8e90821a0053'.
 Done uploading PDI to DOR -> object id: d899526f24ea732482f040cdbda4ebf72cab0e46c936a6a729e476565bcc7493
 ```
 
-Note that if the repository is not public it is necessary to specify the necessary
-Github credentials `GITHUB_USERNAME` and `GITHUB_TOKEN` either in a `.env` file or
-directly as environment variables.
+> If the repository is not public it is necessary to specify the necessary Github credentials 
+> `GITHUB_USERNAME` and `GITHUB_TOKEN` either in a `.env` file or directly as environment 
+> variables.
+
+> Processor Docker Images depend on the `sim-aas-middleware` repository. At the time of writing,
+> this repository is private. Ensure the GitHub credentials used have **full access** to the the
+> `sim-aas-middleware` repository.

@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import traceback
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import docker
 from dotenv import load_dotenv
@@ -89,7 +89,7 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
             credentials_path = os.path.join(tempdir, "credentials")
             try:
                 # assemble the command
-                command = ['docker', 'build', '--no-cache']
+                command: List[str] = ['docker', 'build', '--no-cache']
                 if platform:
                     command.extend(['--platform', platform])
                 if credentials:
@@ -306,7 +306,9 @@ class ProcBuilderGithub(CLICommand):
             Argument('--delete-image', dest="keep_image", action='store_const', const=False,
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
-                          "image being replaced with the newly created one.")
+                          "image being replaced with the newly created one."),
+            Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
+            Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
