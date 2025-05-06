@@ -1,0 +1,49 @@
+{
+  "repository": "local:///Users/lyeoxiang/Dev/sim-aas-middleware/examples/cosim",
+  "commit_id": "content_hash:89e8cf8f7aa6fcb49a6ea4330b303479cf95c704fdb0ab08c7533345bc6ee031",
+  "proc_path": "small_img_thermostat",
+  "proc_descriptor": {
+    "name": "proc-small-img-thermostat",
+    "input": [
+      {
+        "name": "parameters",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "threshold_low": {
+              "type": "number"
+            },
+            "threshold_high": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "threshold_low",
+            "threshold_high"
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "name": "result",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "array"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        }
+      }
+    ],
+    "required_secrets": []
+  }
+}

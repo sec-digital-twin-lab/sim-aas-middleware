@@ -1,0 +1,63 @@
+{
+  "repository": "local:///Users/lyeoxiang/Dev/sim-aas-middleware/examples/simple",
+  "commit_id": "content_hash:ad63f53630c88626ca7b35698622f524e84040013ab48778ac96c6370dbb4804",
+  "proc_path": "small_img_abc",
+  "proc_descriptor": {
+    "name": "proc-small-img-abc",
+    "input": [
+      {
+        "name": "a",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "v"
+          ]
+        }
+      },
+      {
+        "name": "b",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "v"
+          ]
+        }
+      }
+    ],
+    "output": [
+      {
+        "name": "c",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "v"
+          ]
+        }
+      }
+    ],
+    "required_secrets": [
+      "SECRET_ABC_KEY"
+    ]
+  }
+}
