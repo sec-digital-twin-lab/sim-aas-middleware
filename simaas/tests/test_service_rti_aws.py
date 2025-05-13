@@ -273,7 +273,9 @@ def aws_deployed_test_processor(
 
     else:
         # add test processor
-        meta = add_test_processor(aws_dor_proxy, aws_session_node.keystore, 'proc-abc', 'examples/simple/abc')
+        meta = add_test_processor(
+            aws_dor_proxy, aws_session_node.keystore, 'proc-abc', 'examples/simple/abc', 'linux/amd64'
+        )
         proc_id = meta.obj_id
 
         if not docker_available:
