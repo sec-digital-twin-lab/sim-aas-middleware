@@ -22,7 +22,7 @@ from examples.prime.factorisation.processor import ProcessorFactorisation
 from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 
-from simaas.cli.cmd_proc_builder import clone_repository
+from simaas.cli.cmd_proc_builder import build_processor_image
 from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -30,7 +30,7 @@ from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy, DORInterface
 from simaas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject, DataObjectProvenance, \
     DataObjectRecipe, DORStatistics
-from simaas.helpers import determine_local_ip, PortMaster
+from simaas.helpers import determine_local_ip, PortMaster, docker_export_image
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
@@ -156,7 +156,9 @@ def session_node(session_keystore):
         _node.shutdown()
 
 
-def add_test_processor(dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str) -> DataObject:
+def add_test_processor(
+        dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str, platform: str = 'linux/amd64'
+) -> DataObject:
     org = 'sec-digital-twin-lab'
     repo_name = 'sim-aas-middleware'
     repo_url = f'https://github.com/{org}/{repo_name}'
@@ -167,32 +169,47 @@ def add_test_processor(dor: DORProxy, keystore: Keystore, proc_name: str, proc_p
     existing = [obj for obj in result if obj.tags['image_name'] == image_name]
     if not existing:
         with tempfile.TemporaryDirectory() as tempdir:
-            # clone the repository and checkout the specified commit
-            repo_path = os.path.join(tempdir, 'repository')
-            commit_timestamp = clone_repository(repo_url, repo_path, commit_id=REPOSITORY_COMMIT_ID)
+            # don't clone the repo but use this repo (since it's sim-aas-middleware)
+            repo_path = os.path.abspath(os.path.join(os.getcwd(), '..', '..'))
+
+            # make full proc path
+            abs_proc_path = os.path.join(repo_path, proc_path)
 
             # read the processor descriptor
-            descriptor_path = os.path.join(repo_path, proc_path, 'descriptor.json')
+            descriptor_path = os.path.join(abs_proc_path, 'descriptor.json')
             with open(descriptor_path, 'r') as f:
                 # noinspection PyTypeChecker
                 descriptor = ProcessorDescriptor.model_validate(json.load(f))
 
-            # store the GPP information in a file
-            gpp_path = os.path.join(tempdir, 'gpp.json')
+            # create the GPP descriptor
+            gpp: GitProcessorPointer = GitProcessorPointer(
+                repository=repo_url,
+                commit_id=REPOSITORY_COMMIT_ID,
+                proc_path=proc_path,
+                proc_descriptor=descriptor
+            )
+            gpp_path = os.path.join(abs_proc_path, 'gpp.json')
             with open(gpp_path, 'w') as f:
-                gpp = GitProcessorPointer(repository=repo_url, commit_id=REPOSITORY_COMMIT_ID, proc_path=proc_path,
-                                          proc_descriptor=descriptor)
-                # noinspection PyTypeChecker
-                json.dump(gpp.model_dump(), f)
+                json.dump(gpp.model_dump(), f, indent=2)
+
+            # get the credentials
+            credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+
+            # build the image
+            build_processor_image(abs_proc_path, image_name, credentials=credentials, platform=platform)
+
+            # export the image
+            image_path = os.path.join(tempdir, 'pdi.tar')
+            docker_export_image(image_name, image_path)
 
             # upload to DOR
-            meta = dor.add_data_object(gpp_path, keystore.identity, False, False, 'ProcessorDockerImage', 'json',
+            meta = dor.add_data_object(image_path, keystore.identity, False, False, 'ProcessorDockerImage', 'tar',
                                        tags=[
-                                           DataObject.Tag(key='repository', value=repo_url),
-                                           DataObject.Tag(key='commit_id', value=REPOSITORY_COMMIT_ID),
-                                           DataObject.Tag(key='commit_timestamp', value=commit_timestamp),
-                                           DataObject.Tag(key='proc_path', value=proc_path),
-                                           DataObject.Tag(key='proc_descriptor', value=descriptor.model_dump()),
+                                           DataObject.Tag(key='repository', value=gpp.repository),
+                                           DataObject.Tag(key='commit_id', value=gpp.commit_id),
+                                           DataObject.Tag(key='commit_timestamp', value=get_timestamp_now()),
+                                           DataObject.Tag(key='proc_path', value=gpp.proc_path),
+                                           DataObject.Tag(key='proc_descriptor', value=gpp.proc_descriptor.model_dump()),
                                            DataObject.Tag(key='image_name', value=image_name)
                                        ])
             os.remove(gpp_path)
@@ -227,7 +244,7 @@ def deployed_abc_processor(
     else:
         # add test processor
         meta = add_test_processor(
-            dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH
+            dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH, platform='linux/amd64'
         )
         proc_id = meta.obj_id
 

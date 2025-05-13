@@ -553,45 +553,41 @@ class AWSRTIService(RTIServiceBase):
 
                 raise e
 
-    def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
-        # attempt to cancel the job
-        try:
-            asyncio.run(P2PInterruptJob.perform(peer_address))
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-            grace_period = 0
-
+    def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
+        # get the AWS job id
         with self._session_maker() as session:
             # get the record and status
             record = session.query(DBJobInfo).get(job_id)
             aws_job_id = record.runner['aws_job_id']
 
-            deadline = get_timestamp_now() + grace_period * 1000
-            while get_timestamp_now() < deadline:
-                try:
-                    # sleep for a bit and check the record
+        # attempt to cancel the job gracefully (only possible if we have the peer address
+        if peer_address is not None:
+            try:
+                # send the cancellation request
+                asyncio.run(P2PInterruptJob.perform(peer_address))
+
+                # determine deadline and wait until then to see if the job has terminated by then
+                deadline = get_timestamp_now() + grace_period * 1000
+                while get_timestamp_now() < deadline:
                     time.sleep(1)
 
                     # is the container still running -> if not, all good we are done
                     if not batch_job_running(aws_job_id):
                         return
 
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] checking status failed: {trace}")
-                    break
-
-            # if we get here then either the deadline has been reached or there was an exception -> kill container
-            try:
-                logger.warning(f"[job:{job_id}] grace period exceeded -> "
-                               f"killing AWS Batch job {aws_job_id}")
-                batch_terminate_job(aws_job_id)
-
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
+                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
+
+        # if we reach here, graceful cancellation wasn't possible (deadlined reached, no peer address, exception)
+        # -> kill container
+        try:
+            logger.warning(f"[job:{job_id}] cancellation unsuccessful -> killing AWS Batch job {aws_job_id}")
+            batch_terminate_job(aws_job_id)
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
 
     def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)

@@ -525,14 +525,19 @@ class RTIServiceBase(RTIRESTService):
         if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
             raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
 
+        # if possible, determine the runner P2P address
+        if record.runner.get('identity') is not None and record.runner.get('address') is not None:
+            runner = Identity.model_validate(record.runner['identity'])
+            runner_address = P2PAddress(
+                address=record.runner['address'],
+                curve_secret_key=self._node.keystore.curve_secret_key(),
+                curve_public_key=self._node.keystore.curve_public_key(),
+                curve_server_key=runner.c_public_key
+            )
+        else:
+            runner_address = None
+
         # start the cancellation worker
-        runner = Identity.model_validate(record.runner['identity'])
-        runner_address = P2PAddress(
-            address=record.runner['address'],
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=runner.c_public_key
-        )
         threading.Thread(target=self.perform_cancel, args=(job_id, runner_address)).start()
 
         return status
