@@ -58,7 +58,7 @@ async def p2p_request(
         timeout: int = 5000, chunk_size: int = 1024 * 1024
 ) -> Tuple[Optional[BaseModel], Optional[str]]:
     # create socket
-    context = Context()
+    context = Context.instance()
     socket = context.socket(zmq.DEALER)
     socket.setsockopt(zmq.LINGER, 0)
     socket.setsockopt(zmq.RCVTIMEO, timeout)
