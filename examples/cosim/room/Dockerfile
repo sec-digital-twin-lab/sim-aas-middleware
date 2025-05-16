@@ -22,7 +22,7 @@ RUN --mount=type=secret,id=git_credentials \
         git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware /sim-aas-middleware ;\
     fi && \
     cd /sim-aas-middleware && \
-    git checkout 33e81110431b5a088643f44ac0d846f080f0699b
+    git checkout dev-2.1.0
 
 # Virtual-env with everything pre-built for TARGETPLATFORM
 RUN python -m venv /opt/venv && \
