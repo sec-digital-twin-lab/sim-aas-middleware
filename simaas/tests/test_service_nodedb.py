@@ -358,6 +358,7 @@ def test_namespace_get_update(module_node, module_nodedb_proxy):
     namespace: Optional[NamespaceInfo] = module_nodedb_proxy.get_namespace(name)
     assert namespace is not None
 
+
 @pytest.mark.asyncio
 async def test_namespace_reserve_cancel(module_node, module_nodedb_proxy):
     name = 'my_namespace2'
@@ -411,6 +412,7 @@ async def test_namespace_reserve_cancel(module_node, module_nodedb_proxy):
         module_node, peer, name, "reservation4", ResourceDescriptor(vcpus=2, memory=4096)
     )
     assert accepted
+
 
 @pytest.mark.asyncio
 async def test_namespace_reserve_claim_release(module_node, module_nodedb_proxy):
