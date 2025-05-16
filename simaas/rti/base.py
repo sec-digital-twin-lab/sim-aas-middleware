@@ -71,6 +71,23 @@ class RTIServiceBase(RTIRESTService):
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
 
+    def update_proc_db(self, proc: Processor) -> None:
+        # update or create db record
+        with self._session_maker() as session:
+            record = session.query(DBDeployedProcessor).get(proc.id)
+            if record:
+                record.state = proc.state.value
+                record.image_name = proc.image_name
+                record.ports = proc.ports
+                record.gpp = proc.gpp.model_dump()
+                record.error = proc.error
+
+            else:
+                session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
+                                                ports=[], gpp=proc.gpp.model_dump() if proc.gpp else None,
+                                                error=proc.error))
+            session.commit()
+
     @abc.abstractmethod
     def perform_deploy(self, proc: Processor) -> None:
         ...
@@ -174,20 +191,7 @@ class RTIServiceBase(RTIRESTService):
             )
 
             # update or create db record
-            with self._session_maker() as session:
-                record = session.query(DBDeployedProcessor).get(proc.id)
-                if record:
-                    record.state = proc.state.value
-                    record.image_name = proc.image_name
-                    record.ports = proc.ports
-                    record.gpp = proc.gpp.model_dump()
-                    record.error = proc.error
-
-                else:
-                    session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                    ports=[], gpp=proc.gpp.model_dump() if proc.gpp else None,
-                                                    error=None))
-                session.commit()
+            self.update_proc_db(proc)
 
             # start the deployment worker
             threading.Thread(target=self.perform_deploy, args=(proc,)).start()
