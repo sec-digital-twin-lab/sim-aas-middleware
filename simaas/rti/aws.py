@@ -429,23 +429,7 @@ class AWSRTIService(RTIServiceBase):
             )
 
             # update the db record
-            with self._mutex:
-                with self._session_maker() as session:
-                    record = session.query(DBDeployedProcessor).get(proc.id)
-                    if record:
-                        record.state = proc.state.value
-                        record.image_name = proc.image_name
-                        record.ports = proc.ports
-                        record.gpp = proc.gpp.model_dump()
-                        record.error = proc.error
-
-                    else:
-                        logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
-                                       f"{proc.image_name} expected to exist but not found -> creating now.")
-                        session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                        ports=proc.ports,
-                                                        gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
-                    session.commit()
+            self.update_proc_db(proc)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -453,6 +437,10 @@ class AWSRTIService(RTIServiceBase):
 
             proc.state = Processor.State.FAILED
             proc.error = str(e)
+
+            # update the db record
+            self.update_proc_db(proc)
+
         finally:
             loop.close()
 
