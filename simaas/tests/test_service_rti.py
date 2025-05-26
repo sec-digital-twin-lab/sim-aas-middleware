@@ -6,9 +6,11 @@ import tempfile
 import threading
 import time
 import traceback
-from typing import Union
+from typing import Union, Optional, List
 
 import pytest
+from simaas.core.identity import Identity
+
 from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
 from examples.cosim.room.processor import Result as RResult
 from examples.cosim.thermostat.processor import Result as TResult
@@ -732,14 +734,13 @@ def deployed_room_processor(
 
             # undeploy it
             rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+            while True:
+                proc = rti_proxy.get_proc(proc_id)
+                if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
                     logger.info(f"Waiting for processor to be ready: {proc}")
                     time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+                else:
+                    break
 
 
 @pytest.fixture(scope="session")
@@ -787,14 +788,72 @@ def deployed_thermostat_processor(
 
             # undeploy it
             rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+            while True:
+                proc = rti_proxy.get_proc(proc_id)
+                if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
                     logger.info(f"Waiting for processor to be ready: {proc}")
                     time.sleep(1)
-            except Exception as e:
-                print(e)
+                else:
+                    break
 
-            logger.info(f"Processor undeployed: {proc}")
+
+def get_cosim_tasks(
+        deployed_room_processor, deployed_thermostat_processor, owner: Identity, namespace: Optional[str] = None
+) -> List[Task]:
+    return [
+        Task(
+            proc_id=deployed_room_processor.obj_id,
+            user_iid=owner.id,
+            input=[
+                Task.InputValue.model_validate({
+                    'name': 'parameters', 'type': 'value', 'value': {
+                        'initial_temp': 20,
+                        'heating_rate': 0.5,
+                        'cooling_rate': -0.2,
+                        'max_steps': 100
+                    }
+                })
+            ],
+            output=[
+                Task.Output.model_validate({
+                    'name': 'result',
+                    'owner_iid': owner.id,
+                    'restricted_access': False,
+                    'content_encrypted': False,
+                    'target_node_iid': None
+                })
+            ],
+            name='room',
+            description=None,
+            budget=ResourceDescriptor(vcpus=1, memory=1024),
+            namespace=namespace
+        ),
+        Task(
+            proc_id=deployed_thermostat_processor.obj_id,
+            user_iid=owner.id,
+            input=[
+                Task.InputValue.model_validate({
+                    'name': 'parameters', 'type': 'value', 'value': {
+                        'threshold_low': 18.0,
+                        'threshold_high': 22.0
+                    }
+                })
+            ],
+            output=[
+                Task.Output.model_validate({
+                    'name': 'result',
+                    'owner_iid': owner.id,
+                    'restricted_access': False,
+                    'content_encrypted': False,
+                    'target_node_iid': None
+                })
+            ],
+            name='thermostat',
+            description=None,
+            budget=ResourceDescriptor(vcpus=1, memory=1024),
+            namespace=namespace
+        )
+    ]
 
 
 def test_rest_submit_cosim(
@@ -807,66 +866,13 @@ def test_rest_submit_cosim(
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    proc_id0 = deployed_room_processor.obj_id
-    proc_id1 = deployed_thermostat_processor.obj_id
     owner = session_node.keystore
 
-    task0 = Task(
-        proc_id=proc_id0,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    'initial_temp': 20,
-                    'heating_rate': 0.5,
-                    'cooling_rate': -0.2,
-                    'max_steps': 100
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name='room',
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
-
-    task1 = Task(
-        proc_id=proc_id1,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    'threshold_low': 18.0,
-                    'threshold_high': 22.0
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name='thermostat',
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # get the co-sim tasks
+    tasks = get_cosim_tasks(deployed_room_processor, deployed_thermostat_processor, owner.identity)
 
     # submit the job
-    result = rti_proxy.submit([task0, task1], with_authorisation_by=owner)
+    result = rti_proxy.submit(tasks, with_authorisation_by=owner)
     jobs = result
 
     batch_id = jobs[0].batch_id
@@ -920,3 +926,69 @@ def test_rest_submit_cosim(
     # print the result
     print(result0.temp)
     print(result1.state)
+
+
+
+def test_namespace_submit_fail(
+        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        deployed_room_processor, deployed_thermostat_processor
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    owner = session_node.keystore
+
+    # test with namespace that has not enough resources for a single task
+    namespace0 = 'namespace0'
+    session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=512))
+
+    # get the tasks for namespace0 and try to submit jobs to namespace0 -> should fail
+    tasks = get_cosim_tasks(deployed_room_processor, deployed_thermostat_processor, owner.identity, namespace0)
+    with pytest.raises(UnsuccessfulRequestError) as e:
+        rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert f"Task {tasks[0].name} exceeds namespace resource capacity" in e.value.reason
+
+    # create namespaces with different resource budgets
+    namespace1 = 'namespace1'
+    namespace2 = 'namespace2'
+    namespace3 = 'namespace3'
+    session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=1024))
+    session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=1024))
+    session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=2048))
+
+    # get the tasks for namespace1 and try to submit jobs to namespace1 -> should fail
+    tasks = get_cosim_tasks(deployed_room_processor, deployed_thermostat_processor, owner.identity, namespace1)
+    with pytest.raises(UnsuccessfulRequestError) as e:
+        rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert "Combined resource budget for namespace 'namespace1' exceeds namespace capacity" in e.value.reason
+
+    # get the tasks for namespace2 and try to submit jobs to namespace1 -> should fail
+    tasks = get_cosim_tasks(deployed_room_processor, deployed_thermostat_processor, owner.identity, namespace2)
+    with pytest.raises(UnsuccessfulRequestError) as e:
+        rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert "Combined resource budget for namespace 'namespace2' exceeds namespace capacity" in e.value.reason
+
+    # get the tasks for namespace3 and try to submit jobs to namespace1 -> should succeed
+    try:
+        tasks = get_cosim_tasks(deployed_room_processor, deployed_thermostat_processor, owner.identity, namespace3)
+        jobs: List[Job] = rti_proxy.submit(tasks, with_authorisation_by=owner)
+        batch_id = jobs[0].batch_id
+
+        while True:
+            time.sleep(1)
+            status: BatchStatus = rti_proxy.get_batch_status(batch_id, with_authorisation_by=owner)
+            is_done = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    is_done = False
+
+            if is_done:
+                break
+
+    except Exception as e:
+        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+        print(trace)
+        assert False

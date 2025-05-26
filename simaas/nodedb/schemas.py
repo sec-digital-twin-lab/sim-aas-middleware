@@ -31,5 +31,4 @@ class NamespaceInfo(BaseModel):
     name: str = Field(..., title="Name", description="The name of the namespace.")
     budget: ResourceDescriptor = Field(..., title="Budget", description="The resource budget allocated to this namespace.")
     reservations: Dict[str, ResourceDescriptor] = Field(..., title="Reservations", description="Reserved resources that have not yet been claimed.")
-    claims: Dict[str, ResourceDescriptor] = Field(..., title="Claims", description="Current resource claims by active jobs.")
     jobs: List[str] = Field(..., title="Job Ids", description="A list of job ids that are associated with this namespace.")

@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from typing import Optional, List
 
@@ -11,8 +12,9 @@ from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.nodedb.api import NodeDBService
 from simaas.nodedb.exceptions import InvalidIdentityError, IdentityNotFoundError, NamespaceNotFoundError, \
-    ReservationNotFoundError, ClaimNotFoundError
-from simaas.nodedb.protocol import NodeDBSnapshot
+    NodeDBException
+from simaas.nodedb.protocol import NodeDBSnapshot, P2PCancelNamespaceReservation, P2PReserveNamespaceResources, \
+    P2PUpdateNamespaceBudget
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
 logger = Logging.get('nodedb.service')
@@ -50,7 +52,6 @@ class NamespaceRecord(Base):
     name = Column(String(64), primary_key=True)
     budget = Column(NestedMutableJson, nullable=False)
     reservations = Column(NestedMutableJson, nullable=False)
-    claims = Column(NestedMutableJson, nullable=False)
     jobs = Column(NestedMutableJson, nullable=False)
 
 
@@ -308,7 +309,6 @@ class DefaultNodeDBService(NodeDBService):
                 name=record.name,
                 budget=ResourceDescriptor.model_validate(record.budget),
                 reservations={k: ResourceDescriptor.model_validate(v) for k, v in record.reservations.items()},
-                claims={k: ResourceDescriptor.model_validate(v) for k, v in record.claims.items()},
                 jobs=[job_id for job_id in record.jobs]
             ) if record else None
 
@@ -323,24 +323,85 @@ class DefaultNodeDBService(NodeDBService):
                     name=record.name,
                     budget=ResourceDescriptor.model_validate(record.budget),
                     reservations={k: ResourceDescriptor.model_validate(v) for k, v in record.reservations.items()},
-                    claims={k: ResourceDescriptor.model_validate(v) for k, v in record.claims.items()},
                     jobs=[job_id for job_id in record.jobs]
                 ) for record in records
             ]
 
-    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    def update_namespace_budget(self, namespace: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
+        ns_info: NamespaceInfo = self.handle_namespace_update(namespace, budget)
+        for peer in self._node.db.get_network():
+            if peer.identity.id != self._node.identity.id:
+                asyncio.run(P2PUpdateNamespaceBudget.perform(self._node, peer, namespace, budget))
+
+        return ns_info
+
+    def reserve_namespace_resources(self, namespace: str, job_id: str, resources: ResourceDescriptor) -> None:
+        # try to make a resource reservation
+        successful = True
+        try:
+            for peer in self._node.db.get_network():
+                if peer.identity.id == self._node.identity.id:
+                    successful = self.handle_namespace_reservation(namespace, job_id, resources)
+                else:
+                    successful = asyncio.run(
+                        P2PReserveNamespaceResources.perform(self._node, peer, namespace, job_id, resources)
+                    )
+
+                # did we encounter an issue?
+                if not successful:
+                    break
+
+        except Exception:
+            successful = False
+
+        # if there was a problem at any point of the reservation process, cancel all reservations (if any)
+        if not successful:
+            for peer in self._node.db.get_network():
+                if peer.identity.id == self._node.identity.id:
+                    self.handle_namespace_cancellation(namespace, job_id)
+                else:
+                    asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, namespace, job_id))
+
+            raise NodeDBException(f"Resource reservation for {namespace}:{job_id} failed")
+
+    def cancel_namespace_reservation(self, namespace: str, job_id: str) -> bool:
+        result = self.handle_namespace_cancellation(namespace, job_id)
+        for peer in self._node.db.get_network():
+            if peer.identity.id != self._node.identity.id:
+                asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, namespace, job_id))
+        return result
+
+    def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:
         with self._mutex:
             with self._Session() as session:
-                record = session.query(NamespaceRecord).get(name)
+                record = session.query(NamespaceRecord).get(ns_info.name)
                 if record is None:
                     record = NamespaceRecord(
-                        name=name,
+                        name=ns_info.name,
+                        budget=ns_info.budget.model_dump(),
+                        reservations={k: v.model_dump() for k, v in ns_info.reservations.items()},
+                        jobs=[job_id for job_id in ns_info.jobs]
+                    )
+                    session.add(record)
+                    session.commit()
+                else:
+                    record.budget = ns_info.budget.model_dump()
+                    record.reservations = {k: v.model_dump() for k, v in ns_info.reservations.items()}
+                    record.jobs = [job_id for job_id in ns_info.jobs]
+                    session.commit()
+
+    def handle_namespace_update(self, namespace: str, budget: ResourceDescriptor) -> NamespaceInfo:
+        with self._mutex:
+            with self._Session() as session:
+                record = session.query(NamespaceRecord).get(namespace)
+                if record is None:
+                    record = NamespaceRecord(
+                        name=namespace,
                         budget=budget.model_dump(),
                         reservations={},
-                        claims={},
                         jobs=[]
                     )
                     session.add(record)
@@ -353,11 +414,10 @@ class DefaultNodeDBService(NodeDBService):
                     name=record.name,
                     budget=ResourceDescriptor.model_validate(record.budget),
                     reservations={k: ResourceDescriptor.model_validate(v) for k, v in record.reservations.items()},
-                    claims={k: ResourceDescriptor.model_validate(v) for k, v in record.claims.items()},
                     jobs=[job_id for job_id in record.jobs]
                 )
 
-    def namespace_handle_reservation(self, namespace: str, request: ResourceDescriptor, reservation_id: str) -> bool:
+    def handle_namespace_reservation(self, namespace: str, job_id: str, request: ResourceDescriptor) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
@@ -365,37 +425,30 @@ class DefaultNodeDBService(NodeDBService):
                 if record is None:
                     raise NamespaceNotFoundError(namespace)
 
-                # determine the budget
+                # determine the total available budget for this namespace
                 budget: ResourceDescriptor = ResourceDescriptor.model_validate(record.budget)
                 vcpus_available = budget.vcpus
                 memory_available = budget.memory
 
                 # consider all reservations
-                for _, reservation in record.reservations.items():
-                    reservation: ResourceDescriptor = reservation
+                for reservation in record.reservations.values():
+                    reservation: ResourceDescriptor = ResourceDescriptor.model_validate(reservation)
                     vcpus_available -= reservation.vcpus
                     memory_available -= reservation.memory
-
-                # consider all current claims
-                for job_id, claim in record.claims.items():
-                    claim: ResourceDescriptor = claim
-
-                    vcpus_available -= claim.vcpus
-                    memory_available -= claim.memory
 
                 # does the namespace has enough resources left?
                 sufficient_vcpus = request.vcpus <= vcpus_available
                 sufficient_memory = request.memory <= memory_available
                 if sufficient_vcpus and sufficient_memory:
                     # add the reservation
-                    record.reservations[reservation_id] = request.model_dump()
+                    record.reservations[job_id] = request.model_dump()
                     session.commit()
                     return True
 
                 else:
                     return False
 
-    def namespace_cancel_reservation(self, namespace: str, reservation_id: str) -> None:
+    def handle_namespace_cancellation(self, namespace: str, job_id: str) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
@@ -403,70 +456,9 @@ class DefaultNodeDBService(NodeDBService):
                 if record is not None:
                     # do we have this reservation?
                     reservations = dict(record.reservations)
-                    if reservation_id in reservations:
-                        reservations.pop(reservation_id)
+                    if job_id in reservations:
+                        reservations.pop(job_id)
                         record.reservations = reservations
                         session.commit()
-
-    def namespace_handle_claim(self, namespace: str, reservation_id: str, job_id: str) -> None:
-        with self._mutex:
-            with self._Session() as session:
-                # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(namespace)
-                if record is None:
-                    raise NamespaceNotFoundError(namespace)
-
-                # do we have this reservation?
-                reservations = dict(record.reservations)
-                if reservation_id not in reservations:
-                    raise ReservationNotFoundError(namespace, reservation_id)
-
-                # remove the reservation
-                resources: ResourceDescriptor = reservations.pop(reservation_id)
-                record.reservations = reservations
-
-                # add to the claims and also add the job id to the jobs
-                claims = dict(record.claims)
-                claims[job_id] = resources
-                record.claims = claims
-                record.jobs.append(job_id)
-                session.commit()
-
-    def namespace_handle_release(self, namespace: str, job_id: str) -> None:
-        with self._mutex:
-            with self._Session() as session:
-                # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(namespace)
-                if record is None:
-                    raise NamespaceNotFoundError(namespace)
-
-                # do we have the claim
-                claims = dict(record.claims)
-                if job_id not in claims:
-                    raise ClaimNotFoundError(namespace, job_id)
-
-                # remove the claim
-                claims.pop(job_id)
-                record.claims = claims
-                session.commit()
-
-    def update_namespace(self, namespace: NamespaceInfo) -> None:
-        with self._Session() as session:
-            record = session.query(NamespaceRecord).get(namespace.name)
-            if record is None:
-                record = NamespaceRecord(
-                    name=namespace.name,
-                    budget=namespace.budget.model_dump(),
-                    reservations={k: v.model_dump() for k, v in namespace.reservations.items()},
-                    claims={k: v.model_dump() for k, v in namespace.claims.items()},
-                    jobs=namespace.jobs
-                )
-                session.add(record)
-                session.commit()
-            else:
-                record.budget = namespace.budget.model_dump(),
-                record.reservations = {k: v.model_dump() for k, v in namespace.reservations.items()},
-                record.claims = {k: v.model_dump() for k, v in namespace.claims.items()},
-                record.jobs = namespace.jobs
-                session.commit()
-
+                        return True
+        return False
