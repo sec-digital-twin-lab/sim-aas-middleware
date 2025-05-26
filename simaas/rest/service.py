@@ -33,10 +33,7 @@ class RESTApp:
 
         @self.api.exception_handler(SaaSRuntimeException)
         async def saas_exception_handler(_: Request, e: SaaSRuntimeException):
-            # add trace to details
-            details = dict(e.details)
-            details['trace'] = ''.join(traceback.format_exception(None, e, e.__traceback__))
-
+            details = dict(e.details) if e.details else {}
             logger.error(f"Exception: {e.reason} {e.id} -> {details}", exc_info=True)
             return JSONResponse(
                 status_code=500,
