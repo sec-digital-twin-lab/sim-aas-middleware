@@ -510,7 +510,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._logger.info(f"P2P service determined external address as {external_address}")
 
         # perform handshake with custodian
-        self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address}...")
+        self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address.address}...")
         self._job, self._custodian, self._batch_status = asyncio.run(P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
         ))
@@ -861,7 +861,10 @@ class JobRunner(CLICommand, ProgressListener):
             self._status_handler.update(state=JobStatus.State.RUNNING)
 
             # run the processor
-            namespace = DefaultNamespace('', self._custodian, self.custodian_address.address, self._keystore)
+            self._logger.info(f"Using namespace: {self._job.task.namespace}")
+            namespace = DefaultNamespace(
+                self._job.task.namespace, self._custodian, self.custodian_address.address, self._keystore
+            )
             self._proc.run(self._wd_path, self._job, self, namespace, self._logger)
 
             # was the processor interrupted?
