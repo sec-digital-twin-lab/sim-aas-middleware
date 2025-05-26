@@ -15,7 +15,7 @@ from git import Repo
 
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
-    default_if_missing
+    default_if_missing, use_env_or_prompt_if_missing
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
@@ -27,29 +27,31 @@ logger = Logging.get('cli')
 
 
 def clone_repository(repository_url: str, repository_path: str, commit_id: str = None,
-                     credentials: Optional[Tuple[str, str]] = None) -> int:
-    original_url = repository_url
+                     credentials: Optional[Tuple[str, str]] = None, simulate_only: bool = False) -> int:
+    # if we don't simulate, we may to delete and actually clone the repo
+    if not simulate_only:
+        original_url = repository_url
 
-    # do we have credentials? inject it into the repo URL
-    if credentials:
-        idx = repository_url.index('github.com')
-        url0 = repository_url[:idx]
-        url1 = repository_url[idx:]
-        repository_url = f"{url0}{credentials[0]}:{credentials[1]}@{url1}"
+        # do we have credentials? inject it into the repo URL
+        if credentials:
+            idx = repository_url.index('github.com')
+            url0 = repository_url[:idx]
+            url1 = repository_url[idx:]
+            repository_url = f"{url0}{credentials[0]}:{credentials[1]}@{url1}"
 
-    # does the destination already exist?
-    shutil.rmtree(repository_path, ignore_errors=True)
+        try:
+            # does the destination already exist?
+            shutil.rmtree(repository_path, ignore_errors=True)
 
-    try:
-        # clone the repo
-        Repo.clone_from(repository_url, repository_path)
-        repo = Repo(repository_path)
+            # clone the repo
+            Repo.clone_from(repository_url, repository_path)
 
-    except Exception as e:
-        raise CLIRuntimeError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
+        except Exception as e:
+            raise CLIRuntimeError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
 
     try:
         # checkout a specific commit
+        repo = Repo(repository_path)
         repo.git.checkout(commit_id)
 
         # determine the commit timestamp
@@ -62,8 +64,12 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
         raise CLIRuntimeError(reason=f"Failed to checkout '{commit_id}'", details={'exception': str(e)})
 
 
-def build_processor_image(processor_path: str, image_name: str, credentials: Tuple[str, str] = None,
+def build_processor_image(processor_path: str, simaas_path: str, image_name: str, credentials: Tuple[str, str] = None,
                           force_build: bool = False, platform: Optional[str] = None) -> bool:
+    # does the processor path exist?
+    if not os.path.isdir(processor_path):
+        raise CLIRuntimeError(f"Processor path {processor_path} does not exist or not a directory")
+
     # check if the image already exists
     client = docker.from_env()
     image_existed = False
@@ -86,6 +92,15 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
     # build the processor docker image
     if force_build or not image_existed:
         with tempfile.TemporaryDirectory() as tempdir:
+            # copy the processor to the temp location
+            context_name = os.path.basename(processor_path)
+            context_path = os.path.join(tempdir, context_name)
+            shutil.copytree(processor_path, context_path)
+
+            # copy the sim-aas-middleware repo into the temp context location
+            simaas_dst_path = os.path.join(context_path, 'sim-aas-middleware')
+            shutil.copytree(simaas_path, simaas_dst_path)
+
             credentials_path = os.path.join(tempdir, "credentials")
             try:
                 # assemble the command
@@ -103,7 +118,7 @@ def build_processor_image(processor_path: str, image_name: str, credentials: Tup
                 env = os.environ.copy()
                 env['DOCKER_BUILDKIT'] = '1'
 
-                subprocess.run(command, cwd=processor_path, check=True, capture_output=True, text=True, env=env)
+                subprocess.run(command, cwd=context_path, check=True, capture_output=True, text=True, env=env)
 
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -147,12 +162,11 @@ class ProcBuilderLocal(CLICommand):
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
                           "image being replaced with the newly created one."),
+            Argument('--simaas-repo-path', dest='simaas_repo_path', action='store', help="Path to the sim-aas-middleware repository."),
             Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
             Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
-
             Argument('location', metavar='location', type=str, nargs=1,
                      help="the location of the processor")
-
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -164,6 +178,10 @@ class ProcBuilderLocal(CLICommand):
 
         # load keystore
         keystore = load_keystore(args, ensure_publication=True)
+
+        # determine sim-aas-middleware path
+        use_env_or_prompt_if_missing(args, 'simaas_repo_path', 'SIMAAS_REPO_PATH', prompt_for_string,
+                                     message="Enter the path to the sim-aas-middleware repository")
 
         # determine node has DOR capabilities
         args['address'] = args['address'].split(':')
@@ -254,8 +272,9 @@ class ProcBuilderLocal(CLICommand):
             json.dump(gpp.model_dump(), f, indent=2)
 
         # build the image
-        image_existed = build_processor_image(args['location'], image_name, credentials=credentials,
-                                              force_build=args['force_build'], platform=args['arch'])
+        image_existed = build_processor_image(args['location'], args['simaas_repo_path'], image_name,
+                                              credentials=credentials, force_build=args['force_build'],
+                                              platform=args['arch'])
         if args['force_build'] or not image_existed:
             print(f"Done building image '{image_name}'.")
         else:
@@ -318,6 +337,10 @@ class ProcBuilderGithub(CLICommand):
 
         # load keystore
         keystore = load_keystore(args, ensure_publication=True)
+
+        # determine sim-aas-middleware path
+        use_env_or_prompt_if_missing(args, 'simaas_repo_path', 'SIMAAS_REPO_PATH', prompt_for_string,
+                                     message="Enter the path to the sim-aas-middleware repository")
 
         # determine node has DOR capabilities
         args['address'] = args['address'].split(':')
@@ -399,8 +422,8 @@ class ProcBuilderGithub(CLICommand):
                 json.dump(gpp.model_dump(), f, indent=2)
 
             # build the image
-            image_existed = build_processor_image(processor_path, image_name, credentials=credentials,
-                                                  force_build=args['force_build'])
+            image_existed = build_processor_image(processor_path, args['simaas_repo_path'], image_name,
+                                                  credentials=credentials, force_build=args['force_build'])
             if args['force_build'] or not image_existed:
                 print(f"Done building image '{image_name}'.")
             else:

@@ -14,24 +14,19 @@ RUN apt-get update && \
         git build-essential libffi-dev tzdata && \
     rm -rf /var/lib/apt/lists/*
 
-# Clone middleware (with optional secret token)
-RUN --mount=type=secret,id=git_credentials \
-    if [ -f /run/secrets/git_credentials ]; then \
-        git clone https://$(cat /run/secrets/git_credentials)@github.com/sec-digital-twin-lab/sim-aas-middleware /sim-aas-middleware ;\
-    else \
-        git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware /sim-aas-middleware ;\
-    fi && \
-    cd /sim-aas-middleware && \
-    git checkout dev-2.1.0
-
 # Virtual-env with everything pre-built for TARGETPLATFORM
 RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    /opt/venv/bin/pip install --no-cache-dir /sim-aas-middleware
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy the processor and move the sim-aas-middleware out
+COPY . /processor
+RUN mv /processor/sim-aas-middleware /sim-aas-middleware
+
+# Install sim-aas-middleware
+RUN /opt/venv/bin/pip install --no-cache-dir /sim-aas-middleware
 
 # Processor code + its own deps
 WORKDIR /processor
-COPY . /processor
 RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 ########################################
