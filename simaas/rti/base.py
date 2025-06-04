@@ -298,7 +298,7 @@ class RTIServiceBase(RTIRESTService):
 
             # task names are mandatory for easier distinction in a batch
             if len(checklists) > 1 and checklist.task.name is None:
-                raise RTIException(f"Missing name for task which is member of batch")
+                raise RTIException("Missing name for task which is member of batch")
 
             # check if the required processor is deployed for each task
             if checklist.proc is None:
@@ -374,7 +374,7 @@ class RTIServiceBase(RTIRESTService):
         # if there was a problem at any point of the reservation process, cancel all reservations (if any)
         if not successful:
             self.cancel_resource_reservations(checklists)
-            raise RTIException(f"Failed to reserve resources for tasks")
+            raise RTIException("Failed to reserve resources for tasks")
 
         # try to prepare the job for each task
         for checklist in checklists:
