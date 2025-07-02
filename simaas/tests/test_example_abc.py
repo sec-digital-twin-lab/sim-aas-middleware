@@ -104,6 +104,7 @@ def test_proc_abc_with_secret(dummy_namespace):
         # undefine the secret
         os.environ.pop('SECRET_ABC_KEY')
 
+
 def test_abc_submit_list_get_job_no_secret(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_abc_processor

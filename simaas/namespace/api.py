@@ -1,4 +1,5 @@
 import abc
+from typing import Optional
 
 from simaas.core.keystore import Keystore
 
@@ -20,7 +21,7 @@ class Namespace(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def name(self) -> str:
+    def name(self) -> Optional[str]:
         ...
 
     @abc.abstractmethod

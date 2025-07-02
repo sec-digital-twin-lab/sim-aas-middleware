@@ -196,7 +196,9 @@ def add_test_processor(
             credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
 
             # build the image
-            build_processor_image(abs_proc_path, image_name, credentials=credentials, platform=platform)
+            build_processor_image(
+                abs_proc_path, os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials, platform=platform
+            )
 
             # export the image
             image_path = os.path.join(tempdir, 'pdi.tar')

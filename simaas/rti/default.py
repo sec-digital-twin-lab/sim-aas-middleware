@@ -25,11 +25,19 @@ from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescrip
 logger = Logging.get('rti.service')
 
 
+REQUIRED_ENV = [
+    'SIMAAS_REPO_PATH'
+]
+
 class DefaultRTIService(RTIServiceBase):
     def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
         super().__init__(
             node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
         )
+
+        # check if all required env variables are available
+        if not all(var in os.environ for var in REQUIRED_ENV):
+            raise RTIException(f"The following environment variables need to be defined: {REQUIRED_ENV}.")
 
         # initialise properties
         self._port_range = (6000, 9000)
@@ -102,7 +110,9 @@ class DefaultRTIService(RTIServiceBase):
                         json.dump(gpp.model_dump(), f, indent=2)
 
                     # build the image
-                    build_processor_image(proc_path, image_name, credentials=credentials)
+                    build_processor_image(
+                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+                    )
 
             # find out what ports are exposed
             ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)

@@ -40,7 +40,7 @@ class AWSConfiguration(BaseModel):
 
 REQUIRED_ENV = [
     'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN',
-    'SIMAAS_AWS_JOB_QUEUE'
+    'SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH'
 ]
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
@@ -407,7 +407,10 @@ class AWSRTIService(RTIServiceBase):
                         json.dump(gpp.model_dump(), f, indent=2)
 
                     # build the image
-                    build_processor_image(proc_path, image_name, credentials=credentials, platform='linux/amd64')
+                    build_processor_image(
+                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
+                        credentials=credentials, platform='linux/amd64'
+                    )
 
                     # push to ECR
                     ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)

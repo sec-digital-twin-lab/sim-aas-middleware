@@ -19,8 +19,7 @@ from simaas.core.logging import Logging
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.nodedb.api import NodeDBService, NodeDBProxy
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity, P2PGetIdentity, P2PGetNetwork, \
-    P2PReserveNamespaceResources, P2PCancelNamespaceReservation, P2PClaimNamespaceResources, \
-    P2PReleaseNamespaceResources
+    P2PReserveNamespaceResources, P2PCancelNamespaceReservation, P2PUpdateNamespaceBudget
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
@@ -94,10 +93,9 @@ class Node(abc.ABC):
         self.p2p.add(P2PGetNetwork(self))
         self.p2p.add(P2PRunnerPerformHandshake(self))
         self.p2p.add(P2PNamespaceServiceCall(self))
+        self.p2p.add(P2PUpdateNamespaceBudget(self))
         self.p2p.add(P2PReserveNamespaceResources(self))
         self.p2p.add(P2PCancelNamespaceReservation(self))
-        self.p2p.add(P2PClaimNamespaceResources(self))
-        self.p2p.add(P2PReleaseNamespaceResources(self))
         self.p2p.start_service()
 
         if rest_address is not None:
