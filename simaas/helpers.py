@@ -133,7 +133,6 @@ def docker_find_image(image_name: str) -> List[Image]:
 
 def docker_delete_image(image_name: str) -> None:
     with docker_client() as client:
-        client = docker.from_env()
         image = client.images.get(image_name)
         client.images.remove(image.id, force=True)
 

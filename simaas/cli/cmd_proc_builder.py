@@ -20,7 +20,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch
+from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch, docker_client
 from simaas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
@@ -71,23 +71,23 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
         raise CLIRuntimeError(f"Processor path {processor_path} does not exist or not a directory")
 
     # check if the image already exists
-    client = docker.from_env()
-    image_existed = False
-    try:
-        # get a list of all images and check if it has the name.
-        for image in client.images.list():
-            if image_name in image.tags:
-                # if we are forced to build a new image, delete the existing one first
-                if force_build:
-                    client.images.remove(image.id, force=True)
+    with docker_client() as client:
+        image_existed = False
+        try:
+            # get a list of all images and check if it has the name.
+            for image in client.images.list():
+                if image_name in image.tags:
+                    # if we are forced to build a new image, delete the existing one first
+                    if force_build:
+                        client.images.remove(image.id, force=True)
 
-                image_existed = True
-                break
+                    image_existed = True
+                    break
 
-    except Exception as e:
-        raise CLIRuntimeError("Deleting existing docker image failed.", details={
-            'exception': e
-        })
+        except Exception as e:
+            raise CLIRuntimeError("Deleting existing docker image failed.", details={
+                'exception': e
+            })
 
     # build the processor docker image
     if force_build or not image_existed:
