@@ -93,7 +93,7 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
     if force_build or not image_existed:
         with tempfile.TemporaryDirectory() as tempdir:
             # copy the processor to the temp location
-            context_name = os.path.basename(processor_path)
+            context_name = os.path.basename(os.path.normpath(processor_path))
             context_path = os.path.join(tempdir, context_name)
             shutil.copytree(processor_path, context_path)
 
