@@ -260,7 +260,7 @@ class ProcBuilderLocal(CLICommand):
         image_name = f"{user_name}/{descriptor.name}:{content_hash}"
         print(f"Building image '{image_name}' for platform '{args['arch']}'. This may take a while...")
 
-        # create the GPP descriptor
+        # create the (temporary) GPP descriptor file
         gpp: GitProcessorPointer = GitProcessorPointer(
             repository=repo_name,
             commit_id=f"content_hash:{content_hash}",
@@ -279,6 +279,9 @@ class ProcBuilderLocal(CLICommand):
             print(f"Done building image '{image_name}'.")
         else:
             print(f"Using existing building image '{image_name}'.")
+
+        # delete the temporary GPP file
+        os.remove(gpp_path)
 
         with tempfile.TemporaryDirectory() as tempdir:
             # export the image
