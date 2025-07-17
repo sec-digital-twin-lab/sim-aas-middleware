@@ -3,7 +3,6 @@ import traceback
 from typing import Optional, List, Tuple, Dict
 
 from pydantic import BaseModel
-from simaas.nodedb.exceptions import NodeDBException
 
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
@@ -233,8 +232,8 @@ class P2PJoinNetwork(P2PProtocol):
 
                 # process the namespaces (if any)
                 if reply.snapshot.update_namespace:
-                    for namespace in reply.snapshot.update_namespace:
-                        self._node.db.update_namespace(namespace)
+                    for ns_info in reply.snapshot.update_namespace:
+                        self._node.db.handle_namespace_snapshot(ns_info)
 
                 logger.debug(f"Adding peer at {peer.p2p_address} to db: {peer.identity.name} | {peer.identity.id}")
 
@@ -265,6 +264,11 @@ class P2PJoinNetwork(P2PProtocol):
         if request.snapshot.update_network:
             for node in request.snapshot.update_network:
                 self._node.db.update_network(node)
+
+        # process the namespaces (if any)
+        if request.snapshot.update_namespace:
+            for ns_info in request.snapshot.update_namespace:
+                self._node.db.handle_namespace_snapshot(ns_info)
 
         return PeerUpdateMessage(
             origin=self._node.db.get_node(),
@@ -323,15 +327,72 @@ class P2PLeaveNetwork(P2PProtocol):
         return None
 
 
+class UpdateNamespaceBudgetRequest(BaseModel):
+    namespace: str
+    budget: ResourceDescriptor
+
+
+class P2PUpdateNamespaceBudget(P2PProtocol):
+    NAME = 'nodedb-namespace-update'
+
+    def __init__(self, node) -> None:
+        super().__init__(self.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(
+            cls, node, peer: NodeInfo, namespace: str, budget: ResourceDescriptor
+    ) -> None:
+        # get the fully qualified P2P address for the peer
+        peer_address = P2PAddress(
+            address=peer.p2p_address,
+            curve_secret_key=node.keystore.curve_secret_key(),
+            curve_public_key=node.keystore.curve_public_key(),
+            curve_server_key=peer.identity.c_public_key
+        )
+
+        try:
+            # send the request
+            reply, _ = await p2p_request(
+                peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget)
+            )
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            logger.error(f"Failed to send update namespace budget request for {namespace} "
+                         f"to: {peer.identity.name} | {peer.identity.id}")
+            logger.error(trace)
+
+    async def handle(
+            self, request: UpdateNamespaceBudgetRequest, attachment_path: Optional[str] = None,
+            download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        try:
+            self._node.db.handle_namespace_update(request.namespace, request.budget)
+            return None, None
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            logger.error(trace)
+            return None, None
+
+    @staticmethod
+    def request_type():
+        return UpdateNamespaceBudgetRequest
+
+    @staticmethod
+    def response_type():
+        return None
+
+
 class ResourceReservationRequest(BaseModel):
     namespace: str
+    job_id: str
     resources: ResourceDescriptor
-    reservation_id: str
 
 
 class ResourceReservationReply(BaseModel):
     accepted: bool
-    reason: Optional[str]
 
 
 class P2PReserveNamespaceResources(P2PProtocol):
@@ -343,8 +404,8 @@ class P2PReserveNamespaceResources(P2PProtocol):
 
     @classmethod
     async def perform(
-            cls, node, peer: NodeInfo, namespace: str, reservation_id: str, resources: ResourceDescriptor
-    ) -> Tuple[bool, str]:
+            cls, node, peer: NodeInfo, namespace: str, job_id: str, resources: ResourceDescriptor
+    ) -> bool:
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
@@ -357,39 +418,34 @@ class P2PReserveNamespaceResources(P2PProtocol):
             # send the request
             reply, _ = await p2p_request(
                 peer_address, cls.NAME, ResourceReservationRequest(
-                    namespace=namespace, resources=resources, reservation_id=reservation_id
+                    namespace=namespace, job_id=job_id, resources=resources
                 ), reply_type=ResourceReservationReply
             )
             reply: ResourceReservationReply = reply  # casting for PyCharm
-            return reply.accepted, reply.reason
+            return reply.accepted
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation request for {namespace}/{reservation_id}' "
+            logger.error(f"Failed to send resource reservation request for {namespace}:{job_id}' "
                          f"to: {peer.identity.name} | {peer.identity.id}")
             logger.error(trace)
-            return False, str(e)
+            return False
 
     async def handle(
             self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
-            accepted: bool = self._node.db.namespace_handle_reservation(
-                request.namespace, request.resources, request.reservation_id
+            accepted: bool = self._node.db.handle_namespace_reservation(
+                request.namespace, request.job_id, request.resources
             )
-
-            return ResourceReservationReply(
-                accepted=accepted, reason=None if accepted else 'Insufficient namespace resources'
-            ), None
-
-        except NodeDBException as e:
-            return ResourceClaimReply(accepted=False, reason=e.reason), None
+            return ResourceReservationReply(accepted=accepted), None
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            logger.error(f"Failed to handle resource reservation request for {request.namespace}:{request.job_id}'")
             logger.error(trace)
-            return ResourceReservationReply(accepted=False, reason=str(e)), None
+            return ResourceReservationReply(accepted=False), None
 
     @staticmethod
     def request_type():
@@ -402,7 +458,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
 
 class ResourceReservationCancellation(BaseModel):
     namespace: str
-    reservation_id: str
+    job_id: str
 
 
 class P2PCancelNamespaceReservation(P2PProtocol):
@@ -413,7 +469,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(cls, node, peer: NodeInfo, namespace: str, reservation_id: str) -> None:
+    async def perform(cls, node, peer: NodeInfo, namespace: str, job_id: str) -> None:
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
@@ -425,24 +481,28 @@ class P2PCancelNamespaceReservation(P2PProtocol):
         try:
             # send the request
             reply, _ = await p2p_request(
-                peer_address, cls.NAME, ResourceReservationCancellation(
-                    namespace=namespace, reservation_id=reservation_id
-                ), reply_type=None
+                peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id)
             )
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation cancellation for {namespace}/{reservation_id}' "
+            logger.error(f"Failed to send resource reservation cancellation for {namespace}:{job_id}' "
                          f"to: {peer.identity.name} | {peer.identity.id}")
             logger.error(trace)
-
-            return False
 
     async def handle(
             self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        self._node.db.namespace_cancel_reservation(request.namespace, request.reservation_id)
+        try:
+            self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            logger.error(f"Failed to handle resource reservation cancellation for {request.namespace}:{request.job_id}")
+            logger.error(trace)
+
+        return None, None
 
     @staticmethod
     def request_type():
@@ -451,142 +511,3 @@ class P2PCancelNamespaceReservation(P2PProtocol):
     @staticmethod
     def response_type():
         return None
-
-
-class ResourceClaimRequest(BaseModel):
-    namespace: str
-    reservation_id: str
-    job_id: str
-
-
-class ResourceClaimReply(BaseModel):
-    accepted: bool
-    reason: Optional[str]
-
-
-class P2PClaimNamespaceResources(P2PProtocol):
-    NAME = 'nodedb-namespace-claim'
-
-    def __init__(self, node) -> None:
-        super().__init__(self.NAME)
-        self._node = node
-
-    @classmethod
-    async def perform(cls, node, peer: NodeInfo, namespace: str, reservation_id: str, job_id: str) -> Tuple[bool, str]:
-        # get the fully qualified P2P address for the peer
-        peer_address = P2PAddress(
-            address=peer.p2p_address,
-            curve_secret_key=node.keystore.curve_secret_key(),
-            curve_public_key=node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
-        )
-
-        try:
-            # send the request
-            reply, _ = await p2p_request(
-                peer_address, cls.NAME, ResourceClaimRequest(
-                    namespace=namespace, reservation_id=reservation_id, job_id=job_id
-                ), reply_type=ResourceClaimReply
-            )
-            reply: ResourceClaimReply = reply  # casting for PyCharm
-            return reply.accepted, reply.reason
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource claim request for {namespace}/{reservation_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
-            return False, str(e)
-
-    async def handle(
-            self, request: ResourceClaimRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            self._node.db.namespace_handle_claim(request.namespace, request.reservation_id, request.job_id)
-            return ResourceClaimReply(accepted=True, reason=None), None
-
-        except NodeDBException as e:
-            return ResourceClaimReply(accepted=False, reason=e.reason), None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(trace)
-            return ResourceClaimReply(accepted=False, reason=str(e)), None
-
-    @staticmethod
-    def request_type():
-        return ResourceClaimRequest
-
-    @staticmethod
-    def response_type():
-        return ResourceClaimReply
-
-
-class ResourceReleaseRequest(BaseModel):
-    namespace: str
-    job_id: str
-
-
-class ResourceReleaseReply(BaseModel):
-    accepted: bool
-    reason: Optional[str]
-
-
-class P2PReleaseNamespaceResources(P2PProtocol):
-    NAME = 'nodedb-namespace-release'
-
-    def __init__(self, node) -> None:
-        super().__init__(self.NAME)
-        self._node = node
-
-    @classmethod
-    async def perform(cls, node, peer: NodeInfo, namespace: str, job_id: str) -> Tuple[bool, str]:
-        # get the fully qualified P2P address for the peer
-        peer_address = P2PAddress(
-            address=peer.p2p_address,
-            curve_secret_key=node.keystore.curve_secret_key(),
-            curve_public_key=node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
-        )
-
-        try:
-            # send the request
-            reply, _ = await p2p_request(
-                peer_address, cls.NAME, ResourceReleaseRequest(
-                    namespace=namespace, job_id=job_id
-                ), reply_type=ResourceReleaseReply
-            )
-            reply: ResourceReleaseReply = reply  # casting for PyCharm
-            return reply.accepted, reply.reason
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource release request for {namespace}/{job_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
-            return False, str(e)
-
-    async def handle(
-            self, request: ResourceReleaseRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
-    ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            self._node.db.namespace_handle_release(request.namespace, request.job_id)
-            return ResourceReleaseReply(accepted=True, reason=None), None
-
-        except NodeDBException as e:
-            return ResourceReleaseReply(accepted=False, reason=e.reason), None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(trace)
-            return ResourceReleaseReply(accepted=False, reason=str(e)), None
-
-    @staticmethod
-    def request_type():
-        return ResourceReleaseRequest
-
-    @staticmethod
-    def response_type():
-        return ResourceReleaseReply

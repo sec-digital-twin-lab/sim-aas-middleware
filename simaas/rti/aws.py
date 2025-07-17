@@ -40,7 +40,7 @@ class AWSConfiguration(BaseModel):
 
 REQUIRED_ENV = [
     'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN',
-    'SIMAAS_AWS_JOB_QUEUE'
+    'SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH'
 ]
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
@@ -407,7 +407,10 @@ class AWSRTIService(RTIServiceBase):
                         json.dump(gpp.model_dump(), f, indent=2)
 
                     # build the image
-                    build_processor_image(proc_path, image_name, credentials=credentials, platform='linux/amd64')
+                    build_processor_image(
+                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
+                        credentials=credentials, platform='linux/amd64'
+                    )
 
                     # push to ECR
                     ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
@@ -429,23 +432,7 @@ class AWSRTIService(RTIServiceBase):
             )
 
             # update the db record
-            with self._mutex:
-                with self._session_maker() as session:
-                    record = session.query(DBDeployedProcessor).get(proc.id)
-                    if record:
-                        record.state = proc.state.value
-                        record.image_name = proc.image_name
-                        record.ports = proc.ports
-                        record.gpp = proc.gpp.model_dump()
-                        record.error = proc.error
-
-                    else:
-                        logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
-                                       f"{proc.image_name} expected to exist but not found -> creating now.")
-                        session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                        ports=proc.ports,
-                                                        gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
-                    session.commit()
+            self.update_proc_db(proc)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -453,6 +440,10 @@ class AWSRTIService(RTIServiceBase):
 
             proc.state = Processor.State.FAILED
             proc.error = str(e)
+
+            # update the db record
+            self.update_proc_db(proc)
+
         finally:
             loop.close()
 
@@ -553,45 +544,41 @@ class AWSRTIService(RTIServiceBase):
 
                 raise e
 
-    def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
-        # attempt to cancel the job
-        try:
-            asyncio.run(P2PInterruptJob.perform(peer_address))
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-            grace_period = 0
-
+    def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
+        # get the AWS job id
         with self._session_maker() as session:
             # get the record and status
             record = session.query(DBJobInfo).get(job_id)
             aws_job_id = record.runner['aws_job_id']
 
-            deadline = get_timestamp_now() + grace_period * 1000
-            while get_timestamp_now() < deadline:
-                try:
-                    # sleep for a bit and check the record
+        # attempt to cancel the job gracefully (only possible if we have the peer address
+        if peer_address is not None:
+            try:
+                # send the cancellation request
+                asyncio.run(P2PInterruptJob.perform(peer_address))
+
+                # determine deadline and wait until then to see if the job has terminated by then
+                deadline = get_timestamp_now() + grace_period * 1000
+                while get_timestamp_now() < deadline:
                     time.sleep(1)
 
                     # is the container still running -> if not, all good we are done
                     if not batch_job_running(aws_job_id):
                         return
 
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] checking status failed: {trace}")
-                    break
-
-            # if we get here then either the deadline has been reached or there was an exception -> kill container
-            try:
-                logger.warning(f"[job:{job_id}] grace period exceeded -> "
-                               f"killing AWS Batch job {aws_job_id}")
-                batch_terminate_job(aws_job_id)
-
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
+                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
+
+        # if we reach here, graceful cancellation wasn't possible (deadlined reached, no peer address, exception)
+        # -> kill container
+        try:
+            logger.warning(f"[job:{job_id}] cancellation unsuccessful -> killing AWS Batch job {aws_job_id}")
+            batch_terminate_job(aws_job_id)
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
 
     def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)

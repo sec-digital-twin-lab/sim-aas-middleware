@@ -101,6 +101,9 @@ def test_proc_abc_with_secret(dummy_namespace):
             value = result['v']
             assert value == 123
 
+        # undefine the secret
+        os.environ.pop('SECRET_ABC_KEY')
+
 
 def test_abc_submit_list_get_job_no_secret(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
@@ -114,10 +117,6 @@ def test_abc_submit_list_get_job_no_secret(
 
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
-
-    # undefine the secret (if necessary)
-    if 'SECRET_ABC_KEY' in os.environ:
-        os.environ.pop('SECRET_ABC_KEY')
 
     # submit the task
     task = Task(
@@ -265,3 +264,6 @@ def test_abc_submit_list_get_job_with_secret(
         result: dict = json.load(f)
         value = result['v']
         assert value == 123
+
+    # undefine the secret
+    os.environ.pop('SECRET_ABC_KEY')

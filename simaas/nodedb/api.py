@@ -94,6 +94,19 @@ class NodeDBService(abc.ABC):
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
 
+    @abc.abstractmethod
+    def reserve_namespace_resources(self, namespace: str, job_id: str, resources: ResourceDescriptor) -> None:
+        """
+        Attempts to reserve namespace resources for a job.
+        """
+
+    @abc.abstractmethod
+    def cancel_namespace_reservation(self, namespace: str, job_id: str) -> bool:
+        """
+        Cancels a namespace resource reservation (if it exists).
+        """
+
+
 class NodeDBProxy(EndpointProxy):
     @classmethod
     def from_session(cls, session: Session) -> NodeDBProxy:

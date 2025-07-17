@@ -115,8 +115,8 @@ class Keystore:
         keystore.sync()
 
         logger.info(f"keystore created: id={keystore.identity.id} "
-                    f"s_key={keystore._s_key.public_as_string()} "
-                    f"e_key={keystore._e_key.public_as_string()}")
+                    f"s_pubkey={keystore._s_key.public_as_string()} "
+                    f"e_pubkey={keystore._e_key.public_as_string()}")
 
         return keystore
 

@@ -4,7 +4,6 @@ import os
 import random
 import tempfile
 import time
-import traceback
 from typing import Optional, List
 
 import pytest
@@ -237,30 +236,8 @@ def test_namespace_rti_job_submit_status(
     )
 
     # submit the job
-    try:
-        result = namespace0.rti.submit([task])
-        job: Job = result[0]
-    except Exception as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        print(trace)
-
-    # # get list of all jobs by correct user
-    # result = rti_proxy.get_jobs_by_user(owner)
-    # assert (result is not None)
-    # result = {job.id: job for job in result}
-    # assert (job_id in result)
-    #
-    # # get list of all jobs by wrong user
-    # result = rti_proxy.get_jobs_by_user(wrong_user)
-    # assert (result is not None)
-    # assert (len(result) == 0)
-    #
-    # # get list of all jobs by proc
-    # result = rti_proxy.get_jobs_by_proc(proc_id)
-    # assert (result is not None)
-    # assert (len(result) == 1)
-
-    # try to get the job info as the wrong user
+    result = namespace0.rti.submit([task])
+    job: Job = result[0]
 
     # not owner of job
     with pytest.raises(SaaSRuntimeException) as e:

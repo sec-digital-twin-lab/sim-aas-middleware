@@ -12,6 +12,8 @@ from typing import List, Union, Any, Optional, Tuple
 
 import pytest
 from docker.errors import ImageNotFound
+from git import Repo
+
 from simaas.cli.cmd_service import Service
 
 from examples.simple.abc.processor import write_value
@@ -1295,25 +1297,31 @@ def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+    # copy the repository (if required)
     repo_path = os.path.join(temp_dir, 'repository')
+    if not os.path.isdir(repo_path):
+        shutil.copytree(os.environ['SIMAAS_REPO_PATH'], repo_path)
+
+    # get the current commit id
+    repo = Repo(repo_path)
+    commit_id = repo.head.commit.hexsha
 
     try:
-        clone_repository(REPOSITORY_URL+"_doesnt_exist", temp_dir, credentials=credentials)
+        clone_repository(REPOSITORY_URL+"_doesnt_exist", os.path.join(temp_dir, 'repository_doesnt_exist'),
+                         credentials=(os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN']))
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
-        clone_repository(REPOSITORY_URL, repo_path, commit_id="doesntexist", credentials=credentials)
+        clone_repository(REPOSITORY_URL, repo_path, commit_id="doesntexist", simulate_only=True)
         assert False
     except CLIRuntimeError:
         assert os.path.isdir(repo_path)
         assert True
 
     try:
-        clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
-        assert os.path.isdir(repo_path)
+        clone_repository(REPOSITORY_URL, repo_path, commit_id=commit_id, simulate_only=True)
         assert True
     except CLIRuntimeError:
         assert False
@@ -1326,28 +1334,35 @@ def test_cli_builder_build_image(docker_available, github_credentials_available,
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    # clone the repository
-    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+    # copy the repository
     repo_path = os.path.join(temp_dir, 'repository')
-    clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
+    if not os.path.isdir(repo_path):
+        shutil.copytree(os.environ['SIMAAS_REPO_PATH'], repo_path)
 
+    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     image_name = 'test'
 
     try:
-        build_processor_image(os.path.join(repo_path+"_wrong", PROC_ABC_PATH), image_name, credentials=credentials)
+        build_processor_image(
+            os.path.join(repo_path+"_wrong", PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+        )
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
         proc_path_wrong = "examples/adapters"
-        build_processor_image(os.path.join(repo_path, proc_path_wrong), image_name, credentials=credentials)
+        build_processor_image(
+            os.path.join(repo_path, proc_path_wrong), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+        )
         assert False
     except CLIRuntimeError:
         assert True
 
     try:
-        build_processor_image(os.path.join(repo_path, PROC_ABC_PATH), image_name, credentials=credentials)
+        build_processor_image(
+            os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+        )
     except CLIRuntimeError:
         assert False
 
@@ -1367,14 +1382,17 @@ def test_cli_builder_export_image(docker_available, github_credentials_available
     except ImageNotFound:
         assert True
 
-    # clone the repository
-    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+    # copy the repository
     repo_path = os.path.join(temp_dir, 'repository')
-    clone_repository(REPOSITORY_URL, repo_path, commit_id=REPOSITORY_COMMIT_ID, credentials=credentials)
+    if not os.path.isdir(repo_path):
+        shutil.copytree(os.environ['SIMAAS_REPO_PATH'], repo_path)
 
     # build image
+    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
     image_name = 'test'
-    build_processor_image(os.path.join(repo_path, PROC_ABC_PATH), image_name, credentials=credentials)
+    build_processor_image(
+        os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+    )
 
     # export image
     try:

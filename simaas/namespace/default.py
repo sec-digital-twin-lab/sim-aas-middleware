@@ -228,7 +228,9 @@ class NamespaceRTI(RTIInterface):
 
 
 class DefaultNamespace(Namespace):
-    def __init__(self, name: str, custodian_identity: Identity, custodian_address: str, authority: Keystore) -> None:
+    def __init__(
+            self, name: Optional[str], custodian_identity: Identity, custodian_address: str, authority: Keystore
+    ) -> None:
         super().__init__(
             NamespaceDOR(custodian_identity, custodian_address, authority),
             NamespaceRTI(custodian_identity, custodian_address, authority)
@@ -244,7 +246,7 @@ class DefaultNamespace(Namespace):
     def custodian_address(self) -> P2PAddress:
         return self._custodian_address
 
-    def name(self) -> str:
+    def name(self) -> Optional[str]:
         return self._name
 
     def keystore(self) -> Keystore:

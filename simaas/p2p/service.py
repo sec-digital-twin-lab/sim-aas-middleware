@@ -59,8 +59,8 @@ class P2PService:
         with self._mutex:
             if not self._socket:
                 try:
-                    server_ctx = Context()
-                    self._socket = server_ctx.socket(zmq.ROUTER)
+                    context = Context.instance()
+                    self._socket = context.socket(zmq.ROUTER)
                     self._socket.setsockopt(zmq.LINGER, 0)
                     self._socket.setsockopt(zmq.RCVTIMEO, timeout)
                     self._socket.setsockopt(zmq.SNDTIMEO, timeout)

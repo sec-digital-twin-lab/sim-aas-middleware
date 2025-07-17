@@ -25,11 +25,19 @@ from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescrip
 logger = Logging.get('rti.service')
 
 
+REQUIRED_ENV = [
+    'SIMAAS_REPO_PATH'
+]
+
 class DefaultRTIService(RTIServiceBase):
     def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
         super().__init__(
             node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
         )
+
+        # check if all required env variables are available
+        if not all(var in os.environ for var in REQUIRED_ENV):
+            raise RTIException(f"The following environment variables need to be defined: {REQUIRED_ENV}.")
 
         # initialise properties
         self._port_range = (6000, 9000)
@@ -102,7 +110,9 @@ class DefaultRTIService(RTIServiceBase):
                         json.dump(gpp.model_dump(), f, indent=2)
 
                     # build the image
-                    build_processor_image(proc_path, image_name, credentials=credentials)
+                    build_processor_image(
+                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+                    )
 
             # find out what ports are exposed
             ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
@@ -117,23 +127,7 @@ class DefaultRTIService(RTIServiceBase):
             )
 
             # update the db record
-            with self._mutex:
-                with self._session_maker() as session:
-                    record = session.query(DBDeployedProcessor).get(proc.id)
-                    if record:
-                        record.state = proc.state.value
-                        record.image_name = proc.image_name
-                        record.ports = proc.ports
-                        record.gpp = proc.gpp.model_dump()
-                        record.error = proc.error
-
-                    else:
-                        logger.warning(f"[deploy:{shorten_id(proc.id)}] database record for proc {proc.id}:"
-                                       f"{proc.image_name} expected to exist but not found -> creating now.")
-                        session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                        ports=proc.ports,
-                                                        gpp=proc.gpp.model_dump() if proc.gpp else None, error=None))
-                    session.commit()
+            self.update_proc_db(proc)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -141,6 +135,10 @@ class DefaultRTIService(RTIServiceBase):
 
             proc.state = Processor.State.FAILED
             proc.error = str(e)
+
+            # update the db record
+            self.update_proc_db(proc)
+
         finally:
             loop.close()
 
