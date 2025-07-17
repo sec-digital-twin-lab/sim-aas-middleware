@@ -87,6 +87,13 @@ arguments. For a list of all arguments, use:
 simaas-cli service --help
 ```
 
+### Path to Sim-aaS Middleware Repository
+A node may have to build a Processor Docker Image (PDI) from scratch in case the PDI in the DOR
+only contains the meta information about GPP but not the image itself. For this reason, either 
+the `SIMAAS_REPO_PATH` environment variable needs to be defined, or the path needs to be passed
+explicitly when using the CLI command. 
+
+
 ## AWS RTI Service
 > Note: if you want to use processors with AWS, make sure you build the Processor Docker
 > Images for `linux/amd64`. See documentation [here](./usage_build_processor_docker_image.md) 
