@@ -327,27 +327,27 @@ class DefaultNodeDBService(NodeDBService):
                 ) for record in records
             ]
 
-    def update_namespace_budget(self, namespace: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
-        ns_info: NamespaceInfo = self.handle_namespace_update(namespace, budget)
+        ns_info: NamespaceInfo = self.handle_namespace_update(name, budget)
         for peer in self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                asyncio.run(P2PUpdateNamespaceBudget.perform(self._node, peer, namespace, budget))
+                asyncio.run(P2PUpdateNamespaceBudget.perform(self._node, peer, name, budget))
 
         return ns_info
 
-    def reserve_namespace_resources(self, namespace: str, job_id: str, resources: ResourceDescriptor) -> None:
+    def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         # try to make a resource reservation
         successful = True
         try:
             for peer in self._node.db.get_network():
                 if peer.identity.id == self._node.identity.id:
-                    successful = self.handle_namespace_reservation(namespace, job_id, resources)
+                    successful = self.handle_namespace_reservation(name, job_id, resources)
                 else:
                     successful = asyncio.run(
-                        P2PReserveNamespaceResources.perform(self._node, peer, namespace, job_id, resources)
+                        P2PReserveNamespaceResources.perform(self._node, peer, name, job_id, resources)
                     )
 
                 # did we encounter an issue?
@@ -361,17 +361,17 @@ class DefaultNodeDBService(NodeDBService):
         if not successful:
             for peer in self._node.db.get_network():
                 if peer.identity.id == self._node.identity.id:
-                    self.handle_namespace_cancellation(namespace, job_id)
+                    self.handle_namespace_cancellation(name, job_id)
                 else:
-                    asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, namespace, job_id))
+                    asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id))
 
-            raise NodeDBException(f"Resource reservation for {namespace}:{job_id} failed")
+            raise NodeDBException(f"Resource reservation for {name}:{job_id} failed")
 
-    def cancel_namespace_reservation(self, namespace: str, job_id: str) -> bool:
-        result = self.handle_namespace_cancellation(namespace, job_id)
+    def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
+        result = self.handle_namespace_cancellation(name, job_id)
         for peer in self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, namespace, job_id))
+                asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id))
         return result
 
     def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:
@@ -393,13 +393,13 @@ class DefaultNodeDBService(NodeDBService):
                     record.jobs = [job_id for job_id in ns_info.jobs]
                     session.commit()
 
-    def handle_namespace_update(self, namespace: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    def handle_namespace_update(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         with self._mutex:
             with self._Session() as session:
-                record = session.query(NamespaceRecord).get(namespace)
+                record = session.query(NamespaceRecord).get(name)
                 if record is None:
                     record = NamespaceRecord(
-                        name=namespace,
+                        name=name,
                         budget=budget.model_dump(),
                         reservations={},
                         jobs=[]
@@ -417,13 +417,13 @@ class DefaultNodeDBService(NodeDBService):
                     jobs=[job_id for job_id in record.jobs]
                 )
 
-    def handle_namespace_reservation(self, namespace: str, job_id: str, request: ResourceDescriptor) -> bool:
+    def handle_namespace_reservation(self, name: str, job_id: str, request: ResourceDescriptor) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(namespace)
+                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(name)
                 if record is None:
-                    raise NamespaceNotFoundError(namespace)
+                    raise NamespaceNotFoundError(name)
 
                 # determine the total available budget for this namespace
                 budget: ResourceDescriptor = ResourceDescriptor.model_validate(record.budget)
@@ -448,11 +448,11 @@ class DefaultNodeDBService(NodeDBService):
                 else:
                     return False
 
-    def handle_namespace_cancellation(self, namespace: str, job_id: str) -> bool:
+    def handle_namespace_cancellation(self, name: str, job_id: str) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(namespace)
+                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(name)
                 if record is not None:
                     # do we have this reservation?
                     reservations = dict(record.reservations)
