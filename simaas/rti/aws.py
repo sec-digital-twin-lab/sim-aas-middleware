@@ -457,30 +457,21 @@ class AWSRTIService(RTIServiceBase):
 
             # remove the docker image (if applicable)
             if not keep_local_image:
-                try:
-                    docker_delete_image(proc.image_name)
+                docker_delete_image(proc.image_name)
 
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.error(
-                        f"[undeploy:{shorten_id(proc.id)}] failed to delete docker image {proc.image_name}: {trace}"
-                    )
-
-            # remove the record from the db
-            with self._mutex:
-                with self._session_maker() as session:
-                    record = session.query(DBDeployedProcessor).get(proc.id)
-                    if record:
-                        session.delete(record)
-                        session.commit()
-                    else:
-                        logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[deploy:{shorten_id(proc.id)}] failed: {trace}")
+            logger.error(f"[undeploy:{shorten_id(proc.id)}] failed: {trace}")
 
-            proc.state = Processor.State.FAILED
-            proc.error = str(e)
+        # remove the record from the db
+        with self._mutex:
+            with self._session_maker() as session:
+                record = session.query(DBDeployedProcessor).get(proc.id)
+                if record:
+                    session.delete(record)
+                    session.commit()
+                else:
+                    logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
     def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
         # determine the custodian address and curve public key
