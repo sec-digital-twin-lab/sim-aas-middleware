@@ -138,6 +138,7 @@ class Service(CLICommand):
             # determine sim-aas-middleware path
             use_env_or_prompt_if_missing(args, 'simaas_repo_path', 'SIMAAS_REPO_PATH', prompt_for_string,
                                          message="Enter the path to the sim-aas-middleware repository")
+            os.environ['SIMAAS_REPO_PATH'] = args['simaas_repo_path']
 
             if args['dor_type'] is None:
                 args['dor_type'] = prompt_for_selection([
