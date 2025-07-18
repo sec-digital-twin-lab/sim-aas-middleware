@@ -15,11 +15,13 @@ from docker.errors import ImageNotFound
 from git import Repo
 
 from build.lib.simaas.core.helpers import get_timestamp_now
+from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
 from simaas.cli.cmd_service import Service
 
 from examples.simple.abc.processor import write_value
 
 from simaas.nodedb.protocol import P2PJoinNetwork
+from simaas.nodedb.schemas import NamespaceInfo
 from simaas.rti.default import DBJobInfo, DefaultRTIService
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
@@ -1449,7 +1451,7 @@ def test_cli_builder_cmd(docker_available, github_credentials_available, session
         assert False
 
 
-def test_cli_builder_cmd_twice(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -2241,4 +2243,137 @@ def test_cli_service(temp_dir):
 
     except CLIRuntimeError:
         assert False
-    
+
+
+def test_cli_namespace_create_list_update(docker_available, github_credentials_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    address = session_node.rest.address()
+    name = 'my_namespace_123'
+    vcpus = 4
+    memory = 2048
+
+    # create a namespace (with invalid resource specification)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': -4,
+            'memory': 2048
+        }
+        cmd = NamespaceUpdate()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    # create a namespace (with invalid resource specification)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': 4,
+            'memory': '2048asdf'
+        }
+        cmd = NamespaceUpdate()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    # list namespaces (should still be 0)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+        }
+        cmd = NamespaceList()
+        result = cmd.execute(args)
+        assert 'namespaces' in result
+        assert len(result['namespaces']) == 0
+
+    except Exception:
+        assert False
+
+    # create a namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': vcpus,
+            'memory': memory
+        }
+        cmd = NamespaceUpdate()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'namespace' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # list namespaces (should be 1 now)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+        }
+        cmd = NamespaceList()
+        result = cmd.execute(args)
+        assert 'namespaces' in result
+        assert len(result['namespaces']) == 1
+
+    except Exception:
+        assert False
+
+    # show namespace (non-existing)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': 'unknown_namespace'
+        }
+        cmd = NamespaceShow()
+        result = cmd.execute(args)
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is None
+
+    except Exception:
+        assert False
+
+    # show namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name
+        }
+        cmd = NamespaceShow()
+        result = cmd.execute(args)
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is not None
+        assert namespace.budget.vcpus == vcpus
+        assert namespace.budget.memory == memory
+
+    except Exception:
+        assert False
+
+    # update namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': 2*vcpus,
+            'memory': 2*memory
+        }
+        cmd = NamespaceUpdate()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is not None
+        assert namespace.budget.vcpus == 2*vcpus
+        assert namespace.budget.memory == 2*memory
+
+    except CLIRuntimeError:
+        assert False
