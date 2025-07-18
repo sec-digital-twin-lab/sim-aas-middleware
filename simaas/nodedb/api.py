@@ -144,7 +144,7 @@ class NodeDBProxy(EndpointProxy):
 
     def get_namespaces(self) -> Dict[str, NamespaceInfo]:
         return {
-            item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespaces")
+            item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespace")
         }
 
     def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
