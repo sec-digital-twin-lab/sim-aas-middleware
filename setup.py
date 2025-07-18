@@ -42,7 +42,6 @@ setup(
     entry_points={
         'console_scripts': [
             'simaas-cli = simaas.cli.saas_cli:main',
-            'simaas-node = simaas.service:main'
         ]
     },
     classifiers=[
