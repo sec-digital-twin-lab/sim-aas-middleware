@@ -558,7 +558,8 @@ class JobRunner(CLICommand, ProgressListener):
 
         # are we the one with complete mappings?
         if mappings_complete:
-            # release the barrier
+            # prepare the release
+            mappings: List[Tuple[str, P2PAddress]] = []
             for name in self._batch_ports.keys():
                 # get the identity and the P2P address (by convention that's the 6000/tcp mapping) of the member
                 member_identity = self._batch_identities[name]
@@ -568,10 +569,23 @@ class JobRunner(CLICommand, ProgressListener):
                     curve_public_key=self._keystore.curve_public_key(),
                     curve_server_key=member_identity.c_public_key
                 )
+                mappings.append((name, member_p2p_address))
 
-                # send the barrier release message to the member
-                self._logger.info(f"[barrier] send release for barrier 'initial_barrier' to {name} at {member_p2p_address}")
-                asyncio.run(BatchBarrier.perform(member_p2p_address, 'initial_barrier', self._batch_status))
+            suffix = ' '.join(f"{item[0]}->{item[1].address}" for item in mappings)
+            self._logger.info(f"[barrier] complete mapping available: {suffix}")
+            self._logger.info(f"[barrier] batch status: {self._batch_status.model_dump()}")
+
+            # release the barrier
+            for name, p2p_address in mappings:
+                try:
+                    # send the barrier release message to the member
+                    self._logger.info(
+                        f"[barrier] send release for 'initial_barrier' to {name} at {p2p_address.address}"
+                    )
+                    asyncio.run(BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status))
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    self._logger.error(f"[barrier] error: {e} -> {trace}")
 
         # wait for the barrier to be released
         self._logger.info("[barrier] waiting for barrier release 'initial_barrier'...")
