@@ -570,7 +570,9 @@ class JobRunner(CLICommand, ProgressListener):
                 )
 
                 # send the barrier release message to the member
-                self._logger.info(f"[barrier] send release for barrier 'initial_barrier' to {name} at {member_p2p_address}")
+                self._logger.info(
+                    f"[barrier] send release for barrier 'initial_barrier' to {name} at {member_p2p_address.address}"
+                )
                 asyncio.run(BatchBarrier.perform(member_p2p_address, 'initial_barrier', self._batch_status))
 
         # wait for the barrier to be released
