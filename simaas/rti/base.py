@@ -293,12 +293,19 @@ class RTIServiceBase(RTIRESTService):
         ]
 
         unique_user_iids: Set[str] = set()
+        unique_task_names: Set[str] = set()
         for checklist in checklists:
             unique_user_iids.add(checklist.task.user_iid)
 
             # task names are mandatory for easier distinction in a batch
             if len(checklists) > 1 and checklist.task.name is None:
                 raise RTIException("Missing name for task which is member of batch")
+
+            # check if the task name is unique
+            if checklist.task.name in unique_task_names:
+                raise RTIException(f"Duplicate task name '{checklist.task.name}' (task names must be unique)")
+            else:
+                unique_task_names.add(checklist.task.name)
 
             # check if the required processor is deployed for each task
             if checklist.proc is None:
