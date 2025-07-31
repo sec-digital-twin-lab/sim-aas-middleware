@@ -95,13 +95,13 @@ class NodeDBService(abc.ABC):
         """
 
     @abc.abstractmethod
-    def reserve_namespace_resources(self, namespace: str, job_id: str, resources: ResourceDescriptor) -> None:
+    def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         """
         Attempts to reserve namespace resources for a job.
         """
 
     @abc.abstractmethod
-    def cancel_namespace_reservation(self, namespace: str, job_id: str) -> bool:
+    def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
         """
         Cancels a namespace resource reservation (if it exists).
         """
@@ -144,7 +144,7 @@ class NodeDBProxy(EndpointProxy):
 
     def get_namespaces(self) -> Dict[str, NamespaceInfo]:
         return {
-            item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespaces")
+            item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespace")
         }
 
     def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:

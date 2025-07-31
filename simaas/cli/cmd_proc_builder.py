@@ -20,7 +20,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch
+from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch, docker_client
 from simaas.nodedb.api import NodeDBProxy
 
 logger = Logging.get('cli')
@@ -71,29 +71,29 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
         raise CLIRuntimeError(f"Processor path {processor_path} does not exist or not a directory")
 
     # check if the image already exists
-    client = docker.from_env()
-    image_existed = False
-    try:
-        # get a list of all images and check if it has the name.
-        for image in client.images.list():
-            if image_name in image.tags:
-                # if we are forced to build a new image, delete the existing one first
-                if force_build:
-                    client.images.remove(image.id, force=True)
+    with docker_client() as client:
+        image_existed = False
+        try:
+            # get a list of all images and check if it has the name.
+            for image in client.images.list():
+                if image_name in image.tags:
+                    # if we are forced to build a new image, delete the existing one first
+                    if force_build:
+                        client.images.remove(image.id, force=True)
 
-                image_existed = True
-                break
+                    image_existed = True
+                    break
 
-    except Exception as e:
-        raise CLIRuntimeError("Deleting existing docker image failed.", details={
-            'exception': e
-        })
+        except Exception as e:
+            raise CLIRuntimeError("Deleting existing docker image failed.", details={
+                'exception': e
+            })
 
     # build the processor docker image
     if force_build or not image_existed:
         with tempfile.TemporaryDirectory() as tempdir:
             # copy the processor to the temp location
-            context_name = os.path.basename(processor_path)
+            context_name = os.path.basename(os.path.normpath(processor_path))
             context_path = os.path.join(tempdir, context_name)
             shutil.copytree(processor_path, context_path)
 
@@ -162,7 +162,7 @@ class ProcBuilderLocal(CLICommand):
                      help="Deletes the newly created image after exporting it - note: if an image with the same "
                           "name already existed, this flag will be ignored, effectively resulting in the existing "
                           "image being replaced with the newly created one."),
-            Argument('--simaas-repo-path', dest='simaas_repo_path', action='store', help="Path to the sim-aas-middleware repository."),
+            Argument('--simaas-repo-path', dest='simaas_repo_path', action='store', help="Path to the sim-aas-middleware repository used for building PDIs."),
             Argument('--git-username', dest='git_username', action='store', help="GitHub username"),
             Argument('--git-token', dest='git_token', action='store', help="GitHub personal access token"),
             Argument('location', metavar='location', type=str, nargs=1,
@@ -260,7 +260,7 @@ class ProcBuilderLocal(CLICommand):
         image_name = f"{user_name}/{descriptor.name}:{content_hash}"
         print(f"Building image '{image_name}' for platform '{args['arch']}'. This may take a while...")
 
-        # create the GPP descriptor
+        # create the (temporary) GPP descriptor file
         gpp: GitProcessorPointer = GitProcessorPointer(
             repository=repo_name,
             commit_id=f"content_hash:{content_hash}",
@@ -279,6 +279,9 @@ class ProcBuilderLocal(CLICommand):
             print(f"Done building image '{image_name}'.")
         else:
             print(f"Using existing building image '{image_name}'.")
+
+        # delete the temporary GPP file
+        os.remove(gpp_path)
 
         with tempfile.TemporaryDirectory() as tempdir:
             # export the image

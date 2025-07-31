@@ -186,6 +186,29 @@ def prompt_for_string(message: str, default: str = '', hide: bool = False, allow
             return answer
 
 
+def prompt_for_integer(message: str, default: int = 0) -> int:
+    questions = [
+        {
+            'type': 'input',
+            'message': message,
+            'name': 'answer',
+        }
+    ]
+
+    # set the default (if any)
+    if default:
+        questions[0]['default'] = default
+
+    while True:
+        answer = inquirer.text(message=message, default=default).execute()
+
+        try:
+            return int(answer)
+
+        except Exception:
+            message = f"Not a valid integer: '{answer}'. {message}"
+
+
 def prompt_for_password(confirm: bool = True, allow_empty: bool = False) -> str:
     while True:
         pwd1 = prompt_for_string("Enter password:", hide=True, allow_empty=allow_empty)

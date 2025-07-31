@@ -3,6 +3,7 @@ import os
 import sys
 import traceback
 
+from simaas.cli.cmd_namespace import NamespaceList, NamespaceUpdate, NamespaceShow
 from simaas.helpers import determine_default_rest_address
 from simaas.meta import __version__
 from simaas.cli.cmd_dor import DORAdd, DORRemove, DORSearch, DORTag, DORUntag, DORAccessGrant, \
@@ -108,6 +109,14 @@ def main():
                     RTIJobStatus(),
                     RTIJobCancel()
                 ])
+            ]),
+            CLICommandGroup('namespace', 'manage namespaces', arguments=[
+                Argument('--address', dest='address', action='store',
+                         help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
+            ], commands=[
+                NamespaceList(),
+                NamespaceUpdate(),
+                NamespaceShow()
             ]),
             CLICommandGroup('network', 'explore the network of nodes', arguments=[
                 Argument('--address', dest='address', action='store',

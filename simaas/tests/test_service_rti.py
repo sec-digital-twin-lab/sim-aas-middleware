@@ -798,7 +798,8 @@ def deployed_thermostat_processor(
 
 
 def get_cosim_tasks(
-        deployed_room_processor, deployed_thermostat_processor, owner: Identity, namespace: Optional[str] = None
+        deployed_room_processor, deployed_thermostat_processor, owner: Identity, namespace: Optional[str] = None,
+        duplicate_name: Optional[str] = None
 ) -> List[Task]:
     return [
         Task(
@@ -823,7 +824,7 @@ def get_cosim_tasks(
                     'target_node_iid': None
                 })
             ],
-            name='room',
+            name=duplicate_name if duplicate_name else 'room',
             description=None,
             budget=ResourceDescriptor(vcpus=1, memory=1024),
             namespace=namespace
@@ -848,12 +849,37 @@ def get_cosim_tasks(
                     'target_node_iid': None
                 })
             ],
-            name='thermostat',
+            name=duplicate_name if duplicate_name else 'thermostat',
             description=None,
             budget=ResourceDescriptor(vcpus=1, memory=1024),
             namespace=namespace
         )
     ]
+
+
+def test_rest_submit_cosim_duplicate_names(
+        docker_available, github_credentials_available, session_node, rti_proxy, deployed_room_processor,
+        deployed_thermostat_processor
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    owner = session_node.keystore
+
+    # get the co-sim tasks
+    tasks = get_cosim_tasks(
+        deployed_room_processor, deployed_thermostat_processor, owner.identity, duplicate_name='name'
+    )
+
+    # submit the job
+    try:
+        rti_proxy.submit(tasks, with_authorisation_by=owner)
+        assert False
+    except UnsuccessfulRequestError as e:
+        assert "Duplicate task name 'name'" in e.reason
 
 
 def test_rest_submit_cosim(

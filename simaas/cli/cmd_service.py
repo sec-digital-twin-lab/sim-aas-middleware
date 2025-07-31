@@ -8,7 +8,8 @@ import traceback
 from InquirerPy.base import Choice
 
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_for_confirmation, prompt_if_missing, \
-    default_if_missing, initialise_storage_folder, prompt_for_selection, load_keystore, extract_address
+    default_if_missing, initialise_storage_folder, prompt_for_selection, load_keystore, extract_address, \
+    use_env_or_prompt_if_missing
 from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
@@ -73,6 +74,7 @@ class Service(CLICommand):
     default_boot_node_address = determine_default_rest_address()
     default_dor_service = DORType.BASIC.value
     default_rti_service = RTIType.DOCKER.value
+    default_simaas_repo_path = os.environ.get('SIMAAS_REPO_PATH', '')
     default_retain_job_history = False
     default_strict_deployment = True
     default_bind_all_address = False
@@ -96,6 +98,8 @@ class Service(CLICommand):
             Argument('--rti-type', dest='rti_type', action='store', choices=[t.value for t in RTIType],
                      help=f"indicate the type of RTI service provided by the node "
                           f"(default: '{self.default_rti_service}')."),
+            Argument('--simaas-repo-path', dest='simaas_repo_path', action='store',
+                     help="Path to the sim-aas-middleware repository used for building PDIs."),
             Argument('--retain-job-history', dest="retain-job-history", action='store_const', const=True,
                      help="[for execution/full nodes only] instructs the RTI to retain the job history (default "
                           "behaviour is to delete information of completed jobs). This flag should only be used for "
@@ -112,12 +116,16 @@ class Service(CLICommand):
         use_ssh_tunneling = False
 
         if args['use-defaults']:
+            if self.default_simaas_repo_path == '':
+                print("WARNING: using defaults but SIMAAS_REPO_PATH environment variable not defined.")
+
             default_if_missing(args, 'datastore', self.default_datastore)
             default_if_missing(args, 'rest-address', self.default_rest_address)
             default_if_missing(args, 'p2p-address', self.default_p2p_address)
             default_if_missing(args, 'boot-node', self.default_boot_node_address)
             default_if_missing(args, 'dor_type', self.default_dor_service)
             default_if_missing(args, 'rti_type', self.default_rti_service)
+            default_if_missing(args, 'simaas_repo_path', self.default_simaas_repo_path)
             default_if_missing(args, 'retain-job-history', self.default_retain_job_history)
             default_if_missing(args, 'strict-deployment', self.default_strict_deployment)
             default_if_missing(args, 'bind-all-address', self.default_bind_all_address)
@@ -126,6 +134,11 @@ class Service(CLICommand):
             prompt_if_missing(args, 'datastore', prompt_for_string,
                               message="Enter path to datastore:",
                               default=self.default_datastore)
+
+            # determine sim-aas-middleware path
+            use_env_or_prompt_if_missing(args, 'simaas_repo_path', 'SIMAAS_REPO_PATH', prompt_for_string,
+                                         message="Enter the path to the sim-aas-middleware repository")
+            os.environ['SIMAAS_REPO_PATH'] = args['simaas_repo_path']
 
             if args['dor_type'] is None:
                 args['dor_type'] = prompt_for_selection([

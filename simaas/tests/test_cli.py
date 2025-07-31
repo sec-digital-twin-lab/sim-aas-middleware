@@ -14,11 +14,14 @@ import pytest
 from docker.errors import ImageNotFound
 from git import Repo
 
+from build.lib.simaas.core.helpers import get_timestamp_now
+from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
 from simaas.cli.cmd_service import Service
 
 from examples.simple.abc.processor import write_value
 
 from simaas.nodedb.protocol import P2PJoinNetwork
+from simaas.nodedb.schemas import NamespaceInfo
 from simaas.rti.default import DBJobInfo, DefaultRTIService
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
@@ -26,7 +29,7 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove
     IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilderGithub
+from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilderGithub, ProcBuilderLocal
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel
 from simaas.cli.exceptions import CLIRuntimeError
@@ -1448,6 +1451,90 @@ def test_cli_builder_cmd(docker_available, github_credentials_available, session
         assert False
 
 
+def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    address = session_node.rest.address()
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
+
+    # create keystore
+    password = 'password'
+    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
+
+    # ensure the node knows about this identity
+    session_node.db.update_identity(keystore.identity)
+
+    # build the first time
+    try:
+        t0 = get_timestamp_now()
+
+        # define arguments
+        args = {
+            'location': [proc_abc_path],
+            'force_build': True,
+            'keep_image': True,
+            'arch': 'linux/amd64',
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = ProcBuilderLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi' in result
+        assert result['pdi'] is not None
+        pdi: DataObject = result['pdi']
+
+        obj = session_node.dor.get_meta(pdi.obj_id)
+        assert obj is not None
+        assert obj.data_type == 'ProcessorDockerImage'
+        assert obj.data_format == 'tar'
+
+    except CLIRuntimeError:
+        assert False
+
+    # build the second time
+    try:
+        t1 = get_timestamp_now()
+
+        # define arguments
+        args = {
+            'location': [proc_abc_path],
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64',
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = ProcBuilderLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi' in result
+        assert result['pdi'] is not None
+        pdi: DataObject = result['pdi']
+
+        obj = session_node.dor.get_meta(pdi.obj_id)
+        assert obj is not None
+        assert obj.data_type == 'ProcessorDockerImage'
+        assert obj.data_format == 'tar'
+
+    except CLIRuntimeError:
+        assert False
+
+    t2 = get_timestamp_now()
+
+    # the second build attempt should be significantly faster (indicating that the existing image has been used)
+    dt1 = t1 - t0
+    dt2 = t2 - t1
+    assert dt2 < dt1*0.1
+
+
 def test_cli_builder_cmd_store_image(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -2156,4 +2243,137 @@ def test_cli_service(temp_dir):
 
     except CLIRuntimeError:
         assert False
-    
+
+
+def test_cli_namespace_create_list_update(docker_available, github_credentials_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    address = session_node.rest.address()
+    name = 'my_namespace_123'
+    vcpus = 4
+    memory = 2048
+
+    # create a namespace (with invalid resource specification)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': -4,
+            'memory': 2048
+        }
+        cmd = NamespaceUpdate()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    # create a namespace (with invalid resource specification)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': 4,
+            'memory': '2048asdf'
+        }
+        cmd = NamespaceUpdate()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    # list namespaces (should still be 0)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+        }
+        cmd = NamespaceList()
+        result = cmd.execute(args)
+        assert 'namespaces' in result
+        assert len(result['namespaces']) == 0
+
+    except Exception:
+        assert False
+
+    # create a namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': vcpus,
+            'memory': memory
+        }
+        cmd = NamespaceUpdate()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'namespace' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # list namespaces (should be 1 now)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+        }
+        cmd = NamespaceList()
+        result = cmd.execute(args)
+        assert 'namespaces' in result
+        assert len(result['namespaces']) == 1
+
+    except Exception:
+        assert False
+
+    # show namespace (non-existing)
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': 'unknown_namespace'
+        }
+        cmd = NamespaceShow()
+        result = cmd.execute(args)
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is None
+
+    except Exception:
+        assert False
+
+    # show namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name
+        }
+        cmd = NamespaceShow()
+        result = cmd.execute(args)
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is not None
+        assert namespace.budget.vcpus == vcpus
+        assert namespace.budget.memory == memory
+
+    except Exception:
+        assert False
+
+    # update namespace
+    try:
+        args = {
+            'address': f"{address[0]}:{address[1]}",
+            'name': name,
+            'vcpus': 2*vcpus,
+            'memory': 2*memory
+        }
+        cmd = NamespaceUpdate()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'namespace' in result
+        namespace: Optional[NamespaceInfo] = result['namespace']
+        assert namespace is not None
+        assert namespace.budget.vcpus == 2*vcpus
+        assert namespace.budget.memory == 2*memory
+
+    except CLIRuntimeError:
+        assert False
