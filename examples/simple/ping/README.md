@@ -1,13 +1,44 @@
 # Ping Example: Processor Testing Outbound Connectivity
 
-This example demonstrates involves a simple processor that tries to test the connectivity
-to an external host given its address. The processor will attempt to run 'ping' and 'traceroute'
-commands to test the connectivity to the external host.
+This example demonstrates a comprehensive connectivity testing processor that tests various types of network connectivity to an external host. The processor can perform ping, traceroute, TCP connection tests, and UDP connection tests.
 
-The example consists of one processor:
+The example consists of:
 
-- **`ProcessorPing`** - a processor that takes one input, `parameters`, and produces an 
-output `result`.
+- **`ProcessorPing`** - a processor that takes one input, `parameters`, and produces an output `result`
+- **`test_server.py`** - combined TCP/UDP test server for connectivity testing
+
+## Connectivity Tests Supported
+
+- **Ping Test** - ICMP ping to test basic network reachability
+- **Traceroute Test** - Trace network path to destination
+- **TCP Connection Test** - Attempt to establish TCP connection to specified port
+- **UDP Connection Test** - Send UDP packet and optionally wait for response
+
+## Parameters
+
+The processor accepts these parameters:
+
+```json
+{
+  "address": "target_host_or_ip",
+  "do_ping": true,
+  "do_traceroute": true,
+  "do_tcp_test": true,
+  "tcp_port": 8080,
+  "tcp_timeout": 5,
+  "do_udp_test": true,
+  "udp_port": 8081,
+  "udp_timeout": 5
+}
+```
+
+## Test Server
+
+For testing TCP/UDP connectivity, run the test server on the target machine:
+
+```bash
+python3 server.py --host 0.0.0.0 --tcp-port 8080 --udp-port 8081
+```
 
 ## Install Sim-aaS Middleware
 ```shell
@@ -132,7 +163,7 @@ Here is sample output of the terminal for reference:
 Specify input interface item 'parameters' with data type/format JSONObject/json
 ? How to specify? by-value
 JSON schema available:  no
-? Enter a valid JSON object: {"address": "192.168.50.113", "do_ping": true, "do_traceroute": true}
+? Enter a valid JSON object: {"address": "192.168.50.113", "do_ping": true, "do_traceroute": true, "do_tcp_test": true, "tcp_port": 8080, "tcp_timeout": 5, "do_udp_test": true, "udp_port": 8081, "udp_timeout": 5}
 ? Select the owner for the output data objects: iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn - ping_test <email>
 ? Select the destination node for the output data objects: iq37...qdxn: ping_test at 192.168.50.117:5001
 ? Should access to output data objects be restricted? No
