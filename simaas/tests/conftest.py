@@ -43,6 +43,7 @@ load_dotenv()
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
 REPOSITORY_COMMIT_ID = '104d0161562e7a3ef6d3fb5c75d63b7adc9fc285'
 PROC_ABC_PATH = "examples/simple/abc"
+PROC_PING_PATH = "examples/simple/ping"
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -247,6 +248,62 @@ def deployed_abc_processor(
         # add test processor
         meta = add_test_processor(
             dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH, platform='linux/amd64'
+        )
+        proc_id = meta.obj_id
+
+        if not docker_available:
+            yield meta
+
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+                logger.info(f"Waiting for processor to be ready: {proc}")
+                time.sleep(1)
+
+            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+            logger.info(f"Processor deployed: {proc}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            try:
+                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
+                    logger.info(f"Waiting for processor to be ready: {proc}")
+                    time.sleep(1)
+            except Exception as e:
+                print(e)
+
+            logger.info(f"Processor undeployed: {proc}")
+
+
+@pytest.fixture(scope="session")
+def deployed_ping_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> DataObject:
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
+
+    else:
+        # add test processor
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, proc_name='proc-ping', proc_path=PROC_PING_PATH, platform='linux/amd64'
         )
         proc_id = meta.obj_id
 
