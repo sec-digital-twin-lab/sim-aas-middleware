@@ -83,6 +83,13 @@ class RTIServiceBase(RTIRESTService):
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
 
+        # a map of active cancellation workers
+        self._cancellation_workers: Dict[str, Optional[threading.Thread]] = {}
+
+    def on_cancellation_worker_done(self, job_id: str) -> None:
+        # we keep the dict entry but remove the thread object
+        self._cancellation_workers[job_id] = None
+
     def update_proc_db(self, proc: Processor) -> None:
         # update or create db record
         with self._session_maker() as session:
@@ -364,7 +371,7 @@ class RTIServiceBase(RTIRESTService):
 
         return checklists
 
-    def prepare_job_execution(self, batch_id: str, checklists: List[TaskChecklist]) -> None:
+    def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         # try to make reservations for all tasks that require it
         successful = True
         try:
@@ -407,7 +414,7 @@ class RTIServiceBase(RTIRESTService):
                 # noinspection PyTypeChecker
                 json.dump(checklist.status.model_dump(), f, indent=2)
 
-    def perform_batch_submission(self, batch_id: str, checklists: List[TaskChecklist]) -> None:
+    def perform_batch_submission(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         with self._session_maker() as session:
             # assemble the batch and create initial job DB records
             batch: List[Tuple[Job, JobStatus, Processor]] = []
@@ -560,9 +567,13 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # get the record
-                record = session.query(DBJobInfo).get(job_id)
+                record: DBJobInfo = session.query(DBJobInfo).get(job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
+
+                # is this job part of a batch?
+                batch_records: Optional[List[DBJobInfo]] = \
+                    session.query(DBJobInfo).filter_by(batch_id=record.batch_id).all() if record.batch_id else None
 
                 # TODO: might need to think about restricting status updates from jobs that are marked as finished.
                 # if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
@@ -571,11 +582,35 @@ class RTIServiceBase(RTIRESTService):
 
                 # check the status
                 status = JobStatus.model_validate(record.status)
+
+                # do we need to cancel a namespace reservation?
                 if status.state in [JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED]:
                     # cancel resource reservation (if applicable)
                     job: Job = Job.model_validate(record.job)
                     if job.task.namespace is not None:
                         self._node.db.cancel_namespace_reservation(job.task.namespace, job.id)
+
+                # do we need to terminate related jobs?
+                if batch_records is not None and status.state in [JobStatus.State.FAILED, JobStatus.State.CANCELLED]:
+                    for related in batch_records:
+                        # skip if this is the record of the just updated job
+                        if related.id == job_id:
+                            continue
+
+                        # is there already a cancellation worker?
+                        if related.id in self._cancellation_workers:
+                            continue
+
+                        # check the status and initiate cancellation if necessary
+                        related_status = JobStatus.model_validate(related.status)
+                        if related_status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
+                                                    JobStatus.State.RUNNING]:
+                            logger.info(f"Job {job_id} failed/cancelled -> "
+                                        f"related job {related.id} status {related_status.state} -> cancel")
+                            self._job_cancel_internal(related)
+                        else:
+                            logger.info(f"Job {job_id} failed/cancelled -> "
+                                        f"related job {related.id} status {related_status.state} -> skip")
 
                 # update the status
                 record.status = job_status.model_dump()
@@ -649,22 +684,11 @@ class RTIServiceBase(RTIRESTService):
             members=members
         )
 
-    def job_cancel(self, job_id: str) -> JobStatus:
-        """
-        Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
-        possible.
-        """
-        # get the record
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
-
+    def _job_cancel_internal(self, record: DBJobInfo) -> JobStatus:
         # check the status
         status = JobStatus.model_validate(record.status)
         if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
-            raise RTIException(f"Job {job_id} is not active -> job cannot be cancelled.")
+            raise RTIException(f"Job {record.id} is not active -> job cannot be cancelled.")
 
         # if possible, determine the runner P2P address
         if record.runner.get('identity') is not None and record.runner.get('address') is not None:
@@ -679,9 +703,25 @@ class RTIServiceBase(RTIRESTService):
             runner_address = None
 
         # start the cancellation worker
-        threading.Thread(target=self.perform_cancel, args=(job_id, runner_address)).start()
+        worker = threading.Thread(target=self.perform_cancel, args=(record.id, runner_address))
+        self._cancellation_workers[record.id] = worker
+        worker.start()
 
         return status
+
+    def job_cancel(self, job_id: str) -> JobStatus:
+        """
+        Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
+        possible.
+        """
+        # get the record
+        with self._mutex:
+            with self._session_maker() as session:
+                record = session.query(DBJobInfo).get(job_id)
+                if record is None:
+                    raise RTIException(f"Job {job_id} does not exist.")
+
+        return self._job_cancel_internal(record)
 
     def job_purge(self, job_id: str) -> JobStatus:
         """

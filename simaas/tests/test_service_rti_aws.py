@@ -829,6 +829,91 @@ def test_rest_submit_batch(
             assert (content['v'] == 6)
 
 
+# def test_rest_submit_batch_cancel_cascade(
+#         docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
+#         aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, known_user
+# ):
+#     if not docker_available:
+#         pytest.skip("Docker is not available")
+#
+#     if not aws_available:
+#         pytest.skip("AWS is not available")
+#
+#     if not github_credentials_available:
+#         pytest.skip("Github credentials not available")
+#
+#     proc_id = aws_deployed_test_processor.obj_id
+#     owner = aws_session_node.keystore
+#
+#     def create_task(name: str, a: int, b: int) -> Task:
+#         return Task(
+#             proc_id=proc_id,
+#             user_iid=owner.identity.id,
+#             input=[
+#                 Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
+#                 Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
+#             ],
+#             output=[
+#                 Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+#                                             'restricted_access': False, 'content_encrypted': False,
+#                                             'target_node_iid': None})
+#             ],
+#             name=name,
+#             description=None,
+#             budget=ResourceDescriptor(vcpus=1, memory=2048),
+#             namespace=None
+#         )
+#
+#     # create the tasks
+#     tasks = [create_task(f'task_{i}', 30, 30) for i in range(10)]
+#
+#     # modify the a-value for one task to an invalid value which should cause an exception and the job to fail.
+#     # this should trigger the cancellation cascade.
+#     tasks[0].input[0].value = {'v': 5}
+#     tasks[0].input[1].value = {'v': 1000}
+#
+#     # submit the job
+#     jobs = aws_rti_proxy.submit(tasks, with_authorisation_by=owner)
+#     assert len(jobs) == len(tasks)
+#
+#     # determine batch id
+#     batch_id = jobs[0].batch_id
+#
+#     while True:
+#         # get information about the running job
+#         try:
+#             status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, owner)
+#
+#             from pprint import pprint
+#             # pprint(status.model_dump())
+#             assert (status is not None)
+#
+#             all_finished = True
+#             for member in status.members:
+#                 if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+#                     all_finished = False
+#                     break
+#
+#             if all_finished:
+#                 break
+#
+#         except Exception:
+#             pass
+#
+#         time.sleep(1)
+#
+#     # time.sleep(60)
+#
+#     for i in range(len(status.members)):
+#         job_id = status.members[i].job_id
+#         job_status: JobStatus = aws_rti_proxy.get_job_status(job_id, owner)
+#         # print(f"member: {job_id} -> {json.dumps(job_status.model_dump(), indent=2)}")
+#         if i == 0:
+#             assert job_status.state == 'failed'
+#         else:
+#             assert job_status.state == 'cancelled'
+
+
 @pytest.fixture(scope="session")
 def aws_deployed_room_processor(
         docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node

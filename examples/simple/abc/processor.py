@@ -7,7 +7,7 @@ from typing import Any
 from simaas.rti.schemas import Job
 
 from simaas.core.helpers import get_timestamp_now
-from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace
+from simaas.core.processor import ProcessorBase, ProgressListener, Severity, Namespace, ProcessorRuntimeError
 
 
 def read_value(data_object_path: str) -> int:
@@ -89,6 +89,11 @@ class ProcessorABC(ProcessorBase):
                 seconds (float): Duration to sleep in seconds. Negative values result in
                                  uninterruptible sleep.
             """
+
+            # does the absolute delay exceed the threshold?
+            if abs(seconds) > 999:
+                raise ProcessorRuntimeError(f"Sleep value exceeds threshold", {'seconds': seconds})
+
             if seconds >= 0:  # interruptible sleep
                 t_done = get_timestamp_now() + seconds * 1000
                 while get_timestamp_now() < t_done and not self._is_cancelled:
