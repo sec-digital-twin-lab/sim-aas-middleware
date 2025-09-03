@@ -11,11 +11,11 @@ from typing import Union, Optional, List
 import pytest
 from simaas.core.identity import Identity
 
-from simaas.helpers import docker_container_list, docker_delete_container, docker_container_running
+from simaas.helpers import docker_container_list
 from examples.cosim.room.processor import Result as RResult
 from examples.cosim.thermostat.processor import Result as TResult
 from simaas.node.default import RTIType
-from simaas.rti.default import DefaultRTIService, DBJobInfo
+from simaas.rti.default import DefaultRTIService
 
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
@@ -554,17 +554,6 @@ def test_job_concurrency(
                     results[idx] = content['v']
 
             logprint(idx, f"[{idx}] done")
-
-            with rti._session_maker() as session:
-                record: DBJobInfo = session.query(DBJobInfo).get(job.id)
-
-                # wait for docker container to be shutdown
-                container_id: str = record.runner['container_id']
-                while docker_container_running(container_id):
-                    time.sleep(1)
-
-                # delete the container
-                docker_delete_container(container_id)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

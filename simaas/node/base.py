@@ -5,6 +5,7 @@ import time
 import traceback
 from typing import Optional, Tuple
 
+from simaas.rti.base import RTIServiceBase
 from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError
 from simaas.dor.schemas import DataObject
 from simaas.rest.exceptions import AuthorisationFailedError
@@ -23,7 +24,6 @@ from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIde
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
-from simaas.rti.api import RTIRESTService
 from simaas.meta import __version__
 from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
 
@@ -38,7 +38,7 @@ class Node(abc.ABC):
         self.rest: Optional[RESTService] = None
         self.db: Optional[NodeDBService] = None
         self.dor: Optional[DORRESTService] = None
-        self.rti: Optional[RTIRESTService] = None
+        self.rti: Optional[RTIServiceBase] = None
 
     @property
     def keystore(self) -> Keystore:
@@ -132,10 +132,10 @@ class Node(abc.ABC):
         if leave_network:
             self.leave_network()
         else:
-            logger.warning("node shutting down silently (not leaving the network)")
+            logger.warning(f"[{self.identity.id}/{self.identity.name}] shutdown: leave network silently (do not inform peers)")
 
-        # if we have any procs deployed, undeploy them
         if self.rti is not None:
+            # if we have any procs deployed, undeploy them
             for proc in self.rti.get_all_procs():
                 proc_id: str = proc.id
                 self.rti.undeploy(proc_id)
@@ -149,7 +149,22 @@ class Node(abc.ABC):
 
                 # successful?
                 if check is not None:
-                    logger.warning(f"undeploying processor {proc_id} failed.")
+                    logger.warning(
+                        f"[{self.identity.id}/{self.identity.name}] shutdown: undeploying processor {proc_id} failed."
+                    )
+
+            # wait for any active worker threads
+            for _ in range(10):
+                if not self.rti.has_active_workers():
+                    break
+                logger.info(
+                    f"[{self.identity.id}/{self.identity.name}] shutdown: waiting for active worker threads to be done..."
+                )
+                time.sleep(1)
+            else:
+                logger.warning(
+                    f"[{self.identity.id}/{self.identity.name}] shutdown: ignoring active worker threads that are still active."
+                )
 
         # stop the services
         logger.info("stopping all services.")

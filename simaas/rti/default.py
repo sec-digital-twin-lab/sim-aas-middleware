@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 import socket
 import time
 
@@ -14,7 +15,7 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
-    docker_kill_job_container, docker_container_running, docker_get_exposed_ports
+    docker_kill_job_container, docker_container_running, docker_get_exposed_ports, docker_delete_container
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
 from simaas.rti.exceptions import RTIException
@@ -220,46 +221,52 @@ class DefaultRTIService(RTIServiceBase):
                 raise e
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
-        # attempt to cancel the job
         try:
-            asyncio.run(P2PInterruptJob.perform(peer_address))
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-            grace_period = 0
-
-        with self._session_maker() as session:
-            # get the record and status
-            record = session.query(DBJobInfo).get(job_id)
-            container_id = record.runner['container_id']
-
-            deadline = get_timestamp_now() + grace_period * 1000
-            while get_timestamp_now() < deadline:
-                try:
-                    # sleep for a bit and check the record
-                    time.sleep(1)
-
-                    # is the container still running -> if not, all good we are done
-                    if not docker_container_running(container_id):
-                        self.on_cancellation_worker_done(job_id)
-                        return
-
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] checking status failed: {trace}")
-                    break
-
-            # if we get here then either the deadline has been reached or there was an exception -> kill container
+            # attempt to cancel the job
             try:
-                logger.warning(f"[job:{job_id}] grace period exceeded -> "
-                               f"killing Docker container {container_id}")
-                docker_kill_job_container(container_id)
+                asyncio.run(P2PInterruptJob.perform(peer_address))
 
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
+                grace_period = 0
 
+            with self._session_maker() as session:
+                # get the record and status
+                record = session.query(DBJobInfo).get(job_id)
+                container_id = record.runner['container_id']
+
+                deadline = get_timestamp_now() + grace_period * 1000
+                while get_timestamp_now() < deadline:
+                    try:
+                        # sleep for a bit and check the record
+                        time.sleep(1)
+
+                        # is the container still running -> if not, all good we are done
+                        if not docker_container_running(container_id):
+                            self.on_cancellation_worker_done(job_id)
+                            return
+
+                    except Exception as e:
+                        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                        logger.warning(f"[job:{job_id}] checking status failed: {trace}")
+                        break
+
+                # if we get here then either the deadline has been reached or there was an exception -> kill container
+                try:
+                    logger.warning(f"[job:{job_id}] grace period exceeded -> "
+                                   f"killing Docker container {container_id}")
+                    docker_kill_job_container(container_id)
+
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[job:{job_id}] cancellation failed: {trace}")
+
+        finally:
             self.on_cancellation_worker_done(job_id)
 
     def perform_purge(self, record: DBJobInfo) -> None:
@@ -270,6 +277,39 @@ class DefaultRTIService(RTIServiceBase):
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
+
+    def perform_job_cleanup(self, job_id: str) -> None:
+        try:
+            # only clean up if we are not supposed to keep the job history
+            if not self.retain_job_history:
+                # delete the container
+                with self._session_maker() as session:
+                    record: DBJobInfo = session.query(DBJobInfo).get(job_id)
+
+                    # wait for docker container to be shutdown
+                    container_id: str = record.runner['container_id']
+                    logger.info(f"[job:{job_id}] clean-up -> waiting for container {container_id} to be stopped")
+                    while docker_container_running(container_id):
+                        time.sleep(1)
+
+                    # delete the container
+                    logger.info(f"[job:{job_id}] clean-up -> delete container {container_id}")
+                    docker_delete_container(container_id)
+
+                # delete the scratch folder (if any)
+                if self._scratch_volume is not None:
+                    # create the job-specific scratch folder
+                    job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
+                    logger.info(f"[job:{job_id}] clean-up -> delete scratch folder at {job_scratch_path}")
+                    shutil.rmtree(job_scratch_path, ignore_errors=True)
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[job:{job_id}] clean-up failed: {trace}")
+
+        finally:
+            # notify base class that we are done
+            self.on_cleanup_worker_done(job_id)
 
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         # in case the of the default RTI the port mapping is actually already known during submission time.

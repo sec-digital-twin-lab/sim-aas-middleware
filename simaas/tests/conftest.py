@@ -149,7 +149,7 @@ def session_node(session_keystore):
             keystore=session_keystore, storage_path=tempdir,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
-            retain_job_history=True, strict_deployment=False
+            retain_job_history=False, strict_deployment=False
         )
 
         yield _node

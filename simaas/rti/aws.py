@@ -583,6 +583,9 @@ class AWSRTIService(RTIServiceBase):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {aws_job_id} failed: {trace}")
 
+    def perform_job_cleanup(self, job_id: str) -> None:
+        ...
+
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         # update missing port mappings by using the same host as the runner address. this makes some assumptions
         # about external ports being the same as the ones exposed by the Docker image - which seems to be the case
