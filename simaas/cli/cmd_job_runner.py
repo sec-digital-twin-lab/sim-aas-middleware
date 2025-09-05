@@ -819,17 +819,25 @@ class JobRunner(CLICommand, ProgressListener):
 
         # determine working directory
         self._wd_path = args['job_path']
-        if os.path.isdir(self._wd_path):
-            print(f"Using existing job path at {self._wd_path}")
-        else:
-            print(f"Creating job path at {self._wd_path}")
+        if not os.path.isdir(self._wd_path):
+            raise CLIRuntimeError(f"Required job directory {self._wd_path} does not exist")
 
         # setup logger
         self._setup_logger(args.get('log_level'))
 
         try:
-            # initialise processor
             self._logger.info("BEGIN initialising job runner...")
+
+            # determine if /scratch exists
+            if os.path.exists('/scratch'):
+                self._logger.info(f"Using externally mounted scratch folder.")
+            else:
+                # if not create a symlink pointing at /tmp/scratch
+                os.makedirs('/tmp/scratch', exist_ok=True)
+                os.symlink('/tmp/scratch', '/scratch')
+                self._logger.info(f"Using symlink to /tmp/scratch as scratch folder.")
+
+            # initialise processor
             self._initialise_processor(args['proc_path'])
 
             # initialise P2P services
