@@ -36,7 +36,7 @@ from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy, RTIInterface
 from simaas.rti.aws import get_default_aws_config
-from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
+from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus, ProcessorVolume
 
 load_dotenv()
 
@@ -157,6 +157,12 @@ def session_node(session_keystore):
         _node.shutdown()
 
 
+@pytest.fixture(scope="session")
+def session_data_dir(session_keystore):
+    with tempfile.TemporaryDirectory() as tempdir:
+        yield tempdir
+
+
 def add_test_processor(
         dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str, platform: str = 'linux/amd64'
 ) -> DataObject:
@@ -224,7 +230,7 @@ def add_test_processor(
 
 @pytest.fixture(scope="session")
 def deployed_abc_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node, session_data_dir
 ) -> DataObject:
     if not github_credentials_available:
         yield DataObject(
@@ -256,7 +262,12 @@ def deployed_abc_processor(
 
         else:
             # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
+            rti_proxy.deploy(proc_id, session_node.keystore, volumes=[
+                ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                    'path': session_data_dir
+                })
+            ])
+
             while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)

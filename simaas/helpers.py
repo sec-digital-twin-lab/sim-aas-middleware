@@ -179,12 +179,11 @@ def docker_get_exposed_ports(image_name) -> List[Tuple[int, str]]:
 
 def docker_run_job_container(
         image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_pubkey: str, job_id: str,
-        budget: Optional[ResourceDescriptor] = None, custom_ports: List[Tuple[int, str, str, int]] = None
+        budget: Optional[ResourceDescriptor] = None, custom_ports: List[Tuple[int, str, str, int]] = None,
+        volumes: Optional[Dict[str, dict]] = None
 ) -> str:
     with docker_client() as client:
-        volumes = {
-            # job_path: {'bind': '/job', 'mode': 'rw'}
-        }
+        volumes = volumes if volumes else {}
 
         ports = {
             '6000/tcp': p2p_address,
@@ -297,7 +296,6 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
     result = {}
     for root, dirs, files in os.walk(search_path):
         for file in files:
-            print(file)
             if file == "processor.py":
                 module_path = os.path.join(root, file)
                 module_name = os.path.splitext(os.path.basename(module_path))[0]

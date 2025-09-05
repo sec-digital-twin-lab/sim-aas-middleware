@@ -15,7 +15,7 @@ from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
 from simaas.rti.exceptions import RTIException
-from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus
+from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus, ProcessorVolume
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
@@ -36,6 +36,7 @@ class DBDeployedProcessor(Base):
     state = Column(String, nullable=False)
     image_name = Column(String, nullable=True)
     ports = Column(NestedMutableJson, nullable=False)
+    volumes = Column(NestedMutableJson, nullable=False)
     gpp = Column(NestedMutableJson, nullable=True)
     error = Column(String, nullable=True)
 
@@ -111,10 +112,12 @@ class RTIServiceBase(RTIRESTService):
                 record.ports = proc.ports
                 record.gpp = proc.gpp.model_dump()
                 record.error = proc.error
+                record.volumes = [volume.model_dump() for volume in proc.volumes]
 
             else:
                 session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                ports=[], gpp=proc.gpp.model_dump() if proc.gpp else None,
+                                                ports=[], volumes=[volume.model_dump() for volume in proc.volumes],
+                                                gpp=proc.gpp.model_dump() if proc.gpp else None,
                                                 error=proc.error))
             session.commit()
 
@@ -188,6 +191,7 @@ class RTIServiceBase(RTIRESTService):
             for record in records:
                 result.append(Processor(id=record.id, state=Processor.State(record.state),
                                         image_name=record.image_name, ports=list(record.ports),
+                                        volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                         gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                         error=record.error))
 
@@ -202,12 +206,13 @@ class RTIServiceBase(RTIRESTService):
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
+                                 volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
             else:
                 return None
 
-    def deploy(self, proc_id: str) -> Processor:
+    def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
         """
         Deploys a processor.
         """
@@ -221,7 +226,8 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             # create a placeholder processor object
             proc = Processor(
-                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None, gpp=None, error=None
+                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None,
+                volumes=volumes if volumes else [], gpp=None, error=None
             )
 
             # update or create db record
@@ -246,6 +252,7 @@ class RTIServiceBase(RTIRESTService):
                 # create the processor object
                 proc = Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
+                                 volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
 

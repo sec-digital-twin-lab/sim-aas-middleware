@@ -20,7 +20,7 @@ from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job, JobStatus
+from simaas.rti.schemas import Processor, Job, JobStatus, ProcessorVolume
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -31,7 +31,9 @@ REQUIRED_ENV = [
 ]
 
 class DefaultRTIService(RTIServiceBase):
-    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
+    def __init__(
+            self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True
+    ) -> None:
         super().__init__(
             node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
         )
@@ -43,6 +45,15 @@ class DefaultRTIService(RTIServiceBase):
         # initialise properties
         self._port_range = (6000, 9000)
         self._most_recent_port = None
+        self._scratch_volume = os.environ.get('SIMAAS_RTI_DOCKER_SCRATCH_PATH')
+
+        # determine the scratch path (if any)
+        if self._scratch_volume:
+            if os.path.isdir(self._scratch_volume):
+                logger.info(f"Docker RTI scratch path at '{self._scratch_volume}' found.")
+            else:
+                logger.warning(f"Docker RTI scratch path at '{self._scratch_volume}' not found -> skipping")
+                self._scratch_volume = None
 
     def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
@@ -165,14 +176,32 @@ class DefaultRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+    def _perform_submit(
+            self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None
+    ) -> str:
         # get the runner address and custom port mappings (if any)
         runner_p2p_address, custom_ports, ports = self._map_ports(proc.ports)
+
+        # get volumes information
+        volumes = {}
+        for volume in proc.volumes:
+            volume = ProcessorVolume.model_validate(volume)
+            path = volume.reference['path']
+            volumes[path] = {'bind': volume.mount_point, 'mode': 'ro' if volume.read_only else 'rw'}
+
+        # add the scratch volume (if any)
+        if self._scratch_volume is not None:
+            # create the job-specific scratch folder
+            job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job.id}_scratch"))
+            os.makedirs(job_scratch_path, exist_ok=True)
+
+            # add to the volumes
+            volumes[job_scratch_path] = {'bind': '/scratch', 'mode': 'rw'}
 
         # start the job container and keep the container id
         container_id = docker_run_job_container(
             proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
-            budget=job.task.budget, custom_ports=custom_ports
+            budget=job.task.budget, custom_ports=custom_ports, volumes=volumes if volumes else None
         )
 
         if submitted:

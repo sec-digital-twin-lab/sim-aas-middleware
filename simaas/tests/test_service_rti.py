@@ -27,7 +27,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
-from simaas.rti.schemas import Task, JobStatus, Processor, Job, BatchStatus
+from simaas.rti.schemas import Task, JobStatus, Processor, Job, BatchStatus, ProcessorVolume
 from simaas.tests.conftest import REPOSITORY_URL, add_test_processor
 
 Logging.initialise(level=logging.DEBUG)
@@ -158,6 +158,43 @@ def test_rest_deploy_undeploy(
             time.sleep(0.5)
     except UnsuccessfulRequestError as e:
         assert ('Processor not deployed' in e.reason)
+
+
+def test_rest_deploy_with_volume(
+        docker_available, github_credentials_available, non_strict_node
+):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    user: Keystore = non_strict_node.keystore
+    dor = DORProxy(non_strict_node.rest.address())
+    rti = RTIProxy(non_strict_node.rest.address())
+
+    # upload the test proc GCC
+    proc: DataObject = add_test_processor(dor, user, 'proc-abc', 'examples/simple/abc')
+    proc_id = proc.obj_id
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        rti.deploy(proc_id, user, volumes=[
+            ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                'path': temp_dir,
+            })
+        ])
+
+        # wait for deployment to be done
+        while True:
+            proc: Optional[Processor] = rti.get_proc(proc_id)
+            if proc.state == Processor.State.READY:
+                print(proc.volumes)
+                assert proc.volumes[0].name == 'data_volume'
+                break
+            time.sleep(0.5)
+
+        # try to undeploy the processor with the wrong user on node0
+        rti.undeploy(proc_id, user)
 
 
 def test_rest_submit_list_get_job(

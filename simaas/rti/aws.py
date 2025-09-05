@@ -198,7 +198,9 @@ def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
     ), config
 
 
-def batch_ensure_job_def(repository_name: str, proc: Processor, config: Optional[AWSConfiguration] = None) -> str:
+def batch_ensure_job_def(
+        repository_name: str, proc: Processor, config: Optional[AWSConfiguration] = None
+) -> str:
     # get the client
     client, _ = get_batch_client(config)
 
@@ -212,32 +214,56 @@ def batch_ensure_job_def(repository_name: str, proc: Processor, config: Optional
     name = f"job-def_{proc.id}"
     response = client.describe_job_definitions(jobDefinitionName=name, status="ACTIVE")
     if response["jobDefinitions"]:
-        job_def_arn = response["jobDefinitions"][0]["jobDefinitionArn"]
-    else:
-        # if it doesn't exist, create one for Fargate
-        response = client.register_job_definition(
-            jobDefinitionName=name,
-            type="container",
-            containerProperties={
-                "image": ecr_image_name,
-                "resourceRequirements": [
-                    {"type": "VCPU", "value": "1"},
-                    {"type": "MEMORY", "value": "2048"}
-                ],
-                "networkConfiguration": {
-                    "assignPublicIp": "ENABLED"  # Optional, to assign a public IP
-                },
-                # Optional: specify Fargate platform version (latest is default)
-                "fargatePlatformConfiguration": {
-                    "platformVersion": "LATEST"
-                },
-                "executionRoleArn": config.aws_role_arn
-            },
-            platformCapabilities=["FARGATE"],  # Specify Fargate platform
-        )
-        job_def_arn = response['jobDefinitionArn']
+        return response["jobDefinitions"][0]["jobDefinitionArn"]
 
-    return job_def_arn
+    # --- Build volumes list for AWS Batch job definition ---
+    aws_volumes = []
+    mount_points = []
+    for v in proc.volumes:
+        # ignore non-EFS volumes
+        if "efsFileSystemId" not in v.reference:
+            logger.warning(f"Ignoring non-EFS volume {v.name} for {proc.image_name}: {v}")
+            continue
+
+        aws_volumes.append({
+            "name": v.name,
+            "efsVolumeConfiguration": {
+                "fileSystemId": v.reference["efsFileSystemId"],
+                "rootDirectory": v.reference.get("rootDirectory", "/"),
+                "transitEncryption": v.reference.get("transitEncryption", "ENABLED")
+            }
+        })
+
+        mount_points.append({
+            "sourceVolume": v.name,
+            "containerPath": v.mount_point,
+            "readOnly": v.read_only
+        })
+
+    # --- Register job definition ---
+    response = client.register_job_definition(
+        jobDefinitionName=name,
+        type="container",
+        containerProperties={
+            "image": ecr_image_name,
+            "resourceRequirements": [
+                {"type": "VCPU", "value": "1"},
+                {"type": "MEMORY", "value": "2048"}
+            ],
+            "networkConfiguration": {
+                "assignPublicIp": "ENABLED"  # TODO: investiate if a public IP is really necessary. seems overkill.
+            },
+            "fargatePlatformConfiguration": {
+                "platformVersion": "LATEST"
+            },
+            "executionRoleArn": config.aws_role_arn,
+            "volumes": aws_volumes,
+            "mountPoints": mount_points
+        },
+        platformCapabilities=["FARGATE"]
+    )
+
+    return response['jobDefinitionArn']
 
 
 def batch_deregister_job_def(proc: Processor, config: Optional[AWSConfiguration] = None) -> None:
@@ -473,7 +499,10 @@ class AWSRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+    def _perform_submit(
+            self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None,
+            volumes: Optional[Dict[str, dict]] = None
+    ) -> str:
         # determine the custodian address and curve public key
         custodian_pubkey: str = self._node.identity.c_public_key
         if "SIMAAS_CUSTODIAN_HOST" in os.environ:
