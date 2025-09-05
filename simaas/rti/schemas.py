@@ -154,10 +154,10 @@ class Processor(BaseModel):
     id: str = Field(..., title="Processor Id", description="The processor id.", examples=["d01d069675bcaaeb90b46273ccc4ae9818a2667957045d0f0f15901ffcf807de"])
     state: Literal[State.BUSY_DEPLOY, State.BUSY_UNDEPLOY, State.READY, State.FAILED] = Field(..., title="State", description="The state of the processor.")
     image_name: Optional[str] = Field(title="Image Name", description="The name of the docker image that contains the processor.")
-    ports: Optional[List[Tuple[int, str]]] = Field(..., title="Ports", description="The ports exposed/used by this processor.")
-    volumes: List[ProcessorVolume] =  Field(..., title="Volumes", description="List of volumes used by the processor (if any).")
+    ports: Optional[List[Tuple[int, str]]] = Field(title="Ports", description="The ports exposed/used by this processor.")
+    volumes: List[ProcessorVolume] = Field(..., title="Volumes", description="List of volumes used by the processor (if any).")
     gpp: Optional[GitProcessorPointer] = Field(title="GPP", description="The Git Processor Pointer information.")
-    error: Optional[str] = Field(..., title="Error", description="Information about the error encountered (only if state is 'failed').")
+    error: Optional[str] = Field(title="Error", description="Information about the error encountered (only if state is 'failed').")
 
 
 class ProcessorStatus(BaseModel):
