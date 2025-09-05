@@ -14,11 +14,11 @@ import pytest
 from docker.errors import ImageNotFound
 from git import Repo
 
-from build.lib.simaas.core.helpers import get_timestamp_now
 from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
 from simaas.cli.cmd_service import Service
 
 from examples.simple.abc.processor import write_value
+from simaas.core.helpers import get_timestamp_now
 
 from simaas.nodedb.protocol import P2PJoinNetwork
 from simaas.nodedb.schemas import NamespaceInfo

@@ -548,6 +548,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-factor-search',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -556,6 +557,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-factorisation',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -564,6 +566,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-room',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -572,6 +575,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-thermostat',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 )
