@@ -113,7 +113,7 @@ def find_available_port(host: str = 'localhost', port_range: (int, int) = (6000,
 
 @contextmanager
 def docker_client():
-    client = docker.from_env()
+    client = docker.from_env(timeout=600)
     try:
         yield client
     finally:
