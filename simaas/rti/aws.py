@@ -251,7 +251,7 @@ def batch_ensure_job_def(
                 {"type": "MEMORY", "value": "2048"}
             ],
             "networkConfiguration": {
-                "assignPublicIp": "ENABLED"  # TODO: investiate if a public IP is really necessary. seems overkill.
+                "assignPublicIp": "ENABLED"  # TODO: without public IP the job won't have internet access
             },
             "fargatePlatformConfiguration": {
                 "platformVersion": "LATEST"
