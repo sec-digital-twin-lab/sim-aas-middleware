@@ -358,6 +358,9 @@ class AWSRTIService(RTIServiceBase):
         os.makedirs(self._jobs_path, exist_ok=True)
         os.makedirs(self._procs_path, exist_ok=True)
 
+    def type(self) -> str:
+        return 'aws'
+
     def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
         try:

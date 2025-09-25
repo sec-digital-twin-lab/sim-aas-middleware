@@ -466,6 +466,8 @@ class DummyNamespace(Namespace):
             self._meta: Dict[str, DataObject] = {}
             self._content: Dict[str, dict] = {}
 
+        def type(self) -> str:
+            return 'dummy'
 
         def search(self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
                    data_type: Optional[str] = None, data_format: Optional[str] = None,
@@ -593,6 +595,9 @@ class DummyNamespace(Namespace):
             self._next_job_id: int = 0
             self._keystore = Keystore.new('dummy')
 
+        def type(self) -> str:
+            return 'dummy'
+
         def get_all_procs(self) -> List[Processor]:
             return list(self._procs.values())
 
@@ -634,8 +639,8 @@ class DummyNamespace(Namespace):
                     custodian=NodeInfo(
                         identity=self._keystore.identity,
                         last_seen=get_timestamp_now(),
-                        dor_service=True,
-                        rti_service=True,
+                        dor_service='dummy',
+                        rti_service='dummy',
                         p2p_address='in-memory',
                         rest_address=None,
                         retain_job_history=True,

@@ -16,6 +16,10 @@ DOR_ENDPOINT_PREFIX = "/api/v1/dor"
 
 class DORInterface(abc.ABC):
     @abc.abstractmethod
+    def type(self) -> str:
+        ...
+
+    @abc.abstractmethod
     def search(
             self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
             data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None

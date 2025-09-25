@@ -53,8 +53,8 @@ class Node(abc.ABC):
         return NodeInfo(
             identity=self.identity,
             last_seen=get_timestamp_now(),
-            dor_service=self.dor is not None,
-            rti_service=self.rti is not None,
+            dor_service=self.dor.type() if self.dor else 'none',
+            rti_service=self.rti.type() if self.rti else 'none',
             p2p_address=self.p2p.address(),
             rest_address=self.rest.address() if self.rest else None,
             retain_job_history=self.rti.retain_job_history if self.rti else None,
@@ -115,8 +115,8 @@ class Node(abc.ABC):
         self.db.update_network(NodeInfo(
             identity=self.identity,
             last_seen=get_timestamp_now(),
-            dor_service=self.dor is not None,
-            rti_service=self.rti is not None,
+            dor_service=self.dor.type() if self.dor else 'none',
+            rti_service=self.rti.type() if self.rti else 'none',
             p2p_address=self.p2p.address(),
             rest_address=self.rest.address() if self.rest else None,
             retain_job_history=self.rti.retain_job_history if self.rti else None,

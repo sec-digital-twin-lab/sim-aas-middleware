@@ -55,6 +55,9 @@ class DefaultRTIService(RTIServiceBase):
                 logger.warning(f"Docker RTI scratch path at '{self._scratch_volume}' not found -> skipping")
                 self._scratch_volume = None
 
+    def type(self) -> str:
+        return 'docker'
+
     def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
         try:

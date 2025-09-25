@@ -32,7 +32,7 @@ def _require_rti(args: dict) -> RTIProxy:
                       default=determine_default_rest_address())
 
     db = NodeDBProxy(extract_address(args['address']))
-    if db.get_node().rti_service is False:
+    if db.get_node().rti_service.lower() is 'none':
         raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 

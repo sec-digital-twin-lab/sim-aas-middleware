@@ -58,6 +58,10 @@ class RTIAdminInterface(abc.ABC):
 
 class RTIInterface(abc.ABC):
     @abc.abstractmethod
+    def type(self) -> str:
+        ...
+
+    @abc.abstractmethod
     def get_all_procs(self) -> List[Processor]:
         """
         Retrieves a dict of all deployed processors by their id.
