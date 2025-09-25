@@ -31,7 +31,7 @@ from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
 from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilderGithub, ProcBuilderLocal
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
-    RTIJobList, RTIJobCancel
+    RTIJobList, RTIJobCancel, RTIVolumeCreateFSRef, RTIVolumeList, RTIVolumeDelete, RTIVolumeCreateEFSRef
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -1580,6 +1580,99 @@ def test_cli_builder_cmd_store_image(docker_available, github_credentials_availa
         assert False
 
 
+def test_cli_rti_volumes_list_add_delete(temp_dir):
+    try:
+        cmd = RTIVolumeList()
+        result = cmd.execute({
+            'datastore': temp_dir,
+        })
+        assert result is not None
+        assert len(result) == 0
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeCreateFSRef()
+        cmd.execute({
+            'datastore': temp_dir,
+            'name': 'ref1',
+            'path': os.path.join(temp_dir, 'does_not_exist')
+        })
+
+    except CLIRuntimeError:
+        assert True
+
+    try:
+        cmd = RTIVolumeCreateFSRef()
+        result = cmd.execute({
+            'datastore': temp_dir,
+            'name': 'ref1',
+            'path': temp_dir
+        })
+        assert result is not None
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeList()
+        result = cmd.execute({
+            'datastore': temp_dir,
+        })
+        assert result is not None
+        assert len(result) == 1
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeCreateEFSRef()
+        result = cmd.execute({
+            'datastore': temp_dir,
+            'name': 'ref2',
+            'efs_fs_id': 'fs-abc123'
+        })
+        assert result is not None
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeList()
+        result = cmd.execute({
+            'datastore': temp_dir,
+        })
+        assert result is not None
+        assert len(result) == 2
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeDelete()
+        result = cmd.execute({
+            'datastore': temp_dir,
+            'name': ['ref1']
+        })
+        assert result is not None
+        assert len(result) == 1
+
+    except CLIRuntimeError:
+        assert False
+
+    try:
+        cmd = RTIVolumeList()
+        result = cmd.execute({
+            'datastore': temp_dir,
+        })
+        assert result is not None
+        assert len(result) == 1
+
+    except CLIRuntimeError:
+        assert False
+
+
 def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credentials_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -1645,11 +1738,12 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
     # deploy the processor
     try:
         args = {
+            'datastore': temp_dir,
             'keystore': temp_dir,
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': obj.obj_id,
+            'proc_id': obj.obj_id,
         }
 
         cmd = RTIProcDeploy()
@@ -1687,7 +1781,7 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
                 'keystore-id': keystore.identity.id,
                 'password': 'password',
                 'address': f"{address[0]}:{address[1]}",
-                'proc-id': obj.obj_id
+                'proc_id': obj.obj_id
             }
 
             cmd = RTIProcShow()
@@ -1715,7 +1809,190 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': [obj.obj_id]
+            'proc_id': [obj.obj_id]
+        }
+
+        cmd = RTIProcUndeploy()
+        result = cmd.execute(args)
+        assert result is not None
+        assert obj.obj_id in result
+
+    except CLIRuntimeError:
+        assert False
+
+    time.sleep(1)
+
+    # get list of deployed processors
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}"
+        }
+
+        cmd = RTIProcList()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'deployed' in result
+        assert len(result['deployed']) == n
+
+    except CLIRuntimeError:
+        assert False
+
+
+def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, github_credentials_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not github_credentials_available:
+        pytest.skip("Github credentials not available")
+
+    address = session_node.rest.address()
+
+    # add a volume
+    try:
+        cmd = RTIVolumeCreateFSRef()
+        cmd.execute({
+            'datastore': temp_dir,
+            'name': 'my_volume',
+            'path': temp_dir
+        })
+
+    except CLIRuntimeError:
+        assert True
+
+    # define arguments
+    args = {
+        'repository': REPOSITORY_URL,
+        'commit_id':  REPOSITORY_COMMIT_ID,
+        'proc_path': PROC_ABC_PATH,
+        'address': f"{address[0]}:{address[1]}",
+        'store_image': True
+    }
+
+    # create keystore
+    password = 'password'
+    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
+    args['keystore-id'] = keystore.identity.id
+    args['keystore'] = temp_dir
+    args['password'] = password
+
+    # ensure the node knows about this identity
+    session_node.db.update_identity(keystore.identity)
+
+    try:
+        cmd = ProcBuilderGithub()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi' in result
+        assert result['pdi'] is not None
+        pdi: DataObject = result['pdi']
+
+        obj = session_node.dor.get_meta(pdi.obj_id)
+        assert obj is not None
+        assert obj.data_type == 'ProcessorDockerImage'
+        assert obj.data_format == 'tar'
+
+    except CLIRuntimeError:
+        assert False
+
+    # get list of deployed processors
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}"
+        }
+
+        cmd = RTIProcList()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'deployed' in result
+        n = len(result['deployed'])
+
+    except CLIRuntimeError:
+        assert False
+
+    # deploy the processor
+    try:
+        args = {
+            'datastore': temp_dir,
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'proc_id': obj.obj_id,
+            'volumes': [
+                'my_volume:/mnt/storage:true'
+            ]
+        }
+
+        cmd = RTIProcDeploy()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'proc' in result
+        assert result['proc'] is not None
+
+    except CLIRuntimeError:
+        assert False
+
+    # get list of deployed processors
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}"
+        }
+
+        cmd = RTIProcList()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'deployed' in result
+        assert len(result['deployed']) == n + 1
+
+    except CLIRuntimeError:
+        assert False
+
+    while True:
+        # show the details of the deployed processor
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}",
+                'proc_id': obj.obj_id
+            }
+
+            cmd = RTIProcShow()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'processor' in result
+            assert 'jobs' in result
+            assert result['processor'] is not None
+            assert len(result['jobs']) == 0
+
+        except CLIRuntimeError:
+            assert False
+
+        proc: Processor = result['processor']
+        if proc.state in [Processor.State.READY, Processor.State.FAILED]:
+            break
+
+        else:
+            time.sleep(1)
+
+    # undeploy the processor
+    try:
+        args = {
+            'keystore': temp_dir,
+            'keystore-id': keystore.identity.id,
+            'password': 'password',
+            'address': f"{address[0]}:{address[1]}",
+            'proc_id': [obj.obj_id]
         }
 
         cmd = RTIProcUndeploy()
