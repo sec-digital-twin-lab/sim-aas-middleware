@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import shutil
 import socket
 import time
 
@@ -14,12 +15,12 @@ from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
-    docker_kill_job_container, docker_container_running, docker_get_exposed_ports
+    docker_kill_job_container, docker_container_running, docker_get_exposed_ports, docker_delete_container
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
 from simaas.rti.exceptions import RTIException
 from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Processor, Job, JobStatus
+from simaas.rti.schemas import Processor, Job, JobStatus, ProcessorVolume
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
 logger = Logging.get('rti.service')
@@ -30,7 +31,9 @@ REQUIRED_ENV = [
 ]
 
 class DefaultRTIService(RTIServiceBase):
-    def __init__(self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True):
+    def __init__(
+            self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True
+    ) -> None:
         super().__init__(
             node=node, db_path=db_path, retain_job_history=retain_job_history, strict_deployment=strict_deployment
         )
@@ -42,6 +45,18 @@ class DefaultRTIService(RTIServiceBase):
         # initialise properties
         self._port_range = (6000, 9000)
         self._most_recent_port = None
+        self._scratch_volume = os.environ.get('SIMAAS_RTI_DOCKER_SCRATCH_PATH')
+
+        # determine the scratch path (if any)
+        if self._scratch_volume:
+            if os.path.isdir(self._scratch_volume):
+                logger.info(f"Docker RTI scratch path at '{self._scratch_volume}' found.")
+            else:
+                logger.warning(f"Docker RTI scratch path at '{self._scratch_volume}' not found -> skipping")
+                self._scratch_volume = None
+
+    def type(self) -> str:
+        return 'docker'
 
     def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
@@ -164,14 +179,32 @@ class DefaultRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+    def _perform_submit(
+            self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None
+    ) -> str:
         # get the runner address and custom port mappings (if any)
         runner_p2p_address, custom_ports, ports = self._map_ports(proc.ports)
+
+        # get volumes information
+        volumes = {}
+        for volume in proc.volumes:
+            volume = ProcessorVolume.model_validate(volume)
+            path = volume.reference['path']
+            volumes[path] = {'bind': volume.mount_point, 'mode': 'ro' if volume.read_only else 'rw'}
+
+        # add the scratch volume (if any)
+        if self._scratch_volume is not None:
+            # create the job-specific scratch folder
+            job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job.id}_scratch"))
+            os.makedirs(job_scratch_path, exist_ok=True)
+
+            # add to the volumes
+            volumes[job_scratch_path] = {'bind': '/scratch', 'mode': 'rw'}
 
         # start the job container and keep the container id
         container_id = docker_run_job_container(
             proc.image_name, runner_p2p_address, self._node.p2p.address(), self._node.identity.c_public_key, job.id,
-            budget=job.task.budget, custom_ports=custom_ports
+            budget=job.task.budget, custom_ports=custom_ports, volumes=volumes if volumes else None
         )
 
         if submitted:
@@ -220,46 +253,52 @@ class DefaultRTIService(RTIServiceBase):
                 raise e
 
     def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
-        # attempt to cancel the job
         try:
-            asyncio.run(P2PInterruptJob.perform(peer_address))
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-            grace_period = 0
-
-        with self._session_maker() as session:
-            # get the record and status
-            record = session.query(DBJobInfo).get(job_id)
-            container_id = record.runner['container_id']
-
-            deadline = get_timestamp_now() + grace_period * 1000
-            while get_timestamp_now() < deadline:
-                try:
-                    # sleep for a bit and check the record
-                    time.sleep(1)
-
-                    # is the container still running -> if not, all good we are done
-                    if not docker_container_running(container_id):
-                        self.on_cancellation_worker_done(job_id)
-                        return
-
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] checking status failed: {trace}")
-                    break
-
-            # if we get here then either the deadline has been reached or there was an exception -> kill container
+            # attempt to cancel the job
             try:
-                logger.warning(f"[job:{job_id}] grace period exceeded -> "
-                               f"killing Docker container {container_id}")
-                docker_kill_job_container(container_id)
+                asyncio.run(P2PInterruptJob.perform(peer_address))
 
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
+                grace_period = 0
 
+            with self._session_maker() as session:
+                # get the record and status
+                record = session.query(DBJobInfo).get(job_id)
+                container_id = record.runner['container_id']
+
+                deadline = get_timestamp_now() + grace_period * 1000
+                while get_timestamp_now() < deadline:
+                    try:
+                        # sleep for a bit and check the record
+                        time.sleep(1)
+
+                        # is the container still running -> if not, all good we are done
+                        if not docker_container_running(container_id):
+                            self.on_cancellation_worker_done(job_id)
+                            return
+
+                    except Exception as e:
+                        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                        logger.warning(f"[job:{job_id}] checking status failed: {trace}")
+                        break
+
+                # if we get here then either the deadline has been reached or there was an exception -> kill container
+                try:
+                    logger.warning(f"[job:{job_id}] grace period exceeded -> "
+                                   f"killing Docker container {container_id}")
+                    docker_kill_job_container(container_id)
+
+                except Exception as e:
+                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[job:{job_id}] cancellation failed: {trace}")
+
+        finally:
             self.on_cancellation_worker_done(job_id)
 
     def perform_purge(self, record: DBJobInfo) -> None:
@@ -270,6 +309,39 @@ class DefaultRTIService(RTIServiceBase):
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {record.container_id} failed: {trace}")
+
+    def perform_job_cleanup(self, job_id: str) -> None:
+        try:
+            # only clean up if we are not supposed to keep the job history
+            if not self.retain_job_history:
+                # delete the container
+                with self._session_maker() as session:
+                    record: DBJobInfo = session.query(DBJobInfo).get(job_id)
+
+                    # wait for docker container to be shutdown
+                    container_id: str = record.runner['container_id']
+                    logger.info(f"[job:{job_id}] clean-up -> waiting for container {container_id} to be stopped")
+                    while docker_container_running(container_id):
+                        time.sleep(1)
+
+                    # delete the container
+                    logger.info(f"[job:{job_id}] clean-up -> delete container {container_id}")
+                    docker_delete_container(container_id)
+
+                # delete the scratch folder (if any)
+                if self._scratch_volume is not None:
+                    # create the job-specific scratch folder
+                    job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
+                    logger.info(f"[job:{job_id}] clean-up -> delete scratch folder at {job_scratch_path}")
+                    shutil.rmtree(job_scratch_path, ignore_errors=True)
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"[job:{job_id}] clean-up failed: {trace}")
+
+        finally:
+            # notify base class that we are done
+            self.on_cleanup_worker_done(job_id)
 
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         # in case the of the default RTI the port mapping is actually already known during submission time.

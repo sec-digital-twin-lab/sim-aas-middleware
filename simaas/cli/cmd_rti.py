@@ -2,7 +2,7 @@ import datetime
 import json
 import os
 from json import JSONDecodeError
-from typing import List, Union, Optional, Dict
+from typing import List, Union, Optional, Dict, Tuple
 
 import jsonschema
 from InquirerPy.base import Choice
@@ -12,7 +12,7 @@ from tabulate import tabulate
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, prompt_for_selection, \
     get_nodes_by_service, prompt_for_confirmation, load_keystore, extract_address, label_data_object, shorten_id, \
-    label_identity
+    label_identity, default_if_missing
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
@@ -20,7 +20,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
-from simaas.rti.schemas import Processor, Task, JobStatus, Job
+from simaas.rti.schemas import Processor, Task, JobStatus, Job, ProcessorVolume
 from simaas.dor.schemas import ProcessorDescriptor, DataObject
 
 logger = Logging.get('cli')
@@ -32,11 +32,25 @@ def _require_rti(args: dict) -> RTIProxy:
                       default=determine_default_rest_address())
 
     db = NodeDBProxy(extract_address(args['address']))
-    if db.get_node().rti_service is False:
+    if db.get_node().rti_service.lower() is 'none':
         raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 
     return RTIProxy(extract_address(args['address']))
+
+
+def _require_rti_with_type(args: dict) -> Tuple[RTIProxy, str]:
+    prompt_if_missing(args, 'address', prompt_for_string,
+                      message="Enter the node's REST address",
+                      default=determine_default_rest_address())
+
+    db = NodeDBProxy(extract_address(args['address']))
+    rti_type = db.get_node().rti_service.lower()
+    if rti_type is 'none':
+        raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
+                              f"not provide a RTI service. Aborting.")
+
+    return RTIProxy(extract_address(args['address'])), rti_type
 
 
 def proc_info(proc: Processor) -> str:
@@ -57,15 +71,221 @@ def job_label(job: Job, status: JobStatus, deployed: Dict[str, Processor]) -> st
     return result
 
 
-class RTIProcDeploy(CLICommand):
+# define the default values
+default_datastore = os.path.join(os.environ['HOME'], '.datastore')
+
+
+class RTIVolumeList(CLICommand):
     def __init__(self) -> None:
-        super().__init__('deploy', 'deploys a processor', arguments=[
-            Argument('proc-id', metavar='proc-id', type=str, nargs='?',
-                     help="the id of the PDI data object of the processor to be deployed")
+        super().__init__('list', 'show a list of volume references', arguments=[
+            Argument('--datastore', dest='datastore', action='store',
+                     help=f"path to the datastore (default: '{default_datastore}')"),
+        ])
+
+    def execute(self, args: dict) -> Optional[List[dict]]:
+        default_if_missing(args, 'datastore', default_datastore)
+
+        # does the volume references file exist?
+        vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
+        if not os.path.isfile(vol_refs_path):
+            print("No volume references found.")
+            return []
+
+        # load the volume reference file
+        with open(vol_refs_path, 'r') as f:
+            vol_refs = json.load(f)
+
+        # do we have any references?
+        if len(vol_refs) == 0:
+            print("No volume references found.")
+            return []
+
+        # headers
+        lines = [
+            ['VOLUME NAME', 'TYPE', 'REFERENCE'],
+            ['-----------', '----', '---------']
+        ]
+
+        # prepare lines unsorted
+        for item in vol_refs:
+            lines.append([item['name'], item['type'], item['reference']])
+
+        print(f"Found {len(lines)-1} volume references:")
+        print(tabulate(lines, tablefmt="plain"))
+        print()
+
+        return vol_refs
+
+
+class RTIVolumeCreateFSRef(CLICommand):
+    def __init__(self) -> None:
+        super().__init__('fs', 'create filesystem volume reference', arguments=[
+            Argument('--datastore', dest='datastore', action='store',
+                     help=f"path to the datastore (default: '{default_datastore}')"),
+            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
+            Argument('--path', dest='path', action='store', help=f"the path to the local filesystem location")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
-        rti = _require_rti(args)
+        default_if_missing(args, 'datastore', default_datastore)
+
+        # does the volume references file exist?
+        vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
+        if os.path.isfile(vol_refs_path):
+            # load the volume reference file
+            with open(vol_refs_path, 'r') as f:
+                vol_refs = json.load(f)
+        else:
+            vol_refs = []
+
+        # get the name for the reference
+        prompt_if_missing(args, 'name', prompt_for_string,
+                          message="Enter the name of volume reference:", allow_empty=False)
+        for item in vol_refs:
+            if item['name'] == args['name']:
+                raise CLIRuntimeError(f"Volume reference with name '{args['name']}' already exists")
+
+        # get the path for the reference
+        prompt_if_missing(args, 'path', prompt_for_string,
+                          message="Enter the path to the local filesystem location:", allow_empty=False)
+        if not os.path.isdir(args['path']):
+            raise CLIRuntimeError(f"Location '{args['path']}' does not exist or is not a directory")
+
+        reference = {
+            'name': args['name'],
+            'type': 'fs',
+            'reference': {
+                'path': args['path']
+            }
+        }
+
+        # store the updated volume references
+        vol_refs.append(reference)
+        with open(vol_refs_path, 'w') as f:
+            json.dump(vol_refs, f, indent=2)
+
+        return reference
+
+
+class RTIVolumeCreateEFSRef(CLICommand):
+    def __init__(self) -> None:
+        super().__init__('efs', 'create AWS elastic filesystem volume reference', arguments=[
+            Argument('--datastore', dest='datastore', action='store',
+                     help=f"path to the datastore (default: '{default_datastore}')"),
+            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
+            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help=f"the AWS EFS filesystem Id")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        default_if_missing(args, 'datastore', default_datastore)
+
+        # does the volume references file exist?
+        vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
+        if os.path.isfile(vol_refs_path):
+            # load the volume reference file
+            with open(vol_refs_path, 'r') as f:
+                vol_refs = json.load(f)
+        else:
+            vol_refs = []
+
+        # get the name for the reference
+        prompt_if_missing(args, 'name', prompt_for_string,
+                          message="Enter the name of volume reference:", allow_empty=False)
+        for item in vol_refs:
+            if item['name'] == args['name']:
+                raise CLIRuntimeError(f"Volume reference with name '{args['name']}' already exists")
+
+        # get the EFS FS id for the reference
+        prompt_if_missing(args, 'efs_fs_id', prompt_for_string,
+                          message="Enter the path to the local filesystem location:", allow_empty=False)
+
+        reference = {
+            'name': args['name'],
+            'type': 'efs',
+            'reference': {
+                'efsFileSystemId': args['efs_fs_id'],
+                'rootDirectory': '/',
+                'transitEncryption': 'ENABLED'
+            }
+        }
+
+        # store the updated volume references
+        vol_refs.append(reference)
+        with open(vol_refs_path, 'w') as f:
+            json.dump(vol_refs, f, indent=2)
+
+        return reference
+
+
+class RTIVolumeDelete(CLICommand):
+    def __init__(self):
+        super().__init__('delete', 'delete volume references', arguments=[
+            Argument('--datastore', dest='datastore', action='store',
+                     help=f"path to the datastore (default: '{default_datastore}')"),
+            Argument('--name', metavar='name', type=str, nargs='*',
+                     help="the name of the volume references to be deleted"),
+        ])
+
+    def execute(self, args: dict) -> Optional[List[dict]]:
+        default_if_missing(args, 'datastore', default_datastore)
+
+        # does the volume references file exist?
+        vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
+        if not os.path.isfile(vol_refs_path):
+            print("No volume references found.")
+            return []
+
+        # load the volume reference file
+        with open(vol_refs_path, 'r') as f:
+            vol_refs = json.load(f)
+
+        # do we have any references?
+        if len(vol_refs) == 0:
+            print("No volume references found.")
+            return []
+
+        # determine the choices
+        if not args['name'] or len(args['name']) == 0:
+            choices = []
+            for item in vol_refs:
+                if item['name'] in args['name']:
+                    choices.append(Choice(value=item['name'], name=f"{item['name']} ({item['type']})"))
+            selected: List[str] = prompt_for_selection(choices, message="Select the volumes:", allow_multiple=True)
+
+        else:
+            selected: List[str] = args['name']
+
+        # remove the items
+        filtered = []
+        removed = []
+        for item in vol_refs:
+            if item['name'] not in selected:
+                filtered.append(item)
+            else:
+                removed.append(item)
+
+        with open(vol_refs_path, 'w') as f:
+            json.dump(filtered, f, indent=2)
+
+        return removed
+
+
+class RTIProcDeploy(CLICommand):
+    def __init__(self) -> None:
+        super().__init__('deploy', 'deploys a processor', arguments=[
+            Argument('--proc-id', dest='proc_id', action='store',
+                     help="the id of the PDI data object of the processor to be deployed"),
+            Argument('--datastore', dest='datastore', action='store',
+                     help=f"path to the datastore (default: '{default_datastore} - required for volumes')"),
+            Argument('volumes', metavar='volumes', type=str, nargs='*',
+                     help="attach volumes (use this format: '<volume name>:<mount point>:<read only>', "
+                          "e.g., 'ref_1:/mnt/storage:true'")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        default_if_missing(args, 'datastore', default_datastore)
+
+        rti, rti_type = _require_rti_with_type(args)
         keystore = load_keystore(args, ensure_publication=False)
 
         # discover nodes by service
@@ -92,19 +312,72 @@ class RTIProcDeploy(CLICommand):
             raise CLIRuntimeError("No processors found for deployment. Aborting.")
 
         # do we have a processor id?
-        if args['proc-id'] is None:
-            args['proc-id'] = prompt_for_selection(choices, "Select the processor you would like to deploy:",
-                                                   allow_multiple=False)
+        interactive = False
+        if args['proc_id'] is None:
+            interactive = True
+            args['proc_id'] = prompt_for_selection(
+                choices, "Select the processor you would like to deploy:", allow_multiple=False
+            )
 
         # do we have a custodian for this processor id?
-        if args['proc-id'] not in custodian:
-            raise CLIRuntimeError(f"Custodian of processor {shorten_id(args['proc-id'])} not found. Aborting.")
+        if args['proc_id'] not in custodian:
+            raise CLIRuntimeError(f"Custodian of processor {shorten_id(args['proc_id'])} not found. Aborting.")
+
+        # get all the available references and filter by RTI type
+        vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
+        if os.path.isfile(vol_refs_path):
+            with open(vol_refs_path, 'r') as f:
+                vol_refs = json.load(f)
+        else:
+            vol_refs = []
+
+        eligible: Dict[str, dict] = {}
+        eligible_fs_type = {
+            'docker': 'fs',
+            'aws': 'efs'
+        }.get(rti_type)
+        choices: List[Choice] = []
+        for item in vol_refs:
+            if item['type'] == eligible_fs_type:
+                eligible[item['name']] = item['reference']
+                choices.append(Choice(value=item['name'], name=f"{item['name']}: {item['reference']}"))
+
+        # attach volumes (if any)
+        volumes: List[ProcessorVolume] = []
+        if interactive:
+            if len(eligible) == 0:
+                print("No eligible volumes found to attach.")
+            else:
+                if prompt_for_confirmation(
+                        f"Attach volumes to this processor deployment (found {len(eligible)} eligible volumes)?",
+                        default=False
+                ):
+                    selection = prompt_for_selection(choices, message="Select volumes to attach:", allow_multiple=True)
+
+                    for volume in selection:
+                        mount_point = prompt_for_string(f"Enter mount point for volume '{volume}':", allow_empty=False)
+                        read_only = prompt_for_confirmation(f"Enter if volume '{volume}' is read only:", default=True)
+                        volumes.append(ProcessorVolume(
+                            name=volume, mount_point=mount_point, read_only=read_only, reference=eligible[volume]
+                        ))
+        elif args.get('volumes'):
+            for item in args['volumes']:
+                volume, mount_point, read_only = item.split(':')
+                read_only = bool(read_only)
+
+                # is this volume eligible?
+                if volume not in eligible:
+                    raise CLIRuntimeError(f"Volume '{volume}' not found or not eligible for mounting")
+
+                volumes.append(ProcessorVolume(
+                    name=volume, mount_point=mount_point, read_only=read_only, reference=eligible[volume]
+                ))
 
         # deploy the processor
-        print(f"Deploying processor {shorten_id(args['proc-id'])}...", end='')
+        print(f"Deploying processor {shorten_id(args['proc_id'])}...", end='')
         result = {}
         try:
-            result['proc'] = rti.deploy(args['proc-id'], keystore)
+            result['proc'] = rti.deploy(args['proc_id'], keystore, volumes=volumes if volumes else None)
             print("Done")
 
         except UnsuccessfulRequestError as e:
@@ -116,7 +389,7 @@ class RTIProcDeploy(CLICommand):
 class RTIProcUndeploy(CLICommand):
     def __init__(self):
         super().__init__('undeploy', 'undeploys a processor', arguments=[
-            Argument('proc-id', metavar='proc-id', type=str, nargs='*',
+            Argument('--proc-id', metavar='proc_id', type=str, nargs='*',
                      help="the ids of the processors to be undeployed"),
             Argument('--force', dest="force", action='store_const', const=True,
                      help="Force undeployment even if there are still active jobs."),
@@ -132,20 +405,20 @@ class RTIProcUndeploy(CLICommand):
             raise CLIRuntimeError(f"No processors deployed at {args['address']}. Aborting.")
 
         # do we have a proc_id?
-        if not args['proc-id']:
+        if not args['proc_id']:
             choices = [Choice(proc.id, proc_info(proc)) for proc in rti.get_all_procs()]
             if not choices:
                 raise CLIRuntimeError(f"No processors deployed at {args['address']}")
 
-            args['proc-id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=True)
+            args['proc_id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=True)
 
         # do we have a selection?
-        if len(args['proc-id']) == 0:
+        if len(args['proc_id']) == 0:
             raise CLIRuntimeError("No processors selected. Aborting.")
 
         # are the processors deployed?
         result = {}
-        for proc_id in args['proc-id']:
+        for proc_id in args['proc_id']:
             if proc_id not in deployed:
                 print(f"Processor {proc_id} is not deployed at {args['address']}. Skipping.")
                 continue
@@ -191,7 +464,7 @@ class RTIProcList(CLICommand):
 class RTIProcShow(CLICommand):
     def __init__(self) -> None:
         super().__init__('show', 'show details of a deployed processor', arguments=[
-            Argument('--proc-id', dest='proc-id', action='store',
+            Argument('--proc-id', dest='proc_id', action='store',
                      help="the id of the processor")
         ])
 
@@ -199,15 +472,15 @@ class RTIProcShow(CLICommand):
         rti = _require_rti(args)
 
         # do we have a proc_id?
-        if not args['proc-id']:
+        if not args['proc_id']:
             choices = [Choice(proc.id, proc_info(proc)) for proc in rti.get_all_procs()]
             if not choices:
                 raise CLIRuntimeError(f"No processors deployed at {args['address']}")
 
-            args['proc-id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=False)
+            args['proc_id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=False)
 
         # get the proc and the jobs
-        proc = rti.get_proc(args['proc-id'])
+        proc = rti.get_proc(args['proc_id'])
         jobs = rti.get_jobs_by_proc(proc.id)
 
         # print detailed information

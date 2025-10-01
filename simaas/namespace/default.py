@@ -23,6 +23,9 @@ class NamespaceDOR(DORInterface):
         )
         self._authority = authority
 
+    def type(self) -> str:
+        return 'namespace-dor'
+
     def search(
             self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
             data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
@@ -164,6 +167,9 @@ class NamespaceRTI(RTIInterface):
             curve_server_key=custodian_identity.c_public_key
         )
         self._authority = authority
+
+    def type(self) -> str:
+        return 'namespace-rti'
 
     def get_all_procs(self) -> List[Processor]:
         reply: List[dict] = asyncio.run(P2PNamespaceServiceCall.perform(

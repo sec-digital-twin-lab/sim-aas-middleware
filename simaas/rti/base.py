@@ -15,7 +15,7 @@ from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
 from simaas.rti.exceptions import RTIException
-from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus
+from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus, ProcessorVolume
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
@@ -36,6 +36,7 @@ class DBDeployedProcessor(Base):
     state = Column(String, nullable=False)
     image_name = Column(String, nullable=True)
     ports = Column(NestedMutableJson, nullable=False)
+    volumes = Column(NestedMutableJson, nullable=False)
     gpp = Column(NestedMutableJson, nullable=True)
     error = Column(String, nullable=True)
 
@@ -85,10 +86,21 @@ class RTIServiceBase(RTIRESTService):
 
         # a map of active cancellation workers
         self._cancellation_workers: Dict[str, Optional[threading.Thread]] = {}
+        self._cleanup_workers: Dict[str, Optional[threading.Thread]] = {}
 
     def on_cancellation_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
         self._cancellation_workers[job_id] = None
+
+    def on_cleanup_worker_done(self, job_id: str) -> None:
+        # we keep the dict entry but remove the thread object
+        self._cleanup_workers[job_id] = None
+
+    def has_active_workers(self) -> bool:
+        all_workers = list(self._cancellation_workers.values()) + list(self._cleanup_workers.values())
+        return any(
+            worker is not None for worker in all_workers
+        )
 
     def update_proc_db(self, proc: Processor) -> None:
         # update or create db record
@@ -100,10 +112,12 @@ class RTIServiceBase(RTIRESTService):
                 record.ports = proc.ports
                 record.gpp = proc.gpp.model_dump()
                 record.error = proc.error
+                record.volumes = [volume.model_dump() for volume in proc.volumes]
 
             else:
                 session.add(DBDeployedProcessor(id=proc.id, state=proc.state.value, image_name=proc.image_name,
-                                                ports=[], gpp=proc.gpp.model_dump() if proc.gpp else None,
+                                                ports=[], volumes=[volume.model_dump() for volume in proc.volumes],
+                                                gpp=proc.gpp.model_dump() if proc.gpp else None,
                                                 error=proc.error))
             session.commit()
 
@@ -129,6 +143,10 @@ class RTIServiceBase(RTIRESTService):
 
     @abc.abstractmethod
     def perform_purge(self, job_record: DBJobInfo) -> None:
+        ...
+
+    @abc.abstractmethod
+    def perform_job_cleanup(self, job_id: str) -> None:
         ...
 
     @abc.abstractmethod
@@ -173,6 +191,7 @@ class RTIServiceBase(RTIRESTService):
             for record in records:
                 result.append(Processor(id=record.id, state=Processor.State(record.state),
                                         image_name=record.image_name, ports=list(record.ports),
+                                        volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                         gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                         error=record.error))
 
@@ -187,12 +206,13 @@ class RTIServiceBase(RTIRESTService):
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
+                                 volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
             else:
                 return None
 
-    def deploy(self, proc_id: str) -> Processor:
+    def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
         """
         Deploys a processor.
         """
@@ -206,7 +226,8 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             # create a placeholder processor object
             proc = Processor(
-                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None, gpp=None, error=None
+                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None,
+                volumes=volumes if volumes else [], gpp=None, error=None
             )
 
             # update or create db record
@@ -231,6 +252,7 @@ class RTIServiceBase(RTIRESTService):
                 # create the processor object
                 proc = Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
+                                 volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
                                  gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
                                  error=record.error)
 
@@ -571,27 +593,44 @@ class RTIServiceBase(RTIRESTService):
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
-                # is this job part of a batch?
-                batch_records: Optional[List[DBJobInfo]] = \
-                    session.query(DBJobInfo).filter_by(batch_id=record.batch_id).all() if record.batch_id else None
+                # update the status
+                record.status = job_status.model_dump()
+                session.commit()
 
-                # TODO: might need to think about restricting status updates from jobs that are marked as finished.
-                # if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                #                         JobStatus.State.RUNNING]:
-                #     logger.warning(f"Job {job_id} is not active -> status cannot be updated.")
-
-                # check the status
-                status = JobStatus.model_validate(record.status)
+                # update the local status file
+                try:
+                    status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                    with open(status_path, 'w') as f:
+                        # noinspection PyTypeChecker
+                        json.dump(job_status.model_dump(), f, indent=2)
+                except Exception:
+                    logger.warning(f"Could not write job status to {status_path}")
 
                 # do we need to cancel a namespace reservation?
-                if status.state in [JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED]:
+                if job_status.state in [
+                    JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED
+                ]:
                     # cancel resource reservation (if applicable)
                     job: Job = Job.model_validate(record.job)
                     if job.task.namespace is not None:
                         self._node.db.cancel_namespace_reservation(job.task.namespace, job.id)
 
+                    # initiate post-job clean-up
+                    if job.id not in self._cleanup_workers:
+                        # start the cancellation worker
+                        worker = threading.Thread(target=self.perform_job_cleanup, args=(job.id,))
+                        self._cleanup_workers[record.id] = worker
+                        worker.start()
+
+                # is this job part of a batch?
+                batch_records: Optional[List[DBJobInfo]] = \
+                    session.query(DBJobInfo).filter_by(
+                        batch_id=record.batch_id).all() if record.batch_id else None
+
                 # do we need to terminate related jobs?
-                if batch_records is not None and status.state in [JobStatus.State.FAILED, JobStatus.State.CANCELLED]:
+                if batch_records is not None and job_status.state in [
+                    JobStatus.State.FAILED, JobStatus.State.CANCELLED
+                ]:
                     for related in batch_records:
                         # skip if this is the record of the just updated job
                         if related.id == job_id:
@@ -611,19 +650,6 @@ class RTIServiceBase(RTIRESTService):
                         else:
                             logger.info(f"Job {job_id} failed/cancelled -> "
                                         f"related job {related.id} status {related_status.state} -> skip")
-
-                # update the status
-                record.status = job_status.model_dump()
-                session.commit()
-
-                # update the local status file
-                try:
-                    status_path = os.path.join(self._jobs_path, job_id, 'job.status')
-                    with open(status_path, 'w') as f:
-                        # noinspection PyTypeChecker
-                        json.dump(job_status.model_dump(), f, indent=2)
-                except Exception:
-                    logger.warning(f"Could not write job status to {status_path}")
 
     def get_job_owner_iid(self, job_id: str) -> str:
         with self._mutex:

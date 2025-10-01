@@ -71,8 +71,8 @@ def test_cosim(dummy_namespace):
         custodian = NodeInfo(
             identity=user,
             last_seen=0,
-            dor_service=False,
-            rti_service=False,
+            dor_service='none',
+            rti_service='none',
             p2p_address='',
             rest_address=None,
             retain_job_history=False,

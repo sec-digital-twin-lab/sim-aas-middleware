@@ -198,7 +198,9 @@ def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
     ), config
 
 
-def batch_ensure_job_def(repository_name: str, proc: Processor, config: Optional[AWSConfiguration] = None) -> str:
+def batch_ensure_job_def(
+        repository_name: str, proc: Processor, config: Optional[AWSConfiguration] = None
+) -> str:
     # get the client
     client, _ = get_batch_client(config)
 
@@ -212,32 +214,56 @@ def batch_ensure_job_def(repository_name: str, proc: Processor, config: Optional
     name = f"job-def_{proc.id}"
     response = client.describe_job_definitions(jobDefinitionName=name, status="ACTIVE")
     if response["jobDefinitions"]:
-        job_def_arn = response["jobDefinitions"][0]["jobDefinitionArn"]
-    else:
-        # if it doesn't exist, create one for Fargate
-        response = client.register_job_definition(
-            jobDefinitionName=name,
-            type="container",
-            containerProperties={
-                "image": ecr_image_name,
-                "resourceRequirements": [
-                    {"type": "VCPU", "value": "1"},
-                    {"type": "MEMORY", "value": "2048"}
-                ],
-                "networkConfiguration": {
-                    "assignPublicIp": "ENABLED"  # Optional, to assign a public IP
-                },
-                # Optional: specify Fargate platform version (latest is default)
-                "fargatePlatformConfiguration": {
-                    "platformVersion": "LATEST"
-                },
-                "executionRoleArn": config.aws_role_arn
-            },
-            platformCapabilities=["FARGATE"],  # Specify Fargate platform
-        )
-        job_def_arn = response['jobDefinitionArn']
+        return response["jobDefinitions"][0]["jobDefinitionArn"]
 
-    return job_def_arn
+    # --- Build volumes list for AWS Batch job definition ---
+    aws_volumes = []
+    mount_points = []
+    for v in proc.volumes:
+        # ignore non-EFS volumes
+        if "efsFileSystemId" not in v.reference:
+            logger.warning(f"Ignoring non-EFS volume {v.name} for {proc.image_name}: {v}")
+            continue
+
+        aws_volumes.append({
+            "name": v.name,
+            "efsVolumeConfiguration": {
+                "fileSystemId": v.reference["efsFileSystemId"],
+                "rootDirectory": v.reference.get("rootDirectory", "/"),
+                "transitEncryption": v.reference.get("transitEncryption", "ENABLED")
+            }
+        })
+
+        mount_points.append({
+            "sourceVolume": v.name,
+            "containerPath": v.mount_point,
+            "readOnly": v.read_only
+        })
+
+    # --- Register job definition ---
+    response = client.register_job_definition(
+        jobDefinitionName=name,
+        type="container",
+        containerProperties={
+            "image": ecr_image_name,
+            "resourceRequirements": [
+                {"type": "VCPU", "value": "1"},
+                {"type": "MEMORY", "value": "2048"}
+            ],
+            "networkConfiguration": {
+                "assignPublicIp": "ENABLED"  # TODO: without public IP the job won't have internet access
+            },
+            "fargatePlatformConfiguration": {
+                "platformVersion": "LATEST"
+            },
+            "executionRoleArn": config.aws_role_arn,
+            "volumes": aws_volumes,
+            "mountPoints": mount_points
+        },
+        platformCapabilities=["FARGATE"]
+    )
+
+    return response['jobDefinitionArn']
 
 
 def batch_deregister_job_def(proc: Processor, config: Optional[AWSConfiguration] = None) -> None:
@@ -332,10 +358,14 @@ class AWSRTIService(RTIServiceBase):
         os.makedirs(self._jobs_path, exist_ok=True)
         os.makedirs(self._procs_path, exist_ok=True)
 
+    def type(self) -> str:
+        return 'aws'
+
     def perform_deploy(self, proc: Processor) -> None:
         loop = asyncio.new_event_loop()
         try:
             # search the network for the processor docker image data object and fetch it
+            logger.info(f"[deploy][{proc.id}] searching network for PDI: image_name={proc.image_name}")
             protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj: Optional[DataObject] = None
@@ -355,68 +385,85 @@ class AWSRTIService(RTIServiceBase):
             if image_name is None:
                 raise RTIException("Malformed processor data object -> image_name not found.")
 
-            # find out first if we require a build or not
-            require_build = True
-            if docker_find_image(image_name):
+            # do we have the image in Docker?
+            image_found = docker_find_image(image_name)
+
+            # if not, can we load it from DOR?
+            if not image_found and proc_obj.data_format == 'tar':
+                logger.info(f"[deploy][{proc.id}] image not found but PDI exists as 'tar' -> try loading it...")
+
+                # fetch the data object
+                image_path = os.path.join(self._procs_path, f"{proc.id}.content")
+                meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
+                protocol = P2PFetchDataObject(self._node)
+                loop.run_until_complete(
+                    protocol.perform(custodian, proc.id, meta_path, image_path)
+                )
+
+                # load the image
+                docker_load_image(image_path, image_name)
+                image_found = True
+
+            # do we require a rebuild?
+            if image_found:
                 # check if the existing image matches the required platform
                 if docker_check_image_platform(image_name, 'linux/amd64'):
                     require_build = False
+                    logger.info(f"[deploy][{proc.id}] image found and arch == linux/amd64 -> no build required!")
+
                 else:
                     # remove the existing image before rebuilding
                     docker_delete_image(image_name)
+                    require_build = True
+                    logger.info(f"[deploy][{proc.id}] image found but arch != linux/amd64 -> build required!")
+
+            else:
+                require_build = True
+                logger.info(f"[deploy][{proc.id}] image not found -> build required!")
+
 
             # if we require a build -> build it now and push to ECR
             if require_build:
-                # is the processor data object and image or a GPP?
-                if proc_obj.data_format == 'tar':
-                    # fetch the data object
-                    image_path = os.path.join(self._procs_path, f"{proc.id}.content")
-                    meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
-                    protocol = P2PFetchDataObject(self._node)
-                    loop.run_until_complete(
-                        protocol.perform(custodian, proc.id, meta_path, image_path)
-                    )
+                logger.info(f"[deploy][{proc.id}] trying to build image: {image_name}...")
 
-                    # load the image
-                    docker_load_image(image_path, image_name)
+                # do we have credentials for this repo?
+                repository = proc_obj.tags['repository']
+                credentials: Optional[GithubCredentials] = self._node.keystore.github_credentials.get(repository)
+                credentials: Optional[Tuple[str, str]] = \
+                    (credentials.login, credentials.personal_access_token) if credentials else None
 
-                else:
-                    # do we have credentials for this repo?
-                    repository = proc_obj.tags['repository']
-                    credentials: Optional[GithubCredentials] = self._node.keystore.github_credentials.get(repository)
-                    credentials: Optional[Tuple[str, str]] = \
-                        (credentials.login, credentials.personal_access_token) if credentials else None
+                # clone the repository and checkout the specified commit
+                repo_path = os.path.join(self._procs_path, proc.id)
+                commit_id = proc_obj.tags['commit_id']
+                clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
 
-                    # clone the repository and checkout the specified commit
-                    repo_path = os.path.join(self._procs_path, proc.id)
-                    commit_id = proc_obj.tags['commit_id']
-                    clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
+                proc_path = proc_obj.tags['proc_path']
+                proc_path = os.path.join(repo_path, proc_path)
 
-                    proc_path = proc_obj.tags['proc_path']
-                    proc_path = os.path.join(repo_path, proc_path)
+                # create the GPP descriptor
+                gpp: GitProcessorPointer = GitProcessorPointer(
+                    repository=proc_obj.tags['repository'],
+                    commit_id=proc_obj.tags['commit_id'],
+                    proc_path=proc_obj.tags['proc_path'],
+                    proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
+                )
+                gpp_path = os.path.join(proc_path, 'gpp.json')
+                with open(gpp_path, 'w') as f:
+                    json.dump(gpp.model_dump(), f, indent=2)
 
-                    # create the GPP descriptor
-                    gpp: GitProcessorPointer = GitProcessorPointer(
-                        repository=proc_obj.tags['repository'],
-                        commit_id=proc_obj.tags['commit_id'],
-                        proc_path=proc_obj.tags['proc_path'],
-                        proc_descriptor=ProcessorDescriptor.model_validate(proc_obj.tags['proc_descriptor'])
-                    )
-                    gpp_path = os.path.join(proc_path, 'gpp.json')
-                    with open(gpp_path, 'w') as f:
-                        json.dump(gpp.model_dump(), f, indent=2)
+                # build the image
+                build_processor_image(
+                    proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
+                    credentials=credentials, platform='linux/amd64'
+                )
 
-                    # build the image
-                    build_processor_image(
-                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
-                        credentials=credentials, platform='linux/amd64'
-                    )
-
-                    # push to ECR
-                    ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
+                logger.info(f"[deploy][{proc.id}] image building complete: {image_name}")
 
             # if it's not in the ECR yet -> push it now
-            elif not ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
+            if ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
+                logger.info(f"[deploy][{proc.id}] image already exists in ECR: {image_name} -> do nothing.")
+            else:
+                logger.info(f"[deploy][{proc.id}] image does not exist in ECR: {image_name} -> pushing to ECR now...")
                 ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
 
             # find out what ports are exposed
@@ -473,7 +520,10 @@ class AWSRTIService(RTIServiceBase):
                 else:
                     logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
-    def _perform_submit(self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None) -> str:
+    def _perform_submit(
+            self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None,
+            volumes: Optional[Dict[str, dict]] = None
+    ) -> str:
         # determine the custodian address and curve public key
         custodian_pubkey: str = self._node.identity.c_public_key
         if "SIMAAS_CUSTODIAN_HOST" in os.environ:
@@ -582,6 +632,9 @@ class AWSRTIService(RTIServiceBase):
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{record.id}] killing Docker container {aws_job_id} failed: {trace}")
+
+    def perform_job_cleanup(self, job_id: str) -> None:
+        ...
 
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         # update missing port mappings by using the same host as the runner address. this makes some assumptions

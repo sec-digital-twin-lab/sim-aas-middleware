@@ -131,6 +131,13 @@ class BatchStatus(BaseModel):
     members: List[Member] = Field(..., title="Members", description="A list with information about all members of the batch.")
 
 
+class ProcessorVolume(BaseModel):
+    name: str = Field(..., title="Name", description="The name for this volume.")
+    mount_point: str = Field(..., title="Mount Point", description="The mount point for this volume (e.g., '/data').")
+    read_only: bool = Field(..., title="Read Only", description="Flag indicating if the volume should be read only.")
+    reference: dict = Field(..., title="Reference", description="RTI-specific information required to mount the volume.")
+
+
 class Processor(BaseModel):
     class State(str, Enum):
         """
@@ -147,9 +154,10 @@ class Processor(BaseModel):
     id: str = Field(..., title="Processor Id", description="The processor id.", examples=["d01d069675bcaaeb90b46273ccc4ae9818a2667957045d0f0f15901ffcf807de"])
     state: Literal[State.BUSY_DEPLOY, State.BUSY_UNDEPLOY, State.READY, State.FAILED] = Field(..., title="State", description="The state of the processor.")
     image_name: Optional[str] = Field(title="Image Name", description="The name of the docker image that contains the processor.")
-    ports: Optional[List[Tuple[int, str]]] = Field(..., title="Ports", description="The ports exposed/used by this processor.")
+    ports: Optional[List[Tuple[int, str]]] = Field(title="Ports", description="The ports exposed/used by this processor.")
+    volumes: List[ProcessorVolume] = Field(..., title="Volumes", description="List of volumes used by the processor (if any).")
     gpp: Optional[GitProcessorPointer] = Field(title="GPP", description="The Git Processor Pointer information.")
-    error: Optional[str] = Field(..., title="Error", description="Information about the error encountered (only if state is 'failed').")
+    error: Optional[str] = Field(title="Error", description="Information about the error encountered (only if state is 'failed').")
 
 
 class ProcessorStatus(BaseModel):
