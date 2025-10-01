@@ -26,8 +26,8 @@ class NodeRecord(Base):
     __tablename__ = 'node'
     iid = Column(String(64), primary_key=True)
     last_seen = Column(BigInteger, nullable=False)
-    dor_service = Column(Boolean, nullable=False)
-    rti_service = Column(Boolean, nullable=False)
+    dor_service = Column(String, nullable=False)
+    rti_service = Column(String, nullable=False)
     p2p_address = Column(String, nullable=False)
     rest_address = Column(String, nullable=True)
     retain_job_history = Column(Boolean, nullable=True)

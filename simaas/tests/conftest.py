@@ -36,7 +36,7 @@ from simaas.node.default import DefaultNode, DORType, RTIType
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy, RTIInterface
 from simaas.rti.aws import get_default_aws_config
-from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
+from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus, ProcessorVolume
 
 load_dotenv()
 
@@ -149,12 +149,18 @@ def session_node(session_keystore):
             keystore=session_keystore, storage_path=tempdir,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
             enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
-            retain_job_history=True, strict_deployment=False
+            retain_job_history=False, strict_deployment=False
         )
 
         yield _node
 
         _node.shutdown()
+
+
+@pytest.fixture(scope="session")
+def session_data_dir(session_keystore):
+    with tempfile.TemporaryDirectory() as tempdir:
+        yield tempdir
 
 
 def add_test_processor(
@@ -224,7 +230,7 @@ def add_test_processor(
 
 @pytest.fixture(scope="session")
 def deployed_abc_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node, session_data_dir
 ) -> DataObject:
     if not github_credentials_available:
         yield DataObject(
@@ -256,7 +262,12 @@ def deployed_abc_processor(
 
         else:
             # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
+            rti_proxy.deploy(proc_id, session_node.keystore, volumes=[
+                ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                    'path': session_data_dir
+                })
+            ])
+
             while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
@@ -455,6 +466,8 @@ class DummyNamespace(Namespace):
             self._meta: Dict[str, DataObject] = {}
             self._content: Dict[str, dict] = {}
 
+        def type(self) -> str:
+            return 'dummy'
 
         def search(self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
                    data_type: Optional[str] = None, data_format: Optional[str] = None,
@@ -537,6 +550,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-factor-search',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -545,6 +559,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-factorisation',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -553,6 +568,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-room',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 ),
@@ -561,6 +577,7 @@ class DummyNamespace(Namespace):
                     state=Processor.State.READY,
                     image_name='proc-thermostat',
                     ports=None,
+                    volumes=[],
                     gpp=None,
                     error=None
                 )
@@ -577,6 +594,9 @@ class DummyNamespace(Namespace):
             self._batch: Dict[str, BatchStatus] = {}
             self._next_job_id: int = 0
             self._keystore = Keystore.new('dummy')
+
+        def type(self) -> str:
+            return 'dummy'
 
         def get_all_procs(self) -> List[Processor]:
             return list(self._procs.values())
@@ -619,8 +639,8 @@ class DummyNamespace(Namespace):
                     custodian=NodeInfo(
                         identity=self._keystore.identity,
                         last_seen=get_timestamp_now(),
-                        dor_service=True,
-                        rti_service=True,
+                        dor_service='dummy',
+                        rti_service='dummy',
                         p2p_address='in-memory',
                         rest_address=None,
                         retain_job_history=True,

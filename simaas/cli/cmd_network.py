@@ -26,16 +26,16 @@ class NetworkList(CLICommand):
 
         # headers
         lines = [
-            ['NODE IDENTITY ID', 'DOR?', 'RTI?', 'REST ADDRESS', 'P2P ADDRESS', 'LAST SEEN'],
-            ['----------------', '----', '----', '------------', '-----------', '---------']
+            ['NODE IDENTITY ID', 'DOR', 'RTI', 'REST ADDRESS', 'P2P ADDRESS', 'LAST SEEN'],
+            ['----------------', '---', '---', '------------', '-----------', '---------']
         ]
 
         # list
         for node in network:
             lines.append([
                 node.identity.id,
-                'Yes' if node.dor_service else 'No',
-                'Yes' if node.rti_service else 'No',
+                node.dor_service,
+                node.rti_service,
                 f"{node.rest_address[0]}:{node.rest_address[1]}" if node.rest_address else '-',
                 f"{node.p2p_address}",
                 datetime.datetime.fromtimestamp(node.last_seen / 1000.0).strftime('%Y-%m-%d %H:%M:%S UTC')

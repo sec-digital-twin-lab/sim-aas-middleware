@@ -15,7 +15,7 @@ from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
 from simaas.cli.cmd_proc_builder import ProcBuilderLocal, ProcBuilderGithub
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
-    RTIProcShow, RTIJobList, RTIJobCancel
+    RTIProcShow, RTIJobList, RTIJobCancel, RTIVolumeList, RTIVolumeCreateFSRef, RTIVolumeCreateEFSRef, RTIVolumeDelete
 from simaas.cli.cmd_service import Service
 from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
@@ -97,6 +97,14 @@ def main():
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
             ], commands=[
+                CLICommandGroup('volume', 'manage volumes', commands=[
+                    RTIVolumeList(),
+                    CLICommandGroup('create', 'create volumes', commands=[
+                        RTIVolumeCreateFSRef(),
+                        RTIVolumeCreateEFSRef()
+                    ]),
+                    RTIVolumeDelete()
+                ]),
                 CLICommandGroup('proc', 'manage processors', commands=[
                     RTIProcDeploy(),
                     RTIProcUndeploy(),

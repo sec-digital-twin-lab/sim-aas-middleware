@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from stat import S_IREAD, S_IRGRP
 from threading import Lock
 from typing import Optional, List, Dict, Union
@@ -139,6 +140,9 @@ class DefaultDORService(DORRESTService):
         # initialise directories
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH), exist_ok=True)
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_TEMP_PATH), exist_ok=True)
+
+    def type(self) -> str:
+        return 'basic'
 
     def obj_content_path(self, c_hash: str) -> str:
         return os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH, c_hash)
@@ -356,8 +360,10 @@ class DefaultDORService(DORRESTService):
 
                 else:
                     # move the temporary content to its destination and make it read-only
+                    # Note: emulate move by copy + delete to avoid cross-device move issues
                     destination_path = self.obj_content_path(c_hash)
-                    os.rename(content_path, destination_path)
+                    shutil.copyfile(content_path, destination_path)
+                    os.remove(content_path)
                     os.chmod(destination_path, S_IREAD | S_IRGRP)
 
                 # create a new data object record

@@ -12,7 +12,7 @@ from simaas.rest.schemas import EndpointDefinition
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 
 from simaas.core.keystore import Keystore
-from simaas.rti.schemas import Job, JobStatus, Processor, Task, BatchStatus
+from simaas.rti.schemas import Job, JobStatus, Processor, Task, BatchStatus, ProcessorVolume
 
 RTI_ENDPOINT_PREFIX = "/api/v1/rti"
 JOB_ENDPOINT_PREFIX = "/api/v1/job"
@@ -21,7 +21,7 @@ JOB_ENDPOINT_PREFIX = "/api/v1/job"
 class RTIAdminInterface(abc.ABC):
     @abc.abstractmethod
     @requires_node_ownership_if_strict
-    def deploy(self, proc_id: str) -> Processor:
+    def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
         """
         Deploys a processor.
         """
@@ -57,6 +57,10 @@ class RTIAdminInterface(abc.ABC):
 
 
 class RTIInterface(abc.ABC):
+    @abc.abstractmethod
+    def type(self) -> str:
+        ...
+
     @abc.abstractmethod
     def get_all_procs(self) -> List[Processor]:
         """
@@ -176,8 +180,9 @@ class RTIProxy(EndpointProxy):
         result = self.get(f"proc/{proc_id}")
         return Processor.model_validate(result) if result else None
 
-    def deploy(self, proc_id: str, authority: Keystore) -> Processor:
-        result = self.post(f"proc/{proc_id}", with_authorisation_by=authority)
+    def deploy(self, proc_id: str, authority: Keystore, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
+        body = [volume.model_dump() for volume in volumes] if volumes else None
+        result = self.post(f"proc/{proc_id}", body=body, with_authorisation_by=authority)
         return Processor.model_validate(result)
 
     def undeploy(self, proc_id: str, authority: Keystore) -> Processor:
