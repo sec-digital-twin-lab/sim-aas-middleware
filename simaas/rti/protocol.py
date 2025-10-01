@@ -166,10 +166,20 @@ class P2PPushJobStatus(P2PProtocol):
         self._rti = node.rti
 
     @classmethod
-    async def perform(cls, peer_address: P2PAddress, job_id: str, job_status: JobStatus) -> None:
-        await p2p_request(
-            peer_address, cls.NAME, JobStatusRequest(job_id=job_id, job_status=job_status)
-        )
+    async def perform(
+            cls, peer_address: P2PAddress, job_id: str, job_status: JobStatus, max_attempts: int = 10
+    ) -> None:
+        for attempt in range(max_attempts):
+            try:
+                await p2p_request(
+                    peer_address, cls.NAME, JobStatusRequest(job_id=job_id, job_status=job_status)
+                )
+                return None
+
+            except PeerUnavailableError:
+                await asyncio.sleep(0.5)
+
+        raise RTIException(f"Pushing job status failed after {max_attempts} attempts.")
 
     async def handle(
             self, request: JobStatusRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None

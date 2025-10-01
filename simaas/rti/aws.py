@@ -555,6 +555,7 @@ class AWSRTIService(RTIServiceBase):
 
                     # is the container still running -> if not, all good we are done
                     if not batch_job_running(aws_job_id):
+                        self.on_cancellation_worker_done(job_id)
                         return
 
             except Exception as e:
@@ -570,6 +571,8 @@ class AWSRTIService(RTIServiceBase):
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
+
+        self.on_cancellation_worker_done(job_id)
 
     def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)
