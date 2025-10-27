@@ -139,15 +139,37 @@ class SPARQLWrapper:
 
         for g_uri, triples in graph_map.items():
             triples_str = "\n".join(triples)
-            if g_uri:
-                query = f"INSERT DATA {{ GRAPH <{g_uri}> {{ {triples_str} }} }}"
+            graph_iri = self._normalize_graph_identifier(g_uri)
+
+            if graph_iri:
+                query = f"INSERT DATA {{ GRAPH {graph_iri} {{ {triples_str} }} }}"
             else:
-                default_graph = self._config.default_graph
+                default_graph = self._normalize_graph_identifier(self._config.default_graph)
                 if default_graph:
-                    query = f"INSERT DATA {{ GRAPH <{default_graph}> {{ {triples_str} }} }}"
+                    query = f"INSERT DATA {{ GRAPH {default_graph} {{ {triples_str} }} }}"
                 else:
                     query = f"INSERT DATA {{ {triples_str} }}"
             self.update(query)
+
+    def _normalize_graph_identifier(self, graph_identifier):
+        """
+        Convert a graph identifier (URIRef, Graph, or string) into a valid SPARQL IRI literal.
+        Returns None when no identifier is provided.
+        """
+        if not graph_identifier:
+            return None
+
+        if hasattr(graph_identifier, "identifier"):
+            graph_identifier = graph_identifier.identifier
+
+        if hasattr(graph_identifier, "n3"):
+            return graph_identifier.n3()
+
+        identifier = str(graph_identifier)
+        if identifier.startswith("<") and identifier.endswith(">"):
+            return identifier
+
+        return f"<{identifier}>"
 
     # ---------------------
     # History and persistence
