@@ -1,0 +1,191 @@
+{
+  "namespaces": {
+    "CE2M": "http://www.sec.ethz.ch/projects/ce2m#",
+    "RDF": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "OUM": "http://www.sec.ethz.ch/ontologies/ontourbanmetabolism#",
+    "OM": "https://www.commoncoreontologies.org/UnitsOfMeasureOntology#",
+    "XSD": "http://www.w3.org/2001/XMLSchema#"
+  },
+  "graph": {
+    "namespace": "CE2M",
+    "local": "default_graph"
+  },
+  "value_placeholder": {
+    "string_in_template": "%%EMISSIONS_VALUE%%",
+    "source_variable_name": "calculated_emissions"
+  },
+  "triples": [
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_metabolism"
+      },
+      "predicate": {
+        "namespace": "RDF",
+        "local": "type"
+      },
+      "object": {
+        "namespace": "OUM",
+        "local": "UrbanMetabolism"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_metabolism"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "temporallyBoundedBy"
+      },
+      "object": {
+        "namespace": "CE2M",
+        "local": "example_timespan"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_timespan"
+      },
+      "predicate": {
+        "namespace": "RDF",
+        "local": "type"
+      },
+      "object": {
+        "namespace": "OUM",
+        "local": "MetabolicTimespan"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_metabolism"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "spatiallyBoundedBy"
+      },
+      "object": {
+        "namespace": "CE2M",
+        "local": "example_site"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_site"
+      },
+      "predicate": {
+        "namespace": "RDF",
+        "local": "type"
+      },
+      "object": {
+        "namespace": "OUM",
+        "local": "MetabolicSite"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_metabolism"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "hasFootprint"
+      },
+      "object": {
+        "namespace": "CE2M",
+        "local": "example_co2_footprint"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_metabolism"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "generatesResourceFlow"
+      },
+      "object": {
+        "namespace": "CE2M",
+        "local": "example_electricityFlow"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_electricityFlow"
+      },
+      "predicate": {
+        "namespace": "RDF",
+        "local": "type"
+      },
+      "object": {
+        "namespace": "OUM",
+        "local": "ResourceInflow"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_electricityFlow"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "usesResource"
+      },
+      "object": {
+        "namespace": "OM",
+        "local": "Electricity"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_co2_footprint"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "measuredIn"
+      },
+      "object": {
+        "namespace": "OM",
+        "local": "gram"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_co2_footprint"
+      },
+      "predicate": {
+        "namespace": "OUM",
+        "local": "hasMeasurePrefix"
+      },
+      "object": {
+        "namespace": "OM",
+        "local": "mega"
+      }
+    },
+    {
+      "subject": {
+        "namespace": "CE2M",
+        "local": "example_co2_footprint"
+      },
+      "predicate": {
+        "namespace": "RDF",
+        "local": "value"
+      },
+      "object": {
+        "literal": "%%EMISSIONS_VALUE%%"
+      },
+      "object_is_literal": true,
+      "object_datatype": {
+        "namespace": "XSD",
+        "local": "double"
+      }
+    }
+  ]
+}
