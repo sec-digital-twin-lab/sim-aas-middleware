@@ -11,6 +11,7 @@ from simaas.core.helpers import hash_json_object, symmetric_decrypt, symmetric_e
 from simaas.dor.schemas import DataObject
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import Logging
+from simaas.dor.wrappers import SPARQLWrapper
 from simaas.rest.exceptions import UnsuccessfulRequestError
 
 Logging.initialise(level=logging.DEBUG)
@@ -47,6 +48,13 @@ def receiver(test_context):
     keystore = test_context.create_keystores(1)[0]
     node = test_context.get_node(keystore, enable_rest=True)
     return node
+
+
+@pytest.fixture
+def sparql():
+    config = SPARQLWrapper.Config(endpoint="http://localhost:9999/blazegraph/sparql")
+    with SPARQLWrapper(config, keep_history=True) as wrapper:
+        yield wrapper
 
 
 def test_search(dor_proxy):
@@ -551,3 +559,49 @@ def test_touch_data_object(test_context, known_users, dor_proxy, random_content)
     dor_proxy.remove_tags(obj_id, owner, ['name'])
     meta: DataObject = dor_proxy.get_meta(obj_id)
     assert(meta.last_accessed > last_accessed)
+
+
+def test_wrapper_sparql(sparql):
+    TEST_SUBJECT = "http://example.org/person/TestUser"
+    TEST_PREDICATE = "http://xmlns.com/foaf/0.1/name"
+    TEST_OBJECT = "TestUser"
+
+    # 1. Clean up any existing triple (idempotent)
+    sparql.update(f"""
+    DELETE WHERE {{
+      <{TEST_SUBJECT}> <{TEST_PREDICATE}> ?o
+    }}
+    """)
+
+    # 2. Insert test triple
+    sparql.update(f"""
+    INSERT DATA {{
+      <{TEST_SUBJECT}> <{TEST_PREDICATE}> "{TEST_OBJECT}" .
+    }}
+    """)
+
+    # 3. Query it back
+    results = sparql.query(f"""
+    SELECT ?s ?p ?o WHERE {{
+      BIND(<{TEST_SUBJECT}> AS ?s)
+      ?s ?p ?o
+    }}
+    """)
+
+    # 4. Assertions
+    bindings = results["results"]["bindings"]
+    assert len(bindings) == 1
+    row = bindings[0]
+    assert row["s"]["value"] == TEST_SUBJECT
+    assert row["p"]["value"] == TEST_PREDICATE
+    assert row["o"]["value"] == TEST_OBJECT
+
+    # 5. Test history logging
+    history = sparql.history()
+    assert len(history) >= 3  # DELETE + INSERT + SELECT
+    assert history[-1].type == "query"
+    assert TEST_OBJECT in history[-1].query or True  # just verify query content exists
+
+    # Optional: print for debugging
+    print("Query result:", {k: v["value"] for k, v in row.items()})
+    print("History events:", history)

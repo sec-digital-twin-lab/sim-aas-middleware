@@ -1,9 +1,29 @@
+import abc
 import os
 
 from pydantic import BaseModel
 from typing import Optional, List
 import requests
 from rdflib import ConjunctiveGraph, Graph
+
+
+class QueryWrapper(abc.ABC):
+    class Event(BaseModel):
+        type: str
+        query: str
+        result: Optional[dict] = None
+
+    def __init__(self, history: Optional[List[Event]] = None):
+        self._reference_history = history
+        self._history = []
+
+    @abc.abstractmethod
+    def history(self) -> List[Event]:
+        ...
+
+    @abc.abstractmethod
+    def close(self):
+        ...
 
 
 class SPARQLWrapper:
@@ -15,18 +35,14 @@ class SPARQLWrapper:
         default_graph: Optional[str] = None
         timeout: int = 30
 
-    class Event(BaseModel):
-        type: str
-        sparql: str
-        result: Optional[dict] = None
-
     def __init__(self, config: Config, keep_history: bool = False):
         self._config = config
         self._session = requests.Session()
-        self._history: Optional[List[SPARQLWrapper.Event]] = [] if keep_history else None
+        self._history: Optional[List[QueryWrapper.Event]] = [] if keep_history else None
 
         if config.username and config.password:
             self._session.auth = (config.username, config.password)
+
 
     # ---------------------
     # Context manager
@@ -36,6 +52,7 @@ class SPARQLWrapper:
 
     def __exit__(self, exc_type, exc, tb):
         self.close()
+
 
     # ---------------------
     # Query / Update
@@ -57,7 +74,7 @@ class SPARQLWrapper:
         result = resp.json()
 
         if self._history is not None:
-            self._history.append(SPARQLWrapper.Event(type="query", sparql=sparql, result=result))
+            self._history.append(QueryWrapper.Event(type="query", query=sparql, result=result))
 
         return result
 
@@ -74,7 +91,7 @@ class SPARQLWrapper:
         resp.raise_for_status()
 
         if self._history is not None:
-            self._history.append(SPARQLWrapper.Event(type="update", sparql=sparql, result=None))
+            self._history.append(QueryWrapper.Event(type="update", query=sparql, result=None))
 
     # ---------------------
     # Execute (auto-detect type)
@@ -174,7 +191,7 @@ class SPARQLWrapper:
     # ---------------------
     # History and persistence
     # ---------------------
-    def history(self) -> List[Event]:
+    def history(self) -> List[QueryWrapper.Event]:
         return self._history
 
     # ---------------------
