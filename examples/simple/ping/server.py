@@ -30,7 +30,7 @@ class CombinedTestServer:
         udp_thread.daemon = True
         udp_thread.start()
         
-        print(f"Combined Test Server started:")
+        print("Combined Test Server started:")
         print(f"  TCP on {self.host}:{self.tcp_port}")
         print(f"  UDP on {self.host}:{self.udp_port}")
         print("Press Ctrl+C to stop...")
@@ -128,7 +128,7 @@ class CombinedTestServer:
         if self.tcp_socket:
             try:
                 self.tcp_socket.close()
-            except:
+            except Exception:
                 pass
                 
         if self.udp_socket:

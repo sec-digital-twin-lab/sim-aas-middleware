@@ -9,7 +9,6 @@ import traceback
 from pathlib import Path
 from typing import Optional, Tuple, List
 
-import docker
 from dotenv import load_dotenv
 from git import Repo
 

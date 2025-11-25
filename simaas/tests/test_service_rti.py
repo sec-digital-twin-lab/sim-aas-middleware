@@ -767,7 +767,7 @@ def test_rest_submit_batch_cancel_cascade(
         try:
             status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
 
-            from pprint import pprint
+            # from pprint import pprint
             # pprint(status.model_dump())
             assert (status is not None)
 
