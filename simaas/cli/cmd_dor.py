@@ -28,7 +28,7 @@ def _require_dor(args: dict) -> DORProxy:
                       default=determine_default_rest_address())
 
     db = NodeDBProxy(extract_address(args['address']))
-    if db.get_node().dor_service.lower() is 'none':
+    if db.get_node().dor_service.lower() == 'none':
         raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a DOR service. Aborting.")
 
