@@ -41,7 +41,7 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchS
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '104d0161562e7a3ef6d3fb5c75d63b7adc9fc285'
+REPOSITORY_COMMIT_ID = 'b9e729d94e5ac55ff04eefef56d199396cdc1ba0'
 PROC_ABC_PATH = "examples/simple/abc"
 PROC_PING_PATH = "examples/simple/ping"
 
@@ -142,19 +142,39 @@ def extra_keystores(github_credentials_available):
 def session_node(session_keystore):
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
-        rest_address = PortMaster.generate_rest_address(host=local_ip)
-        p2p_address = PortMaster.generate_p2p_address(host=local_ip)
 
-        _node = DefaultNode.create(
-            keystore=session_keystore, storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
+        # create node0
+        datastore0 = os.path.join(tempdir, 'session_node0')
+        rest_address0 = PortMaster.generate_rest_address(host=local_ip)
+        p2p_address0 = PortMaster.generate_p2p_address(host=local_ip)
+        _node0 = DefaultNode.create(
+            keystore=session_keystore, storage_path=datastore0,
+            p2p_address=p2p_address0, rest_address=rest_address0, boot_node_address=rest_address0,
             enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
             retain_job_history=False, strict_deployment=False
         )
 
-        yield _node
+        # create node1 to ensure there is a network (of 2 nodes). the rationale here is that some errors may only
+        # occur if there is a network of nodes. so even though we only return one node as 'session node' that node
+        # is part of a network.
+        keystore1 = Keystore.new('session_node1')
+        datastore1 = os.path.join(tempdir, 'session_node1')
+        rest_address1 = PortMaster.generate_rest_address(host=local_ip)
+        p2p_address1 = PortMaster.generate_p2p_address(host=local_ip)
+        _node1 = DefaultNode.create(
+            keystore=keystore1, storage_path=datastore1,
+            p2p_address=p2p_address1, rest_address=rest_address1, boot_node_address=rest_address0,
+            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.NONE,
+            retain_job_history=False, strict_deployment=False
+        )
 
-        _node.shutdown()
+        network = _node0.db.get_network()
+        assert len(network) == 2
+
+        yield _node0
+
+        _node0.shutdown()
+        _node1.shutdown()
 
 
 @pytest.fixture(scope="session")
