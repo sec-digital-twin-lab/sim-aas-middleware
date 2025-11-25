@@ -134,7 +134,7 @@ class CombinedTestServer:
         if self.udp_socket:
             try:
                 self.udp_socket.close()
-            except:
+            except Exception:
                 pass
         
         print("All test servers stopped")
