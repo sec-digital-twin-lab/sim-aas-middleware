@@ -183,7 +183,7 @@ class RTIServiceBase(RTIRESTService):
 
     def get_all_procs(self) -> List[Processor]:
         """
-        Retrieves a dict of all deployed processors by their id.
+        Retrieves a list of all deployed processors
         """
         with self._session_maker() as session:
             records = session.query(DBDeployedProcessor).all()

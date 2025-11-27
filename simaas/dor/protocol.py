@@ -262,8 +262,7 @@ class P2PPushDataObject(P2PProtocol):
         if self._node.dor is None:
             return PushResponse(
                 successful=False, meta=None, details={
-                    'reason': 'node has no DOR',
-                    'user_iid': request.user_iid,
+                    'reason': 'Target node does not support DOR capabilities',
                     'node_iid': self._node.identity.id
                 }
             ), None
