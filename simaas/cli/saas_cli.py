@@ -3,6 +3,7 @@ import os
 import sys
 import traceback
 
+from simaas.cli.cmd_image import PDIBuildLocal, PDIBuildGithub, PDIExport, PDIImport
 from simaas.cli.cmd_namespace import NamespaceList, NamespaceUpdate, NamespaceShow
 from simaas.helpers import determine_default_rest_address
 from simaas.meta import __version__
@@ -13,7 +14,6 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityRemove, IdentityShow
     CredentialsAddGithubCredentials, CredentialsTestSSHCredentials, CredentialsTestGithubCredentials
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import ProcBuilderLocal, ProcBuilderGithub
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
     RTIProcShow, RTIJobList, RTIJobCancel, RTIVolumeList, RTIVolumeCreateFSRef, RTIVolumeCreateEFSRef, RTIVolumeDelete
 from simaas.cli.cmd_service import Service
@@ -74,8 +74,14 @@ def main():
             ]),
             Service(),
             JobRunner(),
-            ProcBuilderLocal(),
-            ProcBuilderGithub(),
+            CLICommandGroup('image', 'manage processor docker images (PDIs)', commands=[
+                CLICommandGroup('build', 'build a PDI', commands=[
+                    PDIBuildLocal(),
+                    PDIBuildGithub()
+                ]),
+                PDIExport(),
+                PDIImport()
+            ]),
             CLICommandGroup('dor', 'interact with a Data Object Repository (DOR)', arguments=[
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")

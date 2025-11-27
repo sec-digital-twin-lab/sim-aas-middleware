@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from examples.cosim.room.processor import RoomProcessor
 from examples.cosim.thermostat.processor import ThermostatProcessor
+from simaas.cli.cmd_image import build_processor_image
 from simaas.core.processor import ProcessorBase, ProgressListener
 
 from examples.prime.factor_search.processor import ProcessorFactorSearch
@@ -22,7 +23,6 @@ from examples.prime.factorisation.processor import ProcessorFactorisation
 from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 
-from simaas.cli.cmd_proc_builder import build_processor_image
 from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging

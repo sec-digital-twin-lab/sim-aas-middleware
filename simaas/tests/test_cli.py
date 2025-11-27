@@ -14,6 +14,8 @@ import pytest
 from docker.errors import ImageNotFound
 from git import Repo
 
+from simaas.cli.cmd_image import clone_repository, build_processor_image, PDIBuildLocal, PDIBuildGithub, PDIExport, \
+    PDIImport, PDIMetaInformation
 from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
 from simaas.cli.cmd_service import Service
 
@@ -29,7 +31,6 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove
     IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image, ProcBuilderGithub, ProcBuilderLocal
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel, RTIVolumeCreateFSRef, RTIVolumeList, RTIVolumeDelete, RTIVolumeCreateEFSRef
 from simaas.cli.exceptions import CLIRuntimeError
@@ -1264,7 +1265,7 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
 
         # execute the job
         status = await execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
-        assert 'Target node does not support DOR capabilities' in status.errors[0].exception.reason
+        assert 'Target node does not support DOR capabilities' == status.errors[0].exception.details['reason']
 
         # shutdown the target node
         target_node.shutdown()
@@ -1296,7 +1297,10 @@ def test_find_open_port():
     assert(port == 5996)
 
 
-def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
+def test_helper_image_clone_build_export(docker_available, github_credentials_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
@@ -1308,6 +1312,10 @@ def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
     # get the current commit id
     repo = Repo(repo_path)
     commit_id = repo.head.commit.hexsha
+
+    # -----
+    # clone tests
+    # -----
 
     try:
         clone_repository(REPOSITORY_URL+"_doesnt_exist", os.path.join(temp_dir, 'repository_doesnt_exist'),
@@ -1329,25 +1337,14 @@ def test_cli_builder_clone_repo(temp_dir, github_credentials_available):
     except CLIRuntimeError:
         assert False
 
-
-def test_cli_builder_build_image(docker_available, github_credentials_available, temp_dir):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    # copy the repository
-    repo_path = os.path.join(temp_dir, 'repository')
-    if not os.path.isdir(repo_path):
-        shutil.copytree(os.environ['SIMAAS_REPO_PATH'], repo_path)
-
-    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+    # -----
+    # build tests
+    # -----
     image_name = 'test'
 
     try:
         build_processor_image(
-            os.path.join(repo_path+"_wrong", PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+            os.path.join(repo_path+"_wrong", PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name
         )
         assert False
     except CLIRuntimeError:
@@ -1356,7 +1353,7 @@ def test_cli_builder_build_image(docker_available, github_credentials_available,
     try:
         proc_path_wrong = "examples/adapters"
         build_processor_image(
-            os.path.join(repo_path, proc_path_wrong), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+            os.path.join(repo_path, proc_path_wrong), os.environ['SIMAAS_REPO_PATH'], image_name
         )
         assert False
     except CLIRuntimeError:
@@ -1364,19 +1361,14 @@ def test_cli_builder_build_image(docker_available, github_credentials_available,
 
     try:
         build_processor_image(
-            os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+            os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name
         )
     except CLIRuntimeError:
         assert False
 
-
-def test_cli_builder_export_image(docker_available, github_credentials_available, temp_dir):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
+    # -----
+    # export tests
+    # -----
     image_path = os.path.join(temp_dir, 'image.tar')
 
     try:
@@ -1385,19 +1377,6 @@ def test_cli_builder_export_image(docker_available, github_credentials_available
     except ImageNotFound:
         assert True
 
-    # copy the repository
-    repo_path = os.path.join(temp_dir, 'repository')
-    if not os.path.isdir(repo_path):
-        shutil.copytree(os.environ['SIMAAS_REPO_PATH'], repo_path)
-
-    # build image
-    credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
-    image_name = 'test'
-    build_processor_image(
-        os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
-    )
-
-    # export image
     try:
         docker_export_image(image_name, image_path, keep_image=True)
         assert os.path.isfile(image_path)
@@ -1407,63 +1386,9 @@ def test_cli_builder_export_image(docker_available, github_credentials_available
         assert False
 
 
-def test_cli_builder_cmd(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_image_build_local(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
-    address = session_node.rest.address()
-
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id': REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}"
-    }
-
-    # create keystore
-    password = 'password'
-    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
-
-    # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
-
-    try:
-        cmd = ProcBuilderGithub()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'pdi' in result
-        assert result['pdi'] is not None
-        pdi: DataObject = result['pdi']
-
-        obj = session_node.dor.get_meta(pdi.obj_id)
-        assert obj is not None
-        assert obj.data_type == 'ProcessorDockerImage'
-        assert obj.data_format == 'json'
-
-    except CLIRuntimeError:
-        assert False
-
-
-def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
-    if not docker_available:
-        pytest.skip("Docker is not available")
-
-    address = session_node.rest.address()
-    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
-
-    # create keystore
-    password = 'password'
-    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-
-    # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
 
     # build the first time
     try:
@@ -1471,27 +1396,21 @@ def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
 
         # define arguments
         args = {
-            'location': [proc_abc_path],
+            'proc_path': os.path.join(examples_path, 'simple', 'abc'),
+            'pdi_path': temp_dir,
             'force_build': True,
             'keep_image': True,
             'arch': 'linux/amd64',
-            'address': f"{address[0]}:{address[1]}",
-            'keystore-id': keystore.identity.id,
-            'keystore': temp_dir,
-            'password': password
         }
 
-        cmd = ProcBuilderLocal()
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
-        assert 'pdi' in result
-        assert result['pdi'] is not None
-        pdi: DataObject = result['pdi']
-
-        obj = session_node.dor.get_meta(pdi.obj_id)
-        assert obj is not None
-        assert obj.data_type == 'ProcessorDockerImage'
-        assert obj.data_format == 'tar'
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+        meta: PDIMetaInformation = result['pdi_meta']
+        assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
+        assert os.path.isfile(result['pdi_path'])
 
     except CLIRuntimeError:
         assert False
@@ -1502,27 +1421,21 @@ def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
 
         # define arguments
         args = {
-            'location': [proc_abc_path],
+            'proc_path': os.path.join(examples_path, 'simple', 'abc'),
+            'pdi_path': temp_dir,
             'force_build': False,
             'keep_image': True,
             'arch': 'linux/amd64',
-            'address': f"{address[0]}:{address[1]}",
-            'keystore-id': keystore.identity.id,
-            'keystore': temp_dir,
-            'password': password
         }
 
-        cmd = ProcBuilderLocal()
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
-        assert 'pdi' in result
-        assert result['pdi'] is not None
-        pdi: DataObject = result['pdi']
-
-        obj = session_node.dor.get_meta(pdi.obj_id)
-        assert obj is not None
-        assert obj.data_type == 'ProcessorDockerImage'
-        assert obj.data_format == 'tar'
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+        meta: PDIMetaInformation = result['pdi_meta']
+        assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
+        assert os.path.isfile(result['pdi_path'])
 
     except CLIRuntimeError:
         assert False
@@ -1535,46 +1448,162 @@ def test_cli_builder_cmd_twice(docker_available, session_node, temp_dir):
     assert dt2 < dt1*0.1
 
 
-def test_cli_builder_cmd_store_image(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_image_build_github(docker_available, github_credentials_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not github_credentials_available:
         pytest.skip("Github credentials not available")
 
-    address = session_node.rest.address()
+    try:
+        # define arguments
+        args = {
+            'repository': REPOSITORY_URL,
+            'commit_id': REPOSITORY_COMMIT_ID,
+            'proc_path': PROC_ABC_PATH,
+            'pdi_path': temp_dir,
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64',
+        }
 
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}",
-        'store_image': True
-    }
+        cmd = PDIBuildGithub()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+        meta: PDIMetaInformation = result['pdi_meta']
+        assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
+        assert os.path.isfile(result['pdi_path'])
+
+    except CLIRuntimeError:
+        assert False
+
+
+def test_cli_image_export_import(docker_available, session_node, temp_dir):
+    if not docker_available:
+        pytest.skip("Docker is not available")
 
     # create keystore
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
 
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilderGithub()
+        # define arguments
+        args = {
+            'proc_path': os.path.join(examples_path, 'simple', 'abc'),
+            'pdi_path': temp_dir,
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64',
+        }
+
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
-        assert 'pdi' in result
-        assert result['pdi'] is not None
-        pdi: DataObject = result['pdi']
 
-        obj = session_node.dor.get_meta(pdi.obj_id)
-        assert obj is not None
-        assert obj.data_type == 'ProcessorDockerImage'
-        assert obj.data_format == 'tar'
+    except CLIRuntimeError:
+        assert False
+
+    # -------
+    # import tests
+    # -------
+    address = session_node.rest.address()
+    pdi_path = result['pdi_path']
+
+    try:
+        args = {
+            'pdi_path': 'location-does-not-exist',
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    try:
+        invalid_pdi_path = os.path.join(temp_dir, 'invalid.pdi')
+        with open(invalid_pdi_path, 'wb') as f:
+            f.write(b'skldfjghskpduhgspkdjfhgskdjfhgslkdfjhgsdkl;fjghsdfkljghsdflgjhdfgdsfgsdfgdsd')
+
+        args = {
+            'pdi_path': invalid_pdi_path,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    try:
+        args = {
+            'pdi_path': pdi_path,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
+        result = cmd.execute(args)
+        assert 'pdi' in result
+        pdi0: DataObject = result['pdi']
+
+    except CLIRuntimeError:
+        assert False
+
+    # -------
+    # export tests
+    # -------
+
+    try:
+        args = {
+            'obj_id': 'does not exist',
+            'pdi_path': temp_dir,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIExport()
+        cmd.execute(args)
+        assert False
+
+    except CLIRuntimeError:
+        assert True
+
+    try:
+        args = {
+            'obj_id': pdi0.obj_id,
+            'pdi_path': temp_dir,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIExport()
+        result = cmd.execute(args)
+        pdi_meta: PDIMetaInformation = result['pdi_meta']
+        assert result['pdi_path'] == os.path.abspath(
+            os.path.join(temp_dir, f"{pdi_meta.proc_descriptor.name}_{pdi_meta.content_hash}.pdi")
+        )
 
     except CLIRuntimeError:
         assert False
@@ -1673,36 +1702,33 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert False
 
 
-def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
     address = session_node.rest.address()
-
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}",
-        'store_image': True
-    }
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
 
     # create keystore
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
 
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilderGithub()
+        args = {
+            'location': [proc_abc_path],
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64',
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -1841,14 +1867,28 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, github_credent
         assert False
 
 
-def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
     address = session_node.rest.address()
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
+
+    # create keystore
+    password = 'password'
+    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
+
+    # define arguments
+    args = {
+        'location': [proc_abc_path],
+        'force_build': False,
+        'keep_image': True,
+        'arch': 'linux/amd64',
+        'address': f"{address[0]}:{address[1]}",
+        'keystore-id': keystore.identity.id,
+        'keystore': temp_dir,
+        'password': password
+    }
 
     # add a volume
     try:
@@ -1862,27 +1902,11 @@ def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, github_crede
     except CLIRuntimeError:
         assert True
 
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}",
-        'store_image': True
-    }
-
-    # create keystore
-    password = 'password'
-    keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
-
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilderGithub()
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2024,38 +2048,34 @@ def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, github_crede
         assert False
 
 
-def test_cli_rti_job_submit_single_list_status_cancel(
-        docker_available, github_credentials_available, session_node, temp_dir
-):
+def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
     address = session_node.rest.address()
-
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}",
-        'store_image': True
-    }
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
 
     # create keystore
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
+
+    # define arguments
+    args = {
+        'location': [proc_abc_path],
+        'force_build': False,
+        'keep_image': True,
+        'arch': 'linux/amd64',
+        'address': f"{address[0]}:{address[1]}",
+        'keystore-id': keystore.identity.id,
+        'keystore': temp_dir,
+        'password': password
+    }
 
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilderGithub()
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2077,7 +2097,7 @@ def test_cli_rti_job_submit_single_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': obj.obj_id,
+            'proc_id': obj.obj_id,
         }
 
         cmd = RTIProcDeploy()
@@ -2096,7 +2116,7 @@ def test_cli_rti_job_submit_single_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': obj.obj_id,
+            'proc_id': obj.obj_id,
         }
 
         while True:
@@ -2228,7 +2248,7 @@ def test_cli_rti_job_submit_single_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': [obj.obj_id],
+            'proc_id': [obj.obj_id],
             'force': True
         }
 
@@ -2243,38 +2263,34 @@ def test_cli_rti_job_submit_single_list_status_cancel(
     time.sleep(1)
 
 
-def test_cli_rti_job_submit_batch_list_status_cancel(
-        docker_available, github_credentials_available, session_node, temp_dir, n=2
-):
+def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_node, temp_dir, n=2):
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
-
     address = session_node.rest.address()
-
-    # define arguments
-    args = {
-        'repository': REPOSITORY_URL,
-        'commit_id':  REPOSITORY_COMMIT_ID,
-        'proc_path': PROC_ABC_PATH,
-        'address': f"{address[0]}:{address[1]}",
-        'store_image': True
-    }
+    proc_abc_path = os.path.join(examples_path, 'simple', 'abc')
 
     # create keystore
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
-    args['keystore-id'] = keystore.identity.id
-    args['keystore'] = temp_dir
-    args['password'] = password
+
+    # define arguments
+    args = {
+        'location': [proc_abc_path],
+        'force_build': False,
+        'keep_image': True,
+        'arch': 'linux/amd64',
+        'address': f"{address[0]}:{address[1]}",
+        'keystore-id': keystore.identity.id,
+        'keystore': temp_dir,
+        'password': password
+    }
 
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
     try:
-        cmd = ProcBuilderGithub()
+        cmd = PDIBuildLocal()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2296,7 +2312,7 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': obj.obj_id,
+            'proc_id': obj.obj_id,
         }
 
         cmd = RTIProcDeploy()
@@ -2315,7 +2331,7 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': obj.obj_id,
+            'proc_id': obj.obj_id,
         }
 
         while True:
@@ -2453,7 +2469,7 @@ def test_cli_rti_job_submit_batch_list_status_cancel(
             'keystore-id': keystore.identity.id,
             'password': 'password',
             'address': f"{address[0]}:{address[1]}",
-            'proc-id': [obj.obj_id],
+            'proc_id': [obj.obj_id],
             'force': True
         }
 
@@ -2522,7 +2538,7 @@ def test_cli_service(temp_dir):
         assert False
 
 
-def test_cli_namespace_create_list_update(docker_available, github_credentials_available, session_node, temp_dir):
+def test_cli_namespace_create_list_update(docker_available, session_node, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 

@@ -5,6 +5,7 @@ import socket
 import sys
 from contextlib import contextmanager
 from importlib.util import spec_from_file_location, module_from_spec
+from pathlib import Path
 from threading import Lock
 
 import netifaces
@@ -319,3 +320,18 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
                             logger.warning(f"creating instance of {obj} failed: {e}")
 
     return result
+
+
+def is_valid_new_file(path: str) -> bool:
+    p = Path(path)
+    if not p.parent.exists() or not p.parent.is_dir():
+        return False
+
+    try:
+        with open(p, "xb"):
+            pass
+        p.unlink()
+        return True
+
+    except Exception:
+        return False

@@ -11,9 +11,9 @@ from typing import Optional, Tuple, Dict, List
 import boto3
 from pydantic import BaseModel
 
+from simaas.cli.cmd_image import clone_repository, build_processor_image
 from simaas.core.helpers import get_timestamp_now
 
-from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
