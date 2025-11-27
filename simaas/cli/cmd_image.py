@@ -31,7 +31,7 @@ logger = Logging.get('cli')
 class PDIMetaInformation(BaseModel):
     proc_descriptor: ProcessorDescriptor
     proc_path: str
-    remote_url: str
+    repository: str
     commit_id: Optional[str]
     content_hash: str
     is_git_repo: bool
@@ -92,22 +92,22 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
         rel_proc_path = str(proc_path.relative_to(git_root))
 
         # Remote URL
-        remote_url = None
+        repository = None
         if repo.remotes:
             try:
-                remote_url = repo.remotes.origin.url
+                repository = repo.remotes.origin.url
             except AttributeError:
                 if len(repo.remotes) > 0:
-                    remote_url = repo.remotes[0].url
+                    repository = repo.remotes[0].url
 
             # Convert SSH to HTTPS if needed
-            if remote_url and remote_url.startswith("git@") and ":" in remote_url:
-                host, path = remote_url.split("@")[1].split(":", 1)
-                remote_url = f"https://{host}/{path}"
+            if repository and repository.startswith("git@") and ":" in repository:
+                host, path = repository.split("@")[1].split(":", 1)
+                repository = f"https://{host}/{path}"
 
         # remove the .git (if applicable)
-        if remote_url.endswith('.git'):
-            remote_url = remote_url[:-4]
+        if repository.endswith('.git'):
+            repository = repository[:-4]
 
         # Commit ID and dirty state
         commit_id = repo.head.commit.hexsha
@@ -116,7 +116,7 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
         return PDIMetaInformation(
             proc_descriptor=descriptor,
             proc_path=rel_proc_path,
-            remote_url=remote_url,
+            repository=repository,
             commit_id=commit_id,
             content_hash=content_hash,
             is_git_repo=True,
@@ -131,12 +131,12 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
 
         # Not a Git repo → synthetic URL
         username = getpass.getuser()
-        remote_url = f"local://{username}@{rel_proc_path}"
+        repository = f"local://{username}@{rel_proc_path}"
 
         return PDIMetaInformation(
             proc_descriptor=descriptor,
             proc_path=rel_proc_path,
-            remote_url=remote_url,
+            repository=repository,
             commit_id=None,
             content_hash=content_hash,
             is_git_repo=True,
@@ -280,7 +280,7 @@ def build_pdi_file(args: dict) -> dict:
 
     # create the (temporary) GPP descriptor file
     gpp: GitProcessorPointer = GitProcessorPointer(
-        repository=pdi_meta.remote_url,
+        repository=pdi_meta.repository,
         commit_id=pdi_meta.commit_id if pdi_meta.commit_id else f"content_hash:{pdi_meta.content_hash}",
         proc_path=pdi_meta.proc_path,
         proc_descriptor=pdi_meta.proc_descriptor
@@ -381,7 +381,7 @@ class PDIBuildLocal(CLICommand):
             pdi_path = pdi_path.parent.resolve() / pdi_path.name
         else:
             raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
-        args['pdi_path'] = pdi_path
+        args['pdi_path'] = str(pdi_path)
 
         return build_pdi_file(args)
 
@@ -437,7 +437,7 @@ class PDIBuildGithub(CLICommand):
             pdi_path = pdi_path.parent.resolve() / pdi_path.name
         else:
             raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
-        args['pdi_path'] = pdi_path
+        args['pdi_path'] = str(pdi_path)
 
         prompt_if_missing(args, 'repository', prompt_for_string, message="Enter URL of the repository:")
         prompt_if_missing(args, 'commit_id', prompt_for_string, message="Enter the commit id:")
@@ -623,7 +623,7 @@ class PDIExport(CLICommand):
         meta: dict = {
             'proc_descriptor': meta.tags['proc_descriptor'],
             'proc_path': meta.tags['proc_path'],
-            'remote_url': meta.tags['remote_url'],
+            'repository': meta.tags['repository'],
             'commit_id': meta.tags['commit_id'],
             'content_hash': meta.tags['content_hash'],
             'is_git_repo': meta.tags['is_git_repo'],
