@@ -830,13 +830,13 @@ class JobRunner(CLICommand, ProgressListener):
 
             # determine if /scratch exists
             if os.path.exists('/scratch'):
-                self._logger.info(f"Using externally mounted scratch folder.")
+                self._logger.info("Using externally mounted scratch folder.")
             else:
                 try:
                     # if not create a symlink pointing at /tmp/scratch
                     os.makedirs('/tmp/scratch', exist_ok=True)
                     os.symlink('/tmp/scratch', '/scratch')
-                    self._logger.info(f"Using symlink to /tmp/scratch as scratch folder.")
+                    self._logger.info("Using symlink to /tmp/scratch as scratch folder.")
                 except Exception as e:
                     self._logger.warning(f"Creating symlink to /tmp/scratch as scratch folder failed: {e}")
 

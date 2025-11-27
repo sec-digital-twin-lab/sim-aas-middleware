@@ -32,7 +32,7 @@ def _require_rti(args: dict) -> RTIProxy:
                       default=determine_default_rest_address())
 
     db = NodeDBProxy(extract_address(args['address']))
-    if db.get_node().rti_service.lower() is 'none':
+    if db.get_node().rti_service.lower() == 'none':
         raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 
@@ -46,7 +46,7 @@ def _require_rti_with_type(args: dict) -> Tuple[RTIProxy, str]:
 
     db = NodeDBProxy(extract_address(args['address']))
     rti_type = db.get_node().rti_service.lower()
-    if rti_type is 'none':
+    if rti_type == 'none':
         raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 
@@ -122,8 +122,8 @@ class RTIVolumeCreateFSRef(CLICommand):
         super().__init__('fs', 'create filesystem volume reference', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
-            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
-            Argument('--path', dest='path', action='store', help=f"the path to the local filesystem location")
+            Argument('--name', dest='name', action='store', help="the name for this volume reference"),
+            Argument('--path', dest='path', action='store', help="the path to the local filesystem location")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -172,8 +172,8 @@ class RTIVolumeCreateEFSRef(CLICommand):
         super().__init__('efs', 'create AWS elastic filesystem volume reference', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
-            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
-            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help=f"the AWS EFS filesystem Id")
+            Argument('--name', dest='name', action='store', help="the name for this volume reference"),
+            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help="the AWS EFS filesystem Id")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:

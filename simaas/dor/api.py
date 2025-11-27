@@ -239,9 +239,9 @@ class DORProxy(EndpointProxy):
     def get_content(self, obj_id: str, with_authorisation_by: Keystore, download_path: str) -> None:
         self.get(f"{obj_id}/content", download_path=download_path, with_authorisation_by=with_authorisation_by)
 
-    def get_provenance(self, c_hash: str) -> DataObjectProvenance:
+    def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
         result = self.get(f"{c_hash}/provenance")
-        return DataObjectProvenance.model_validate(result)
+        return DataObjectProvenance.model_validate(result) if result else None
 
     def grant_access(self, obj_id: str, authority: Keystore, identity: Identity) -> DataObject:
         result = self.post(f"{obj_id}/access/{identity.id}", with_authorisation_by=authority)

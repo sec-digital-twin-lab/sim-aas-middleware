@@ -407,7 +407,7 @@ def test_cli_network_show(session_node, temp_dir):
         result = cmd.execute(args)
         assert result is not None
         assert 'network' in result
-        assert len(result['network']) == 1
+        assert len(result['network']) == 2  # session node is part of a 2-node network
 
     except CLIRuntimeError:
         assert False
