@@ -22,7 +22,7 @@ from simaas.cli.cmd_service import Service
 from examples.simple.abc.processor import write_value
 from simaas.core.helpers import get_timestamp_now
 
-from simaas.nodedb.protocol import P2PJoinNetwork
+from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork
 from simaas.nodedb.schemas import NamespaceInfo
 from simaas.rti.default import DBJobInfo, DefaultRTIService
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
@@ -1267,9 +1267,15 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
         status = await execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
         assert 'Target node does not support DOR capabilities' == status.errors[0].exception.details['reason']
 
+        # leave the network
+        protocol = P2PLeaveNetwork(target_node)
+        await protocol.perform(blocking=True)
+
         # shutdown the target node
-        target_node.shutdown()
-        time.sleep(1)
+        target_node.shutdown(leave_network=False)
+
+        network = session_node.db.get_network()
+        assert len(network) == 2
 
 
 @pytest.mark.asyncio
