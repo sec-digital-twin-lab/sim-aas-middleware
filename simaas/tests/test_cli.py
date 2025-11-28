@@ -1722,19 +1722,38 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, 
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
+    # build the PDI
+    pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
+
     try:
         args = {
-            'location': [proc_abc_path],
+            'proc_path': proc_abc_path,
+            'pdi_path': pdi_path,
             'force_build': False,
             'keep_image': True,
-            'arch': 'linux/amd64',
+            'arch': 'linux/amd64'
+        }
+
+        cmd = PDIBuildLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # import the PDI
+    try:
+        args = {
+            'pdi_path': pdi_path,
             'address': f"{address[0]}:{address[1]}",
             'keystore-id': keystore.identity.id,
             'keystore': temp_dir,
             'password': password
         }
 
-        cmd = PDIBuildLocal()
+        cmd = PDIImport()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -1884,18 +1903,6 @@ def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, session_node
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
-    # define arguments
-    args = {
-        'location': [proc_abc_path],
-        'force_build': False,
-        'keep_image': True,
-        'arch': 'linux/amd64',
-        'address': f"{address[0]}:{address[1]}",
-        'keystore-id': keystore.identity.id,
-        'keystore': temp_dir,
-        'password': password
-    }
-
     # add a volume
     try:
         cmd = RTIVolumeCreateFSRef()
@@ -1911,8 +1918,38 @@ def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, session_node
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
+    # build the PDI
+    pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
+
     try:
+        args = {
+            'proc_path': proc_abc_path,
+            'pdi_path': pdi_path,
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64'
+        }
+
         cmd = PDIBuildLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # import the PDI
+    try:
+        args = {
+            'pdi_path': pdi_path,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2065,23 +2102,41 @@ def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
-    # define arguments
-    args = {
-        'location': [proc_abc_path],
-        'force_build': False,
-        'keep_image': True,
-        'arch': 'linux/amd64',
-        'address': f"{address[0]}:{address[1]}",
-        'keystore-id': keystore.identity.id,
-        'keystore': temp_dir,
-        'password': password
-    }
-
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
+    # build the PDI
+    pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
+
     try:
+        args = {
+            'proc_path': proc_abc_path,
+            'pdi_path': pdi_path,
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64'
+        }
+
         cmd = PDIBuildLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # import the PDI
+    try:
+        args = {
+            'pdi_path': pdi_path,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2178,26 +2233,79 @@ def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_
     except CLIRuntimeError:
         assert False
 
-    # get a list of all jobs
-    try:
-        args = {
-            'keystore': temp_dir,
-            'keystore-id': keystore.identity.id,
-            'password': 'password',
-            'address': f"{address[0]}:{address[1]}"
-        }
+    def get_job_list() -> List[Job]:
+        # get a list of all jobs
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}"
+            }
 
-        cmd = RTIJobList()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'jobs' in result
-        assert result['jobs'] is not None
-        assert len(result['jobs']) == 1
+            cmd = RTIJobList()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'jobs' in result
+            assert result['jobs'] is not None
+            return result['jobs']
 
-    except CLIRuntimeError:
+        except CLIRuntimeError:
+            assert False
+
+    def get_job_status(job_id: str) -> JobStatus:
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}",
+                'job-id': job_id
+            }
+
+            cmd = RTIJobStatus()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'status' in result
+            assert result['status'] is not None
+            return result['status']
+
+        except CLIRuntimeError:
+            assert False
+
+    def wait_for_job_to_be_initialised(job_id: str, max_attempts: int = 20):
+        for i in range(max_attempts):
+            status: JobStatus = get_job_status(job_id)
+            if status.state != JobStatus.State.UNINITIALISED:
+                return
+            else:
+                time.sleep(0.5)
         assert False
 
-    time.sleep(2)
+    def wait_for_job_to_be_cancelled(job_id: str, max_attempts: int = 20):
+        for i in range(max_attempts):
+            status: JobStatus = get_job_status(job_id)
+            if status.state == JobStatus.State.CANCELLED:
+                return
+
+            elif status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.FAILED]:
+                assert False
+            time.sleep(0.5)
+        assert False
+
+    def wait_for_jobs_to_be_cleared(max_attempts: int = 20):
+        for i in range(max_attempts):
+            jobs = get_job_list()
+            if len(jobs) == 0:
+                return
+            time.sleep(0.5)
+        assert False
+
+    # we should have one job now
+    jobs = get_job_list()
+    assert(len(jobs)) == 1
+
+    wait_for_job_to_be_initialised(job.id)
 
     # cancel the job
     try:
@@ -2218,34 +2326,9 @@ def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_
     except CLIRuntimeError:
         assert False
 
-    while True:
-        # get the status of the job
-        try:
-            args = {
-                'keystore': temp_dir,
-                'keystore-id': keystore.identity.id,
-                'password': 'password',
-                'address': f"{address[0]}:{address[1]}",
-                'job-id': job.id
-            }
+    wait_for_job_to_be_cancelled(job.id)
 
-            cmd = RTIJobStatus()
-            result = cmd.execute(args)
-            assert result is not None
-            assert 'status' in result
-            assert result['status'] is not None
-
-            status: JobStatus = result['status']
-            if status.state == JobStatus.State.CANCELLED:
-                break
-
-            elif status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.FAILED]:
-                assert False
-
-        except CLIRuntimeError:
-            assert False
-
-    time.sleep(1)
+    wait_for_jobs_to_be_cleared()
 
     # undeploy the processor
     try:
@@ -2266,8 +2349,6 @@ def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_
     except CLIRuntimeError:
         assert False
 
-    time.sleep(1)
-
 
 def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_node, temp_dir, n=2):
     if not docker_available:
@@ -2280,23 +2361,41 @@ def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_n
     password = 'password'
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
-    # define arguments
-    args = {
-        'location': [proc_abc_path],
-        'force_build': False,
-        'keep_image': True,
-        'arch': 'linux/amd64',
-        'address': f"{address[0]}:{address[1]}",
-        'keystore-id': keystore.identity.id,
-        'keystore': temp_dir,
-        'password': password
-    }
-
     # ensure the node knows about this identity
     session_node.db.update_identity(keystore.identity)
 
+    # build the PDI
+    pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
+
     try:
+        args = {
+            'proc_path': proc_abc_path,
+            'pdi_path': pdi_path,
+            'force_build': False,
+            'keep_image': True,
+            'arch': 'linux/amd64'
+        }
+
         cmd = PDIBuildLocal()
+        result = cmd.execute(args)
+        assert result is not None
+        assert 'pdi_path' in result
+        assert 'pdi_meta' in result
+
+    except CLIRuntimeError:
+        assert False
+
+    # import the PDI
+    try:
+        args = {
+            'pdi_path': pdi_path,
+            'address': f"{address[0]}:{address[1]}",
+            'keystore-id': keystore.identity.id,
+            'keystore': temp_dir,
+            'password': password
+        }
+
+        cmd = PDIImport()
         result = cmd.execute(args)
         assert result is not None
         assert 'pdi' in result
@@ -2397,26 +2496,80 @@ def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_n
     except CLIRuntimeError:
         assert False
 
-    # get a list of all jobs
-    try:
-        args = {
-            'keystore': temp_dir,
-            'keystore-id': keystore.identity.id,
-            'password': 'password',
-            'address': f"{address[0]}:{address[1]}"
-        }
+    def get_job_list() -> List[Job]:
+        # get a list of all jobs
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}"
+            }
 
-        cmd = RTIJobList()
-        result = cmd.execute(args)
-        assert result is not None
-        assert 'jobs' in result
-        assert result['jobs'] is not None
-        assert len(result['jobs']) == n
+            cmd = RTIJobList()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'jobs' in result
+            assert result['jobs'] is not None
+            return result['jobs']
 
-    except CLIRuntimeError:
+        except CLIRuntimeError:
+            assert False
+
+    def get_job_status(job_id: str) -> JobStatus:
+        try:
+            args = {
+                'keystore': temp_dir,
+                'keystore-id': keystore.identity.id,
+                'password': 'password',
+                'address': f"{address[0]}:{address[1]}",
+                'job-id': job_id
+            }
+
+            cmd = RTIJobStatus()
+            result = cmd.execute(args)
+            assert result is not None
+            assert 'status' in result
+            assert result['status'] is not None
+            return result['status']
+
+        except CLIRuntimeError:
+            assert False
+
+    def wait_for_job_to_be_initialised(job_id: str, max_attempts: int = 20):
+        for i in range(max_attempts):
+            status: JobStatus = get_job_status(job_id)
+            if status.state != JobStatus.State.UNINITIALISED:
+                return
+            else:
+                time.sleep(0.5)
         assert False
 
-    time.sleep(2)
+    def wait_for_job_to_be_cancelled(job_id: str, max_attempts: int = 20):
+        for i in range(max_attempts):
+            status: JobStatus = get_job_status(job_id)
+            if status.state == JobStatus.State.CANCELLED:
+                return
+
+            elif status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.FAILED]:
+                assert False
+            time.sleep(0.5)
+        assert False
+
+    def wait_for_jobs_to_be_cleared(max_attempts: int = 20):
+        for i in range(max_attempts):
+            jobs = get_job_list()
+            if len(jobs) == 0:
+                return
+            time.sleep(0.5)
+        assert False
+
+    # we should have n jobs
+    assert len(get_job_list()) == n
+
+    # wait for all jobs to be initialised
+    for job in jobs:
+        wait_for_job_to_be_initialised(job.id)
 
     # cancel the jobs
     for job in jobs:
@@ -2438,35 +2591,12 @@ def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_n
         except CLIRuntimeError:
             assert False
 
+    # wait for all jobs to be cancelled
     for job in jobs:
-        while True:
-            # get the status of the job
-            try:
-                args = {
-                    'keystore': temp_dir,
-                    'keystore-id': keystore.identity.id,
-                    'password': 'password',
-                    'address': f"{address[0]}:{address[1]}",
-                    'job-id': job.id
-                }
+        wait_for_job_to_be_cancelled(job.id)
 
-                cmd = RTIJobStatus()
-                result = cmd.execute(args)
-                assert result is not None
-                assert 'status' in result
-                assert result['status'] is not None
-
-                status: JobStatus = result['status']
-                if status.state == JobStatus.State.CANCELLED:
-                    break
-
-                elif status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.FAILED]:
-                    assert False
-
-            except CLIRuntimeError:
-                assert False
-
-    time.sleep(1)
+    # wait for all jobs to be cleared
+    wait_for_jobs_to_be_cleared()
 
     # undeploy the processor
     try:
@@ -2486,8 +2616,6 @@ def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_n
 
     except CLIRuntimeError:
         assert False
-
-    time.sleep(1)
 
 
 def test_cli_service(temp_dir):
