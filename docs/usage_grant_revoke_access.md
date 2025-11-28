@@ -20,7 +20,7 @@ simaas-cli identity publish
 
 To revoke access:
 ```shell
-sim-aas-middleware % simaas-cli dor --address 192.168.50.126:5001 access revoke
+simaas-cli dor --address 192.168.50.126:5001 access revoke
 
 ? Select the keystore: test/test@email.com/ls1v4ohq59selxhvi9mleak9lgmq6xz2irhxzje46j7nfbee2o6ssac61kg19shq
 ? Enter password: ****
