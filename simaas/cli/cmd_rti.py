@@ -310,7 +310,8 @@ class RTIProcDeploy(CLICommand):
                     custodian[item.obj_id] = node
 
             except Exception:
-                logger.warning(f"Failed to send request to node {node.identity.id} at {node.rest_address}")
+                logger.warning(f"Failed to send request (dor.search) to "
+                               f"node {node.identity.id} at {node.rest_address}")
 
         # do we have any processors to choose from?
         if len(choices) == 0:

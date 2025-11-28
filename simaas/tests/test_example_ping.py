@@ -51,7 +51,7 @@ def test_tcp_connection(tcp_udp_server):
     assert result['error'] is None
 
     # Test connection to a non-existent port (should fail)
-    result = tcp_connect("localhost", 9999, 1)
+    result = tcp_connect("localhost", 19999, 1)
     assert not result['success']
     assert result['error'] is not None
     assert result['response_time_ms'] is None
