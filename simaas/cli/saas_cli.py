@@ -75,10 +75,8 @@ def main():
             Service(),
             JobRunner(),
             CLICommandGroup('image', 'manage processor docker images (PDIs)', commands=[
-                CLICommandGroup('build', 'build a PDI', commands=[
-                    PDIBuildLocal(),
-                    PDIBuildGithub()
-                ]),
+                PDIBuildLocal(),
+                PDIBuildGithub(),
                 PDIExport(),
                 PDIImport()
             ]),

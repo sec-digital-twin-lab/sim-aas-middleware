@@ -173,8 +173,8 @@ def session_node(session_keystore):
 
         yield _node0
 
-        _node0.shutdown()
-        _node1.shutdown()
+        _node0.shutdown(leave_network=False)
+        _node1.shutdown(leave_network=False)
 
 
 @pytest.fixture(scope="session")

@@ -297,7 +297,7 @@ def build_pdi_file(args: dict) -> dict:
     if args['force_build'] or not image_existed:
         print(f"Done building docker image (forced build: {'YES' if args['force_build'] else 'NO'}).")
     else:
-        print(f"Using existing building image.")
+        print(f"Using existing docker image.")
 
     # delete the temporary GPP file
     os.remove(gpp_path)
