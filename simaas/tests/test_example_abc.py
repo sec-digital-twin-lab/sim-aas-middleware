@@ -106,14 +106,10 @@ def test_proc_abc_with_secret(dummy_namespace):
 
 
 def test_abc_submit_list_get_job_no_secret(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
@@ -185,14 +181,10 @@ def test_abc_submit_list_get_job_no_secret(
 
 
 def test_abc_submit_list_get_job_with_secret(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore

@@ -9,6 +9,7 @@ import traceback
 from typing import Union, Optional, List
 
 import pytest
+
 from simaas.core.identity import Identity
 
 from simaas.helpers import docker_container_list
@@ -72,14 +73,9 @@ def test_rest_get_deployed(rti_proxy):
     assert (result is not None)
 
 
-def test_rest_deploy_undeploy(
-        docker_available, github_credentials_available, non_strict_node, strict_node, known_user
-):
+def test_rest_deploy_undeploy(docker_available, non_strict_node, strict_node, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     node0 = non_strict_node
     db0 = NodeDBProxy(node0.rest.address())
@@ -160,14 +156,9 @@ def test_rest_deploy_undeploy(
         assert ('Processor not deployed' in e.reason)
 
 
-def test_rest_deploy_with_volume(
-        docker_available, github_credentials_available, non_strict_node
-):
+def test_rest_deploy_with_volume(docker_available, non_strict_node):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     user: Keystore = non_strict_node.keystore
     dor = DORProxy(non_strict_node.rest.address())
@@ -198,14 +189,10 @@ def test_rest_deploy_with_volume(
 
 
 def test_rest_submit_list_get_job(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor, known_user
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
@@ -291,14 +278,9 @@ def test_rest_submit_list_get_job(
         assert (content['v'] == 2)
 
 
-def test_rest_submit_cancel_job(
-        docker_available, github_credentials_available, session_node, rti_proxy, deployed_abc_processor, known_user
-):
+def test_rest_submit_cancel_job(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
@@ -353,14 +335,9 @@ def test_rest_submit_cancel_job(
     assert (status.state == JobStatus.State.CANCELLED)
 
 
-def test_rest_submit_cancel_kill_job(
-        docker_available, github_credentials_available, session_node, rti_proxy, deployed_abc_processor, known_user
-):
+def test_rest_submit_cancel_kill_job(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
@@ -458,16 +435,12 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
 
 
 def test_provenance(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
     rti: DefaultRTIService = session_node.rti
 
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     owner = session_node.keystore
 
@@ -521,14 +494,10 @@ def test_provenance(
 
 
 def test_job_concurrency(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor, n: int = 50
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, n: int = 50
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     wd_path = test_context.testing_dir
     owner = session_node.keystore
@@ -626,14 +595,10 @@ def test_job_concurrency(
 
 
 def test_rest_submit_batch(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor, known_user
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
@@ -716,14 +681,10 @@ def test_rest_submit_batch(
 
 
 def test_rest_submit_batch_cancel_cascade(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_abc_processor, known_user
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
@@ -798,111 +759,71 @@ def test_rest_submit_batch_cancel_cascade(
 
 
 @pytest.fixture(scope="session")
-def deployed_room_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_room_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-room', 'examples/cosim/room'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-room', 'examples/cosim/room'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        while True:
+            proc = rti_proxy.get_proc(proc_id)
+            if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
-
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            while True:
-                proc = rti_proxy.get_proc(proc_id)
-                if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-                else:
-                    break
+            else:
+                break
 
 
 @pytest.fixture(scope="session")
-def deployed_thermostat_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        while True:
+            proc = rti_proxy.get_proc(proc_id)
+            if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
-
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            while True:
-                proc = rti_proxy.get_proc(proc_id)
-                if proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-                else:
-                    break
+            else:
+                break
 
 
 def get_cosim_tasks(
@@ -966,14 +887,10 @@ def get_cosim_tasks(
 
 
 def test_rest_submit_cosim_duplicate_names(
-        docker_available, github_credentials_available, session_node, rti_proxy, deployed_room_processor,
-        deployed_thermostat_processor
+        docker_available, session_node, rti_proxy, deployed_room_processor, deployed_thermostat_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     owner = session_node.keystore
 
@@ -991,14 +908,11 @@ def test_rest_submit_cosim_duplicate_names(
 
 
 def test_rest_submit_cosim(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_room_processor, deployed_thermostat_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
+        deployed_thermostat_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     owner = session_node.keystore
 
@@ -1062,16 +976,12 @@ def test_rest_submit_cosim(
     print(result1.state)
 
 
-
 def test_namespace_submit_fail(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_room_processor, deployed_thermostat_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
+        deployed_thermostat_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     owner = session_node.keystore
 
