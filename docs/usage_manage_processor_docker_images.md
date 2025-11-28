@@ -1,29 +1,34 @@
 # Manage Processor Docker Images (PDIs)
-The other core module of a Sim-aaS Node is the Runtime Infrastructure (RTI). It executes
-computational jobs using processors that have been deployed on the node. Depending on the
-processor, a job will use some input data (provided by a DOR in form of data objects
-or parameters in form of a json object) and produce some output data (as data objects that will
-be stored on a DOR). Exactly what input is consumed and what output is produced is specified
-by the descriptor of the processor. See "Processor" for more information on this topic.
+The Runtime Infrastructure (RTI) is a core module of a Sim-aaS Node that executes
+computational jobs using processors deployed on the node. A processor consumes input data
+(provided by a DOR as data objects or as parameters in a JSON object) and produces output
+data (as data objects stored in a DOR). The processor descriptor specifies exactly what
+input is consumed and what output is produced. See "Processor" for more information on
+this topic. Before a processor can be deployed, it must first be built and uploaded to
+the DOR in the form of a Processor Docker Image (PDI). 
 
 ## PDI Meta Information
-Before a processor can be deployed, it has to be built first and uploaded to the DOR in form
-of a Processor Docker Image (PDI). A PDI is a file that is essentially a docker image with 
-additional meta information:
+A PDI is a file that combines a Docker image with additional meta information:
 ```
-| Docker image of processor | Meta Information | PDI_META | Length | 
+┌─────────────────────────────────┬──────────────────┬──────────┬─────────┐
+│   Docker Image (TAR format)     │ Meta Information │ PDI_META │ Length  │
+│         (variable size)         │  (JSON, varies)  │ (8 bytes)│(4 bytes)│
+└─────────────────────────────────┴──────────────────┴──────────┴─────────┘
 ```
+The Docker image contains the processor and its dependencies, followed by meta information
+in JSON format. The marker `PDI_META` (8 bytes) identifies the end of the meta information,
+and the length field (4-byte big-endian integer) specifies the size of the meta information
+section.
 
-There are two CLI commands that can be used to build a PDI: `build-local` and `build-github` 
-depending on whether the source of the processor can be found locally or in a Github repository.
-The build commands combine the docker image with PDI meta information and store the resulting
-PDI as files which can then be imported into a DOR for further use. 
+Two CLI commands are available to build PDIs: `build-local` for processors available locally,
+and `build-github` for processors in a GitHub repository. Both commands combine the Docker
+image with PDI meta information and store the resulting PDI as a file that can be imported
+into a DOR for further use.
 
-PDI meta information includes information such as the repository URL, commit id, content hash 
-and image name. Note that the build command will try to establish if the processor is part 
-of a Git repository. If so, it will generate corresponding meta information. For example,
-the following two excerpts show meta information if the processor directory is part of a Git
-and not.
+PDI meta information includes the repository URL, commit ID, content hash, and image name.
+The build command automatically detects whether the processor is part of a Git repository
+and generates the corresponding meta information. The following two examples show the
+difference between processors that are part of a Git repository and those that are not.
 
 Example for PDI meta information for processor part of a Git repository:
 ```
@@ -47,15 +52,14 @@ Example for PDI meta information for processor not part of a Git repository:
 "image_name": "proc-abc:b3cb3eac16889a6b3881cb3086dc0ea652e1888e55c7ae18f3a1293caa681b6b"
 ```
 
-Note that commit ids are only provided if the processor is part of a Git repository. 
-The `is_dirty` flag also indicates `true` if there are changes from the commit that have
-not been committed yet. In general the content hash should be used to determine if two
-processors are exactly the same. For processors that are not part of a Git repository, the
-`is_dirty` flag is always `false` since there is no commit state.
+Note that commit IDs are only provided when the processor is part of a Git repository.
+The `is_dirty` flag is set to `true` when there are uncommitted changes in the repository.
+The content hash should be used to determine if two processors are identical, as it reflects
+the actual file contents regardless of Git state. For processors that are not part of a Git
+repository, the `is_dirty` flag is always `false` since there is no commit state to compare against.
 
 ## Building PDIs from Local Source
-The `build-local` command generates a PDI file from an existing local source. Example for 
-building a PDI from a local source:
+The `build-local` command generates a PDI file from a local processor directory. Example:
 ```shell
 simaas-cli image build-local --arch linux/amd64 simple/abc ~/Desktop
 
@@ -66,37 +70,28 @@ Using existing docker image.
 Done exporting docker image.
 Done building PDI.
 ```
-> Building a PDI requires installing a version of the Sim-aaS Middleware. The build command
-> needs to know where to find it. The location can be either specified by using the 
-> `--simaas-repo-path` attribute or by defining an environment variable `SIMAAS_REPO_PATH`
-> with the path to the Sim-aaS Middleware.
+> Building a PDI requires the Sim-aaS Middleware. Specify its location using the
+> `--simaas-repo-path` flag or by setting the `SIMAAS_REPO_PATH` environment variable.
+> For consistency, use the same version of the Sim-aaS Middleware that runs the build command.
 
-> In principle, the `SIMAAS_REPO_PATH` may point at another version of the Sim-aaS Middleware
-> that is used by the build command itself. However, for consistency it is advised that 
-> `SIMAAS_REPO_PATH` should point at the same version of the Sim-aaS Middleware used by the
-> build commands.
+The build command calculates a SHA256 hash of the processor contents (all files in the
+processor directory and its subdirectories). This content hash is used as part of the PDI name,
+following the convention `<processor name>:<content hash>`. In the example above, the PDI name
+is `proc-abc:b3cb...1b6b`.
 
-The build command will calculate a SHA256 hash of the content of the processor (i.e., the hash 
-over all the files in all subfolders in processor directory). This content hash will be used as
-part of the PDI name. The naming convention for PDIs is `<processor name>:<content hash>`. In 
-the example above, the PDI name is `proc-abc:b3cb...1b6b`. 
+The command requires two arguments: the processor path (`simple/abc`) and the PDI destination
+(`~/Desktop`). When a directory is provided as the destination, a filename is automatically
+generated using the convention `<processor name>_<content hash>.pdi`. In the example, the PDI
+file is created at `/Users/foobar/Desktop/proc-abc_b3cb...1b6b.pdi`. Alternatively, specify
+a complete file path to control the exact filename (e.g., `/Users/foobar/Desktop/my_custom_proc_image.pdi`).
 
-The build command expects a path to the location of the processor (`simple/abc`) and the 
-destination of the PDI file (`~/Desktop`). If a directory is provided as destination, a 
-generic filename will be used. The naming convention is `<processor name>_<content hash>.pdi`. 
-In the example, the PDI file will thus be generated at 
-`/Users/foobar/Desktop/proc-abc_b3cb...1b6b.pdi`. If a valid file path is specified as PDI
-destination, the resulting PDI be created at that exact location (e.g., 
-`/Users/foobar/Desktop/my_custom_proc_image.pdi`).
+The build command uses the local architecture by default (e.g., `darwin/arm64` on macOS).
+For cross-platform compatibility, specify `--arch linux/amd64` to build images that run
+on both macOS Docker RTIs and AWS Batch RTIs.
 
-Unless the architecture is explicitly specified (`--arch linux/amd64`), the local architecture 
-will be used by default (e.g., `darwin/arm64` on MacOS). For cross-platform compatibility it 
-can be useful to always build using `linux/amd64`. These images will be able to run on MacOS
-using Docker RTIs as well on AWS Batch using AWS RTI.
-
-Docker images are only generated if they don't already exist. The build command will skip 
-building the docker image (which can be time-consuming) if possible. It is possible to force
-building a new docker image by using the `--force-build` flag. 
+By default, the build command reuses existing Docker images to save time. If a Docker image
+with the same name already exists, the build step is skipped. Use the `--force-build` flag
+to rebuild the Docker image even if one already exists. 
 
 The `--verbose` flag can be used to display the PDI meta information:
 ```
@@ -169,11 +164,10 @@ Appending PDI meta information: {
 }
 ```
 
-## Building PDIs from a Github Source
-The `build-github` command works in the same way as the `build-local` command. It performs
-the same build operations to generate a PDI file. However, unlike `build-local`,
-`build-github` first clones a Github repository to obtain the processor code. Example for 
-building a PDI from a Github source:
+## Building PDIs from a GitHub Source
+The `build-github` command generates a PDI file from a GitHub repository. It clones the
+repository, checks out a specific commit, and then performs the same build operations as
+`build-local`. Example:
 ```shell
 simaas-cli image build-github --repository https://github.com/sec-digital-twin-lab/sim-aas-middleware --commit-id e81119ada241cd9047e3e6799c932a73f1f7bddc --proc-path examples/simple/abc --arch linux/amd64 --verbose /Users/foobar/Desktop
 
@@ -256,13 +250,13 @@ Appending PDI meta information: {
 Done building PDI.
 ```
 
-> If the repository is not public it is necessary to specify the necessary Github credentials 
-> `GITHUB_USERNAME` and `GITHUB_TOKEN` either in a `.env` file or directly as environment 
-> variables.
+> For private repositories, provide GitHub credentials via the `GITHUB_USERNAME` and
+> `GITHUB_TOKEN` environment variables (or in a `.env` file), or use the `--git-username`
+> and `--git-token` command-line flags.
 
 
 ## Importing PDIs to a DOR
-After a PDI has been built, it can be imported to a DOR. For example:
+Once a PDI has been built, import it to a DOR using the `import` command. Example:
 ```shell
 simaas-cli image import --address 192.168.50.119:5001 ~/Desktop/proc-abc_b74a64c3f7492578fcb46c2df533e446900bb555deb6de6651db43016ee835da.pdi
 
@@ -271,11 +265,14 @@ simaas-cli image import --address 192.168.50.119:5001 ~/Desktop/proc-abc_b74a64c
 Importing PDI at /Users/foobar/Desktop/proc-abc_b74a64c3f7492578fcb46c2df533e446900bb555deb6de6651db43016ee835da.pdi' done -> object id: 59b64d781cfcd74ce5f31af11d1442d9e5109e1cf8f52b9e139f592b188e1f54
 ```
 
-Once it is imported, the processor can be deployed and used to process jobs.
+The PDI is stored as a data object in the DOR with the type `ProcessorDockerImage`. The object
+ID returned by the import command can be used to reference this PDI when deploying the processor
+or exporting it later.
 
 
 ## Exporting PDIs from a DOR
-PDIs that are stored in the DOR can also be exported as PDI files. For example:
+Export PDIs stored in a DOR back to PDI files using the `export` command. The command
+prompts you to select from available PDIs if no object ID is specified. Example:
 ```shell
 simaas-cli image export ~/Desktop
 
@@ -287,3 +284,6 @@ lab/sim-aas-middleware commit_id=2046cb1743186fd5ad4ade118c62cb36d2324253 conten
 epo=1.0 is_dirty=1.0 image_name=proc-abc:b3cb3eac16889a6b3881cb3086dc0ea652e1888e55c7ae18f3a1293caa681b6b
 Exporting PDI (object id: 92e1f7b9596234712527607de0402bdb371df01c54340a1eb48c627700d69163) done -> path: /Users/foobar/Desktop/proc-abc_b3cb3eac16889a6b3881cb3086dc0ea652e1888e55c7ae18f3a1293caa681b6b.pdi.
 ```
+
+For non-interactive use, specify the object ID directly using the `--obj-id` flag to skip
+the selection prompt.
