@@ -8,7 +8,7 @@ import time
 import traceback
 from typing import Optional, Tuple, Dict, List
 
-from simaas.cli.cmd_proc_builder import clone_repository, build_processor_image
+from simaas.cli.cmd_image import clone_repository, build_processor_image
 from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import Logging

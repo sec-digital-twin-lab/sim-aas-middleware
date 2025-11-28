@@ -173,124 +173,81 @@ def test_cosim(dummy_namespace):
         print(result1.state)  # list of [temperature, command] pairs from thermostat
 
 @pytest.fixture(scope="session")
-def deployed_room_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_room_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-room', 'examples/cosim/room'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-room', 'examples/cosim/room'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 @pytest.fixture(scope="session")
-def deployed_thermostat_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 def test_cosim_submit_list_get_job(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
-        deployed_room_processor, deployed_thermostat_processor
+        docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
+        deployed_thermostat_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_room_id = deployed_room_processor.obj_id
     proc_thermostat_id = deployed_thermostat_processor.obj_id

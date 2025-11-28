@@ -167,12 +167,17 @@ class DefaultDORService(DORRESTService):
         # check every node in the network for provenance information
         result = []
         for node in self._node.db.get_network():
-            if node.dor_service and node.rest_address is not None:
-                dor = DORProxy(node.rest_address)
-                provenance = dor.get_provenance(c_hash)
-                if provenance is not None:
-                    # TODO: change once proxy has been refactored
-                    result.append(DataObjectProvenance.model_validate(provenance))
+            try:
+                if node.dor_service and node.rest_address is not None:
+                    dor = DORProxy(node.rest_address)
+                    provenance = dor.get_provenance(c_hash)
+                    if provenance is not None:
+                        # TODO: change once proxy has been refactored
+                        result.append(DataObjectProvenance.model_validate(provenance))
+            except Exception:
+                logger.warning(f"Failed to send request (dor.get_provenance) to "
+                               f"node {node.identity.id} at {node.rest_address}")
+
         return result
 
     def _generate_provenance_information(self, c_hash: str, recipe: DataObjectRecipe) -> DataObjectProvenance:

@@ -96,7 +96,7 @@ explicitly when using the CLI command.
 
 ## AWS RTI Service
 > Note: if you want to use processors with AWS, make sure you build the Processor Docker
-> Images for `linux/amd64`. See documentation [here](./usage_build_processor_docker_image.md) 
+> Images for `linux/amd64`. See documentation [here](./usage_manage_processor_docker_images.md)
 > to learn how to do that.
 
 If `aws` is chosen for the RTI service, jobs will be submitted to AWS Batch. In order for this

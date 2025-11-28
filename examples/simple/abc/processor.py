@@ -92,7 +92,7 @@ class ProcessorABC(ProcessorBase):
 
             # does the absolute delay exceed the threshold?
             if abs(seconds) > 999:
-                raise ProcessorRuntimeError(f"Sleep value exceeds threshold", {'seconds': seconds})
+                raise ProcessorRuntimeError("Sleep value exceeds threshold", {'seconds': seconds})
 
             if seconds >= 0:  # interruptible sleep
                 t_done = get_timestamp_now() + seconds * 1000

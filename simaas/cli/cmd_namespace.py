@@ -58,9 +58,9 @@ class NamespaceList(CLICommand):
 class NamespaceUpdate(CLICommand):
     def __init__(self):
         super().__init__('update', 'updates existing (or creates new) namespace', arguments=[
-            Argument('--name', dest='name', action='store', help=f"the name of the namespace"),
-            Argument('--vcpus', dest='vcpus', action='store', help=f"the number of vCPUs for this namespace (must be a positive integer"),
-            Argument('--memory', dest='memory', action='store', help=f"the amount of memory (in megabytes) for this namespace (must be a positive integer")
+            Argument('--name', dest='name', action='store', help="the name of the namespace"),
+            Argument('--vcpus', dest='vcpus', action='store', help="the number of vCPUs for this namespace (must be a positive integer"),
+            Argument('--memory', dest='memory', action='store', help="the amount of memory (in megabytes) for this namespace (must be a positive integer")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -118,12 +118,12 @@ class NamespaceUpdate(CLICommand):
         if len(namespace.reservations) > 0:
             print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
         else:
-            print(f"- No Active reservations")
+            print("- No Active reservations")
 
         if len(namespace.jobs) > 0:
             print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
         else:
-            print(f"- No Active Jobs")
+            print("- No Active Jobs")
 
         return {
             'namespace': namespace
@@ -164,12 +164,12 @@ class NamespaceShow(CLICommand):
             if len(namespace.reservations) > 0:
                 print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
             else:
-                print(f"- No Active reservations")
+                print("- No Active reservations")
 
             if len(namespace.jobs) > 0:
                 print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
             else:
-                print(f"- No Active Jobs")
+                print("- No Active Jobs")
 
         return {
             'namespace': namespace

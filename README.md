@@ -55,13 +55,13 @@ proceed to learn more about how to use the Sim-aaS Middleware or proceed to look
 some of the examples (see next section): 
 - [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
 - [Granting/Revoking Access to Data Objects](docs/usage_grant_revoke_access.md)
-- [Building a Processor Docker Image](docs/usage_build_processor_docker_image.md)
+- [Managing Processor Docker Images](docs/usage_manage_processor_docker_images.md)
 - [Deploying/Undeploying of Processors](docs/usage_deploy_undeploy_processors.md)
 - [Job Submission and Monitoring](docs/usage_job_submission_and_monitoring.md)
 
 ### Examples
 Learn more about building and running processors by looking at example implementations:
-- [Simple Example: Basic Input/Output Processor](examples/simple/README.md)
+- [Simple Example: Basic Input/Output Processor](examples/simple/abc/README.md)
 - [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
 - [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
 

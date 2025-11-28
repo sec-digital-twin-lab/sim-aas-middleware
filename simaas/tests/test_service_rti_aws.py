@@ -158,17 +158,12 @@ def test_rti_get_deployed(aws_available, aws_rti_proxy):
     assert (result is not None)
 
 
-def test_rest_deploy_undeploy(
-        docker_available, aws_available, github_credentials_available, non_strict_node, strict_node, known_user
-):
+def test_rest_deploy_undeploy(docker_available, aws_available, non_strict_node, strict_node, known_user):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     node0 = non_strict_node
     db0 = NodeDBProxy(node0.rest.address())
@@ -249,14 +244,9 @@ def test_rest_deploy_undeploy(
         assert ('Processor not deployed' in e.reason)
 
 
-def test_rest_deploy_with_volume(
-        docker_available, aws_available, github_credentials_available, non_strict_node
-):
+def test_rest_deploy_with_volume(docker_available, aws_available, non_strict_node):
     if not docker_available:
         pytest.skip("Docker is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     user: Keystore = non_strict_node.keystore
     dor = DORProxy(non_strict_node.rest.address())
@@ -289,80 +279,58 @@ def test_rest_deploy_with_volume(
 
 @pytest.fixture(scope="session")
 def aws_deployed_test_processor(
-        docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
+        docker_available, aws_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
 ) -> DataObject:
-    if not github_credentials_available or not aws_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+    # add test processor
+    meta = add_test_processor(
+        aws_dor_proxy, aws_session_node.keystore, 'proc-abc', 'examples/simple/abc', 'linux/amd64'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
 
     else:
-        # add test processor
-        meta = add_test_processor(
-            aws_dor_proxy, aws_session_node.keystore, 'proc-abc', 'examples/simple/abc', 'linux/amd64'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        aws_rti_proxy.deploy(proc_id, aws_session_node.keystore, volumes=[
+            ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                'efsFileSystemId': 'fs-0bf7f8e5a6ae69397',
+                'rootDirectory': '/',
+                'transitEncryption': 'ENABLED'
+            })
+        ])
 
-        if not docker_available:
-            yield meta
+        while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        else:
-            # deploy it
-            aws_rti_proxy.deploy(proc_id, aws_session_node.keystore, volumes=[
-                ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
-                    'efsFileSystemId': 'fs-0bf7f8e5a6ae69397',
-                    'rootDirectory': '/',
-                    'transitEncryption': 'ENABLED'
-                })
-            ])
+        assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-                logger.info(f"Waiting for processor to be ready: {proc}")
+        yield meta
+
+        # undeploy it
+        aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
+        try:
+            proc = aws_rti_proxy.get_proc(proc_id)
+            while proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
                 time.sleep(1)
-
-            assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
-            try:
                 proc = aws_rti_proxy.get_proc(proc_id)
-                while proc is not None and proc.state == Processor.State.BUSY_UNDEPLOY:
-                    time.sleep(1)
-                    proc = aws_rti_proxy.get_proc(proc_id)
-            except Exception as e:
-                print(e)
+        except Exception as e:
+            print(e)
 
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 def test_rest_submit_list_get_job(
-        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, known_user
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_test_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = aws_deployed_test_processor.obj_id
     wrong_user = known_user
@@ -606,8 +574,8 @@ def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node:
 
 
 def test_provenance(
-        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_rti_proxy, aws_dor_proxy, aws_deployed_test_processor, known_user
+        docker_available, aws_available, test_context, aws_session_node, aws_rti_proxy, aws_dor_proxy,
+        aws_deployed_test_processor, known_user
 ):
     rti: RTIServiceBase = aws_session_node.rti
 
@@ -616,9 +584,6 @@ def test_provenance(
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     owner = aws_session_node.keystore
 
@@ -674,17 +639,14 @@ def test_provenance(
 
 
 def test_job_concurrency(
-        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, n: int = 50
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_test_processor, n: int = 50
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     wd_path = test_context.testing_dir
     owner = aws_session_node.keystore
@@ -782,17 +744,14 @@ def test_job_concurrency(
 
 
 def test_rest_submit_batch(
-        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_test_processor, known_user
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_test_processor, known_user
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = aws_deployed_test_processor.obj_id
     wrong_user = known_user
@@ -961,126 +920,87 @@ def test_rest_submit_batch(
 
 @pytest.fixture(scope="session")
 def aws_deployed_room_processor(
-        docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
+        docker_available, aws_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
 ) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+    # add test processor
+    meta = add_test_processor(
+        aws_dor_proxy, aws_session_node.keystore, 'proc-room', 'examples/cosim/room'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            aws_dor_proxy, aws_session_node.keystore, 'proc-room', 'examples/cosim/room'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
+        while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
-            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
+        try:
+            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
-            try:
-                while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 @pytest.fixture(scope="session")
 def aws_deployed_thermostat_processor(
-        docker_available, aws_available, github_credentials_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
+        docker_available, aws_available, aws_rti_proxy, aws_dor_proxy, aws_session_node
 ) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+    # add test processor
+    meta = add_test_processor(
+        aws_dor_proxy, aws_session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
+
     else:
-        # add test processor
-        meta = add_test_processor(
-            aws_dor_proxy, aws_session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
+        while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            aws_rti_proxy.deploy(proc_id, aws_session_node.keystore)
-            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
+        try:
+            while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(aws_rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            aws_rti_proxy.undeploy(proc_id, aws_session_node.keystore)
-            try:
-                while (proc := aws_rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 def test_rest_submit_cosim(
-        docker_available, aws_available, github_credentials_available, test_context, aws_session_node,
-        aws_dor_proxy, aws_rti_proxy, aws_deployed_room_processor, aws_deployed_thermostat_processor
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_room_processor, aws_deployed_thermostat_processor
 ):
     if not docker_available:
         pytest.skip("Docker is not available")
 
     if not aws_available:
         pytest.skip("AWS is not available")
-
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id0 = aws_deployed_room_processor.obj_id
     proc_id1 = aws_deployed_thermostat_processor.obj_id

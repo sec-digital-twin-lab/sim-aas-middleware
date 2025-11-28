@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from examples.cosim.room.processor import RoomProcessor
 from examples.cosim.thermostat.processor import ThermostatProcessor
+from simaas.cli.cmd_image import build_processor_image
 from simaas.core.processor import ProcessorBase, ProgressListener
 
 from examples.prime.factor_search.processor import ProcessorFactorSearch
@@ -22,7 +23,6 @@ from examples.prime.factorisation.processor import ProcessorFactorisation
 from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 
-from simaas.cli.cmd_proc_builder import build_processor_image
 from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -41,7 +41,7 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchS
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = '104d0161562e7a3ef6d3fb5c75d63b7adc9fc285'
+REPOSITORY_COMMIT_ID = 'b9e729d94e5ac55ff04eefef56d199396cdc1ba0'
 PROC_ABC_PATH = "examples/simple/abc"
 PROC_PING_PATH = "examples/simple/ping"
 
@@ -142,19 +142,39 @@ def extra_keystores(github_credentials_available):
 def session_node(session_keystore):
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
-        rest_address = PortMaster.generate_rest_address(host=local_ip)
-        p2p_address = PortMaster.generate_p2p_address(host=local_ip)
 
-        _node = DefaultNode.create(
-            keystore=session_keystore, storage_path=tempdir,
-            p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
+        # create node0
+        datastore0 = os.path.join(tempdir, 'session_node0')
+        rest_address0 = PortMaster.generate_rest_address(host=local_ip)
+        p2p_address0 = PortMaster.generate_p2p_address(host=local_ip)
+        _node0 = DefaultNode.create(
+            keystore=session_keystore, storage_path=datastore0,
+            p2p_address=p2p_address0, rest_address=rest_address0, boot_node_address=rest_address0,
             enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
             retain_job_history=False, strict_deployment=False
         )
 
-        yield _node
+        # create node1 to ensure there is a network (of 2 nodes). the rationale here is that some errors may only
+        # occur if there is a network of nodes. so even though we only return one node as 'session node' that node
+        # is part of a network.
+        keystore1 = Keystore.new('session_node1')
+        datastore1 = os.path.join(tempdir, 'session_node1')
+        rest_address1 = PortMaster.generate_rest_address(host=local_ip)
+        p2p_address1 = PortMaster.generate_p2p_address(host=local_ip)
+        _node1 = DefaultNode.create(
+            keystore=keystore1, storage_path=datastore1,
+            p2p_address=p2p_address1, rest_address=rest_address1, boot_node_address=rest_address0,
+            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.NONE,
+            retain_job_history=False, strict_deployment=False
+        )
 
-        _node.shutdown()
+        network = _node0.db.get_network()
+        assert len(network) == 2
+
+        yield _node0
+
+        _node0.shutdown(leave_network=False)
+        _node1.shutdown(leave_network=False)
 
 
 @pytest.fixture(scope="session")
@@ -229,120 +249,78 @@ def add_test_processor(
 
 
 @pytest.fixture(scope="session")
-def deployed_abc_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node, session_data_dir
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_abc_processor(docker_available, rti_proxy, dor_proxy, session_node, session_data_dir) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH, platform='linux/amd64'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
 
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH, platform='linux/amd64'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore, volumes=[
+            ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                'path': session_data_dir
+            })
+        ])
 
-        if not docker_available:
-            yield meta
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore, volumes=[
-                ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
-                    'path': session_data_dir
-                })
-            ])
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 @pytest.fixture(scope="session")
-def deployed_ping_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
+def deployed_ping_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    # add test processor
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, proc_name='proc-ping', proc_path=PROC_PING_PATH, platform='linux/amd64'
+    )
+    proc_id = meta.obj_id
+
+    if not docker_available:
+        yield meta
 
     else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, proc_name='proc-ping', proc_path=PROC_PING_PATH, platform='linux/amd64'
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+            logger.info(f"Waiting for processor to be ready: {proc}")
+            time.sleep(1)
 
-        if not docker_available:
-            yield meta
+        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
+        logger.info(f"Processor deployed: {proc}")
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
+        yield meta
+
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        try:
+            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
                 logger.info(f"Waiting for processor to be ready: {proc}")
                 time.sleep(1)
+        except Exception as e:
+            print(e)
 
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
+        logger.info(f"Processor undeployed: {proc}")
 
 
 class TestContext:
