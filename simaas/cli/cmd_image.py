@@ -139,7 +139,7 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
             repository=repository,
             commit_id=None,
             content_hash=content_hash,
-            is_git_repo=True,
+            is_git_repo=False,
             is_dirty=False,
             image_name=f"{descriptor.name}:{content_hash}"
         )
