@@ -61,7 +61,7 @@ some of the examples (see next section):
 
 ### Examples
 Learn more about building and running processors by looking at example implementations:
-- [Simple Example: Basic Input/Output Processor](examples/simple/README.md)
+- [Simple Example: Basic Input/Output Processor](examples/simple/abc/README.md)
 - [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
 - [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
 
