@@ -297,14 +297,14 @@ def build_pdi_file(args: dict) -> dict:
     if args['force_build'] or not image_existed:
         print(f"Done building docker image (forced build: {'YES' if args['force_build'] else 'NO'}).")
     else:
-        print(f"Using existing docker image.")
+        print("Using existing docker image.")
 
     # delete the temporary GPP file
     os.remove(gpp_path)
 
     # export the docker image
     docker_export_image(image_name, args['pdi_path'], keep_image=image_existed or args['keep_docker_image'])
-    print(f"Done exporting docker image.")
+    print("Done exporting docker image.")
 
     # append meta information
     metadata: dict = pdi_meta.model_dump()
@@ -317,7 +317,7 @@ def build_pdi_file(args: dict) -> dict:
         f.write(MARKER)
         f.write(length)
 
-    print(f"Done building PDI.")
+    print("Done building PDI.")
 
     return {
         'pdi_path': args['pdi_path'],
@@ -366,7 +366,7 @@ class PDIBuildLocal(CLICommand):
         if isinstance(args['proc_path'], list) and args['proc_path']:
             args['proc_path'] = args['proc_path'][0]
         if not args['proc_path']:
-            raise CLIRuntimeError(f"Processor path missing")
+            raise CLIRuntimeError("Processor path missing")
         elif not os.path.isdir(args['proc_path']):
             raise CLIRuntimeError(f"Processor path not found or not a directory: {args['proc_path']}")
 
@@ -519,7 +519,7 @@ class PDIImport(CLICommand):
             f.seek(-(LEN_SIZE + MARKER_LEN), 2)
             marker = f.read(MARKER_LEN)
             if marker != MARKER:
-                raise CLIRuntimeError(f"Invalid PDI file (no marker found)")
+                raise CLIRuntimeError("Invalid PDI file (no marker found)")
 
             # read metadata
             f.seek(-(LEN_SIZE + MARKER_LEN + length), 2)
@@ -566,7 +566,7 @@ class PDIExport(CLICommand):
             Argument('--address', dest='address', action='store',
                      help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')"),
             Argument('--obj-id', dest='obj_id', action='store',
-                     help=f"the data object it of the PDI"),
+                     help="the data object it of the PDI"),
             Argument('pdi_path', metavar='pdi_path', type=str, nargs=1,
                      help="the destination of the PDI file")
         ])
