@@ -12,8 +12,9 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode, DORType, RTIType
+from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
+from plugins.dor_default import DefaultDORService
 from simaas.nodedb.exceptions import NodeDBException
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 
@@ -24,7 +25,7 @@ logger = Logging.get(__name__)
 @pytest.fixture(scope="module")
 def module_node(test_context, extra_keystores) -> Node:
     _node: Node = test_context.get_node(
-        extra_keystores[0], enable_rest=True, dor_type=DORType.BASIC, rti_type=DORType.NONE
+        extra_keystores[0], enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None
     )
 
     yield _node
@@ -128,7 +129,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         # manually create a node on a certain address and make it known to the node
         node0 = DefaultNode(
             keystores[0], os.path.join(tempdir, 'node0'), enable_db=True,
-            dor_type=DORType.NONE, rti_type=RTIType.NONE)
+            dor_plugin_class=None, rti_plugin_class=None)
         node0.startup(p2p_address, rest_address=None)
         time.sleep(1)
 
@@ -164,7 +165,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         # manually create another node, using the same address but a different keystore
         node1 = DefaultNode(
             keystores[1], os.path.join(tempdir, 'node1'), enable_db=True,
-            dor_type=DORType.NONE, rti_type=RTIType.NONE
+            dor_plugin_class=None, rti_plugin_class=None
         )
         node1.startup(p2p_address, rest_address=None)
         time.sleep(1)
@@ -208,7 +209,7 @@ def test_join_leave_protocol():
             keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
             node = DefaultNode(
                 keystore, os.path.join(tempdir, f'node_{i}'), enable_db=True,
-                dor_type=DORType.NONE, rti_type=RTIType.NONE
+                dor_plugin_class=None, rti_plugin_class=None
             )
             p2p_address = PortMaster.generate_p2p_address()
             rest_address = PortMaster.generate_rest_address()
@@ -277,7 +278,7 @@ def test_update_identity():
             keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
             node = DefaultNode(
                 keystore, os.path.join(tempdir, f'node_{i}'), enable_db=True,
-                dor_type=DORType.NONE, rti_type=RTIType.NONE
+                dor_plugin_class=None, rti_plugin_class=None
             )
             p2p_address = PortMaster.generate_p2p_address()
             rest_address = PortMaster.generate_rest_address()
@@ -345,7 +346,7 @@ def test_namespace_update(test_context):
     # create nodes
     keystores: List[Keystore] = [Keystore.new(f"keystore_{i}", "email") for i in range(3)]
     nodes: List[Node] = [
-        test_context.get_node(keystore, enable_rest=True, dor_type=DORType.BASIC, rti_type=DORType.NONE)
+        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
         for keystore in keystores
     ]
 
@@ -383,7 +384,7 @@ def test_namespace_reserve_cancel(test_context):
     # create nodes
     keystores: List[Keystore] = [Keystore.new(f"keystore_{i}", "email") for i in range(3)]
     nodes: List[Node] = [
-        test_context.get_node(keystore, enable_rest=True, dor_type=DORType.BASIC, rti_type=DORType.NONE)
+        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
         for keystore in keystores
     ]
 

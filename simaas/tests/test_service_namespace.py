@@ -15,7 +15,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.namespace.default import DefaultNamespace
 from simaas.node.base import Node
-from simaas.node.default import DORType, RTIType
+from plugins.dor_default import DefaultDORService
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -36,7 +36,7 @@ def random_content():
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
     keystore: Keystore = Keystore.new('p2p_server')
-    _node: Node = test_context.get_node(keystore, enable_rest=True, dor_type=DORType.BASIC, rti_type=RTIType.NONE)
+    _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
 
     yield _node
 

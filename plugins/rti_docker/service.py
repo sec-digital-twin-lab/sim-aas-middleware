@@ -55,6 +55,10 @@ class DefaultRTIService(RTIServiceBase):
                 logger.warning(f"Docker RTI scratch path at '{self._scratch_volume}' not found -> skipping")
                 self._scratch_volume = None
 
+    @classmethod
+    def plugin_name(cls) -> str:
+        return 'docker'
+
     def type(self) -> str:
         return 'docker'
 

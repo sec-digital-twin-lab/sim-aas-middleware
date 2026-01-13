@@ -32,11 +32,16 @@ from simaas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObj
     DataObjectRecipe, DORStatistics
 from simaas.helpers import determine_local_ip, PortMaster, docker_export_image
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode, DORType, RTIType
+from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy, RTIInterface
-from simaas.rti.aws import get_default_aws_config
 from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus, ProcessorVolume
+
+# Import plugin classes
+from plugins.dor_default import DefaultDORService
+from plugins.rti_docker import DefaultRTIService
+from plugins.rti_aws import AWSRTIService
+from plugins.rti_aws.service import get_default_aws_config
 
 load_dotenv()
 
@@ -150,7 +155,7 @@ def session_node(session_keystore):
         _node0 = DefaultNode.create(
             keystore=session_keystore, storage_path=datastore0,
             p2p_address=p2p_address0, rest_address=rest_address0, boot_node_address=rest_address0,
-            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.DOCKER,
+            enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=DefaultRTIService,
             retain_job_history=False, strict_deployment=False
         )
 
@@ -164,7 +169,7 @@ def session_node(session_keystore):
         _node1 = DefaultNode.create(
             keystore=keystore1, storage_path=datastore1,
             p2p_address=p2p_address1, rest_address=rest_address1, boot_node_address=rest_address0,
-            enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.NONE,
+            enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None,
             retain_job_history=False, strict_deployment=False
         )
 
@@ -380,8 +385,9 @@ class TestContext:
             f.write(content)
         return path
 
-    def get_node(self, keystore: Keystore, enable_rest: bool = False, dor_type: DORType = DORType.BASIC,
-                 rti_type: RTIType = RTIType.DOCKER, retain_job_history: bool = True, strict_deployment: bool = False,
+    def get_node(self, keystore: Keystore, enable_rest: bool = False,
+                 dor_plugin_class: type = DefaultDORService, rti_plugin_class: type = DefaultRTIService,
+                 retain_job_history: bool = True, strict_deployment: bool = False,
                  wd_path: str = None) -> Node:
         name = keystore.identity.id
         if name in self.nodes:
@@ -394,9 +400,10 @@ class TestContext:
         os.makedirs(storage_path, exist_ok=True)
 
         # create node and startup services
-        node = DefaultNode(keystore, storage_path, enable_db=True, dor_type=dor_type, rti_type=rti_type,
-                           retain_job_history=retain_job_history if rti_type != RTIType.NONE else None,
-                           strict_deployment=strict_deployment if rti_type != RTIType.NONE else None)
+        node = DefaultNode(keystore, storage_path, enable_db=True,
+                           dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
+                           retain_job_history=retain_job_history if rti_plugin_class is not None else None,
+                           strict_deployment=strict_deployment if rti_plugin_class is not None else None)
         node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
         time.sleep(2)
 

@@ -141,8 +141,12 @@ class DefaultDORService(DORRESTService):
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH), exist_ok=True)
         os.makedirs(os.path.join(self._node.datastore, DOR_INFIX_TEMP_PATH), exist_ok=True)
 
+    @classmethod
+    def plugin_name(cls) -> str:
+        return 'default'
+
     def type(self) -> str:
-        return 'basic'
+        return 'default'
 
     def obj_content_path(self, c_hash: str) -> str:
         return os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH, c_hash)

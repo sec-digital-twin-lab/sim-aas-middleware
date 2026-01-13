@@ -15,8 +15,10 @@ from examples.cosim.room.processor import Result as RResult
 from examples.cosim.thermostat.processor import Result as TResult
 from simaas.core.helpers import generate_random_string
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
-from simaas.node.default import DefaultNode, DORType, RTIType
+from simaas.node.default import DefaultNode
 from simaas.core.keystore import Keystore
+from plugins.dor_default import DefaultDORService
+from plugins.rti_aws import AWSRTIService
 from simaas.core.logging import Logging
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
@@ -82,7 +84,7 @@ def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
             _node = DefaultNode.create(
                 keystore=session_keystore, storage_path=tempdir,
                 p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-                enable_db=True, dor_type=DORType.BASIC, rti_type=RTIType.AWS,
+                enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=AWSRTIService,
                 retain_job_history=True, strict_deployment=False
             )
 
@@ -122,7 +124,7 @@ def non_strict_node(aws_available, test_context, github_credentials_available, s
                     REPOSITORY_URL,
                     GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
                 )
-            _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=False)
+            _node = test_context.get_node(keystore, rti_plugin_class=AWSRTIService, enable_rest=True, strict_deployment=False)
             yield _node
 
 
@@ -139,7 +141,7 @@ def strict_node(aws_available, test_context, extra_keystores, github_credentials
                     REPOSITORY_URL,
                     GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
                 )
-            _node = test_context.get_node(keystore, rti_type=RTIType.AWS, enable_rest=True, strict_deployment=True)
+            _node = test_context.get_node(keystore, rti_plugin_class=AWSRTIService, enable_rest=True, strict_deployment=True)
             yield _node
 
 
