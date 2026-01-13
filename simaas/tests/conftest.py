@@ -40,7 +40,6 @@ from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchS
 # Import plugin classes
 from plugins.dor_default import DefaultDORService
 from plugins.rti_docker import DefaultRTIService
-from plugins.rti_aws import AWSRTIService
 from plugins.rti_aws.service import get_default_aws_config
 
 load_dotenv()
