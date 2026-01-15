@@ -1197,3 +1197,166 @@ names should use underscores (e.g., `dor_postgres`, `rti_kubernetes`).
 - **Regulatory Compliance**: GDPR, HIPAA, and other regulatory framework support
 
 This comprehensive developer documentation provides the foundation for understanding, extending, and contributing to the Sim-aaS Middleware platform. The architecture's modular design and well-defined interfaces enable both current functionality and future enhancements while maintaining security, scalability, and usability principles.
+
+## 5. Testing
+
+### 5.1 Environment Setup
+
+#### Virtual Environment
+Tests must be run using the project's virtual environment, not system Python:
+
+```bash
+# Create virtual environment (if not exists)
+python3.11 -m venv .venv
+
+# Install core dependencies (includes plugin dependencies like boto3 for AWS)
+.venv/bin/pip install -r requirements.txt
+
+# Install the package in editable mode
+.venv/bin/pip install -e .
+```
+
+#### Built-in Plugins
+The repository includes three built-in plugins in the `plugins/` directory:
+
+| Plugin | Purpose | Additional Dependencies |
+|--------|---------|------------------------|
+| `dor_default` | Default DOR using SQLite | None (uses core deps) |
+| `rti_docker` | Local Docker execution | None (uses core deps) |
+| `rti_aws` | AWS Batch execution | `boto3` (included in requirements.txt) |
+
+These plugins are automatically discovered at runtime. No separate installation is needed.
+
+#### Environment Variables
+Create a `.env` file in the project root. The test framework automatically loads it via `python-dotenv`.
+
+### 5.2 Environment Variables Reference
+
+#### Required for All Tests (Docker RTI)
+
+| Variable | Description | How to Obtain |
+|----------|-------------|---------------|
+| `SIMAAS_REPO_PATH` | Absolute path to the sim-aas-middleware repository | Set to your local clone path (e.g., `/home/user/sim-aas-middleware`) |
+
+#### Optional for Docker RTI
+
+| Variable | Description | How to Obtain |
+|----------|-------------|---------------|
+| `SIMAAS_RTI_DOCKER_SCRATCH_PATH` | Path for Docker scratch volumes | Any writable directory path |
+
+#### Required for AWS RTI Tests
+
+See [Running a Sim-aaS Node - AWS RTI Service](docs/usage_run_simaas_node.md#aws-rti-service) for detailed AWS setup instructions.
+
+| Variable | Description | How to Obtain |
+|----------|-------------|---------------|
+| `SIMAAS_AWS_REGION` | AWS region (e.g., `ap-southeast-1`) | Choose based on your AWS Batch setup |
+| `SIMAAS_AWS_ACCESS_KEY_ID` | AWS access key ID | Create via AWS IAM Console |
+| `SIMAAS_AWS_SECRET_ACCESS_KEY` | AWS secret access key | Create via AWS IAM Console |
+| `SIMAAS_AWS_ROLE_ARN` | IAM role ARN for Batch execution | Create IAM role with required permissions (see docs) |
+| `SIMAAS_AWS_JOB_QUEUE` | AWS Batch job queue name | Create via AWS Batch Console |
+
+#### AWS RTI Testing Workarounds (for local development)
+
+These variables enable SSH tunneling to test AWS RTI from a local machine. See [Important Notes on Testing with AWS RTI Service](docs/usage_run_simaas_node.md#important-notes-on-testing-with-aws-rti-service).
+
+| Variable | Description | How to Obtain |
+|----------|-------------|---------------|
+| `SSH_TUNNEL_HOST` | EC2 instance public DNS | AWS EC2 Console (Public IPv4 DNS) |
+| `SSH_TUNNEL_USER` | SSH username for EC2 | Typically `ubuntu` or `ec2-user` |
+| `SSH_TUNNEL_KEY_PATH` | Path to SSH private key | Your `.pem` key file from EC2 |
+| `SIMAAS_CUSTODIAN_HOST` | EC2 instance private DNS | AWS EC2 Console (Private IPv4 DNS) |
+
+#### GitHub Credentials (for building images from GitHub)
+
+| Variable | Description | How to Obtain |
+|----------|-------------|---------------|
+| `GITHUB_USERNAME` | GitHub username | Your GitHub account username |
+| `GITHUB_TOKEN` | GitHub Personal Access Token | GitHub Settings → Developer settings → Personal access tokens |
+
+#### Example `.env` File Structure
+
+```bash
+# Required for Docker RTI tests
+SIMAAS_REPO_PATH=/path/to/sim-aas-middleware
+
+# GitHub credentials (optional, for GitHub-based image builds)
+GITHUB_USERNAME=your-username
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+
+# AWS RTI (optional, only needed for AWS tests)
+SIMAAS_AWS_REGION=ap-southeast-1
+SIMAAS_AWS_ACCESS_KEY_ID=AKIA...
+SIMAAS_AWS_SECRET_ACCESS_KEY=...
+SIMAAS_AWS_ROLE_ARN=arn:aws:iam::123456789:role/simaas-role
+SIMAAS_AWS_JOB_QUEUE=simaas-queue
+
+# AWS SSH Tunneling (optional, for local AWS RTI testing)
+SSH_TUNNEL_HOST=ec2-xx-xx-xx-xx.region.compute.amazonaws.com
+SSH_TUNNEL_USER=ubuntu
+SSH_TUNNEL_KEY_PATH=/path/to/key.pem
+SIMAAS_CUSTODIAN_HOST=ip-xx-xx-xx-xx.region.compute.internal
+```
+
+### 5.3 Running Tests
+
+#### Prerequisites
+- Docker must be running (required for RTI tests)
+- Virtual environment activated or use `.venv/bin/python` prefix
+
+#### Running All Tests
+
+```bash
+# Run all tests (approximately 15-20 minutes)
+.venv/bin/python -m pytest simaas/tests/ -v
+
+# Run with coverage
+.venv/bin/python -m coverage run -m pytest simaas/tests/ -v
+.venv/bin/python -m coverage report
+```
+
+#### Running Individual Test Files
+
+```bash
+# Run a specific test file
+.venv/bin/python -m pytest simaas/tests/test_core.py -v
+
+# Run a specific test function
+.venv/bin/python -m pytest simaas/tests/test_core.py::test_ec_signing -v
+```
+
+### 5.4 Test Categories
+
+#### Fast Tests (~10-60 seconds each)
+| Test File | Tests | Description |
+|-----------|-------|-------------|
+| `test_core.py` | 14 | Core functionality (crypto, keystore, logging) |
+| `test_service_rest.py` | 7 | REST API operations |
+| `test_service_namespace.py` | 5 | Namespace service |
+| `test_service_p2p.py` | 7 | P2P networking |
+| `test_service_dor.py` | 16 | Data Object Repository |
+| `test_example_abc.py` | 4 | ABC processor example |
+| `test_example_ping.py` | 5 | Ping processor example |
+| `test_example_primes.py` | 5 | Prime factorization example |
+| `test_example_cosim.py` | 2 | Co-simulation example |
+
+#### Medium Tests (~1-2 minutes each)
+| Test File | Tests | Description |
+|-----------|-------|-------------|
+| `test_service_nodedb.py` | 13 | Node database operations |
+
+#### Longer Tests (~4-7 minutes each)
+| Test File | Tests | Description |
+|-----------|-------|-------------|
+| `test_service_rti.py` | 13 | RTI service (Docker) |
+| `test_cli.py` | 32 | CLI commands |
+| `test_service_rti_aws.py` | 8 | RTI service (AWS Batch) |
+
+**Total: 108 tests across 13 test files**
+
+### 5.5 Notes
+
+- **Docker Requirement**: RTI-related tests require Docker to be running
+- **AWS Tests**: Will run with mock/fallback behavior if AWS credentials are not configured; full execution requires valid AWS setup
+- **GitHub Credentials**: Required for tests that build processor images from GitHub repositories
+- **IDE Support**: Tests also work in PyCharm and other IDEs with pytest support

@@ -12,6 +12,7 @@ of federations of computational models.
 Clone the repository:
 ```shell
 git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware
+cd sim-aas-middleware
 ```
 
 Create and activate the virtual environment:
@@ -20,13 +21,22 @@ python3.12 -m venv venv
 source venv/bin/activate
 ```
 
-Install the Sim-aaS Middleware:
+Install dependencies and the Sim-aaS Middleware:
 ```shell
-pip install ./sim-aas-middleware
+pip install -r requirements.txt
+pip install -e .
 ```
 
+The repository includes built-in plugins for storage and execution:
+- `plugins/dor_default` - Default Data Object Repository (SQLite-based storage)
+- `plugins/rti_docker` - Local Docker-based job execution
+- `plugins/rti_aws` - AWS Batch-based cloud execution
+
+Plugin dependencies are included in `requirements.txt`. For AWS RTI usage, additional
+environment configuration is required - see [AWS RTI Service](docs/usage_run_simaas_node.md#aws-rti-service).
+
 Once done, you may deactivate the virtual environment - or keep it activated if you want
-to starting using the Sim-aaS Middleware:
+to start using the Sim-aaS Middleware:
 ```shell
 deactivate
 ```
@@ -105,3 +115,16 @@ Learn more about related topics:
 - [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
 - [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
 - [Processor Dockerfile](docs/processor_dockerfile.md)
+
+## Development
+
+For contributing to the Sim-aaS Middleware, see [DEVELOPER.md](DEVELOPER.md) for:
+- System architecture and design
+- Component documentation
+- Plugin development
+- [Testing guide](DEVELOPER.md#5-testing) (environment setup, running tests)
+
+### Quick Test Command
+```bash
+.venv/bin/python -m pytest simaas/tests/ -v
+```
