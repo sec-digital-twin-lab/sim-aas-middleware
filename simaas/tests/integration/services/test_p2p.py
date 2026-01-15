@@ -1,3 +1,15 @@
+"""Integration tests for the P2P networking service.
+
+This module tests peer-to-peer networking functionality including:
+- Latency measurement between peers
+- Throughput measurement between peers
+- Handling of unreachable peers
+- Identity updates via P2P protocol
+- Network join/leave operations
+- Data object lookup and fetch via P2P
+- Access control for restricted data objects
+"""
+
 import asyncio
 import json
 import logging
@@ -30,8 +42,23 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
+# ==============================================================================
+# Module-level fixtures
+# ==============================================================================
+
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
+    """Create a session-scoped P2P server node for networking tests.
+
+    Creates a node with REST, DOR, and P2P latency/throughput protocols enabled.
+    This node acts as the server for P2P communication tests.
+
+    Args:
+        test_context: The test context providing node creation utilities.
+
+    Yields:
+        A configured Node instance with P2P protocols.
+    """
     keystore: Keystore = Keystore.new('p2p_server')
     _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
     _node.p2p.add(P2PLatency())
@@ -44,6 +71,17 @@ def p2p_server(test_context) -> Node:
 
 @pytest.fixture(scope="session")
 def p2p_client(test_context) -> Node:
+    """Create a session-scoped P2P client node for networking tests.
+
+    Creates a minimal node without REST, DOR, or RTI services.
+    This node acts as the client for P2P communication tests.
+
+    Args:
+        test_context: The test context providing node creation utilities.
+
+    Yields:
+        A configured Node instance for P2P client operations.
+    """
     keystore: Keystore = Keystore.new('p2p_client')
     _node: Node = test_context.get_node(keystore, enable_rest=False, dor_plugin_class=None, rti_plugin_class=None)
 
@@ -52,8 +90,24 @@ def p2p_client(test_context) -> Node:
     _node.shutdown(leave_network=False)
 
 
+# ==============================================================================
+# P2P Tests
+# ==============================================================================
+
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_latency(p2p_server, p2p_client):
+    """Test P2P latency measurement between peers.
+
+    Verifies that:
+    - Latency measurement protocol can be performed
+    - Latency value is returned in milliseconds
+    - Attempt count is tracked
+
+    Backend: N/A (P2P only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     try:
         peer_address = P2PAddress(
             address=p2p_server.p2p.address(),
@@ -70,8 +124,21 @@ async def test_p2p_latency(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_throughput(p2p_server, p2p_client):
+    """Test P2P throughput measurement between peers.
+
+    Verifies that:
+    - Throughput measurement protocol can be performed with 100MB payload
+    - Upload speed is returned in kB/s
+    - Download speed is returned in kB/s
+    - Attempt count is tracked
+
+    Backend: N/A (P2P only)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     try:
         peer_address = P2PAddress(
             address=p2p_server.p2p.address(),
@@ -89,8 +156,19 @@ async def test_p2p_throughput(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_unreachable(p2p_server, p2p_client):
+    """Test handling of unreachable P2P peers.
+
+    Verifies that:
+    - Attempting to contact unreachable peer raises PeerUnavailableError
+    - Protocol correctly handles connection failures
+
+    Backend: N/A (P2P only)
+    Duration: ~5 seconds (includes timeout)
+    Requirements: None
+    """
     protocol = P2PUpdateIdentity(p2p_client)
 
     info: NodeInfo = p2p_server.info
@@ -105,8 +183,19 @@ async def test_p2p_unreachable(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_update_identity(p2p_server, p2p_client):
+    """Test P2P identity update protocol.
+
+    Verifies that:
+    - Identity can be retrieved from peer via P2P protocol
+    - Returned identity matches the server's identity
+
+    Backend: N/A (P2P only)
+    Duration: ~1 second
+    Requirements: None
+    """
     protocol = P2PUpdateIdentity(p2p_client)
 
     try:
@@ -116,8 +205,21 @@ async def test_p2p_update_identity(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_join_leave_network(p2p_server, p2p_client):
+    """Test P2P network join and leave operations.
+
+    Verifies that:
+    - Initially both nodes have network size of 1 (only themselves)
+    - After join, both nodes have network size of 2
+    - After leave, server has network size of 1
+    - Client retains knowledge of 2 nodes after leaving
+
+    Backend: N/A (P2P only)
+    Duration: ~3 seconds
+    Requirements: None
+    """
     networkS: List[NodeInfo] = p2p_server.db.get_network()
     networkC: List[NodeInfo] = p2p_client.db.get_network()
     assert len(networkS) == 1
@@ -144,8 +246,21 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
     assert len(networkC) == 2
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
+    """Test P2P data object lookup and fetch operations.
+
+    Verifies that:
+    - Data object can be uploaded to server
+    - Client can lookup data object via P2P protocol
+    - Client can fetch data object content via P2P protocol
+    - Fetching non-existent object returns appropriate error
+
+    Backend: N/A (P2P + DOR)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     # client is supposed to be the owner of the data object -> make the server aware of the identity
     owner = p2p_client.identity
     nodedb = NodeDBProxy(p2p_server.rest.address())
@@ -193,8 +308,22 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
             assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
+    """Test P2P fetch of restricted data objects with access control.
+
+    Verifies that:
+    - Fetching non-existent object returns 'data object not found' error
+    - Fetching with unknown user identity returns 'user id not found' error
+    - Fetching without access permission returns 'user does not have access' error
+    - Fetching with invalid signature returns 'authorisation failed' error
+    - Fetching with valid signature and access succeeds
+
+    Backend: N/A (P2P + DOR)
+    Duration: ~10 seconds
+    Requirements: None
+    """
     with tempfile.TemporaryDirectory() as temp_dir:
         # create a fresh client node
         keystore = Keystore.new(f"keystore-{get_timestamp_now()}")

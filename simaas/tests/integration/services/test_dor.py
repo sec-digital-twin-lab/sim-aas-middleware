@@ -1,3 +1,18 @@
+"""Integration tests for the Data Object Repository (DOR) service.
+
+This module tests DOR functionality including:
+- Search and statistics operations
+- Data object creation with various options
+- Data object removal and metadata operations
+- Content retrieval with access control
+- Provenance tracking
+- Access grant/revoke operations
+- Ownership transfer
+- Tag management
+- Content encryption
+- Touch/last accessed tracking
+"""
+
 import json
 import random
 import tempfile
@@ -17,13 +32,37 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
+# ==============================================================================
+# Module-level fixtures
+# ==============================================================================
+
 @pytest.fixture()
 def unknown_user(extra_keystores):
+    """Provide an unknown user keystore (not registered with node).
+
+    Args:
+        extra_keystores: List of available keystores.
+
+    Returns:
+        A Keystore for an unknown user.
+    """
     return extra_keystores[2]
 
 
 @pytest.fixture()
 def known_users(extra_keystores, node_db_proxy):
+    """Provide keystores for users known to the node.
+
+    Registers two users with the node database so they can
+    perform authorized operations.
+
+    Args:
+        extra_keystores: List of available keystores.
+        node_db_proxy: Proxy to node database for identity registration.
+
+    Returns:
+        List of two Keystore instances for known users.
+    """
     keystores = [extra_keystores[0], extra_keystores[1]]
     for keystore in keystores:
         node_db_proxy.update_identity(keystore.identity)
@@ -32,8 +71,12 @@ def known_users(extra_keystores, node_db_proxy):
 
 @pytest.fixture()
 def random_content():
+    """Create a temporary JSON file with random content for testing.
+
+    Yields:
+        Path to a temporary JSON file containing a random integer value.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
-        # create content
         content_path = os.path.join(tmpdir, 'test.json')
         with open(content_path, 'w') as f:
             f.write(json.dumps({
@@ -44,22 +87,68 @@ def random_content():
 
 @pytest.fixture()
 def receiver(test_context):
+    """Create a receiver node for data transfer testing.
+
+    Args:
+        test_context: Test context providing node creation utilities.
+
+    Returns:
+        A Node instance configured as a receiver.
+    """
     keystore = test_context.create_keystores(1)[0]
     node = test_context.get_node(keystore, enable_rest=True)
     return node
 
 
+# ==============================================================================
+# DOR Tests
+# ==============================================================================
+
+@pytest.mark.integration
 def test_search(dor_proxy):
+    """Test DOR search operation.
+
+    Verifies that:
+    - Search operation returns results without error
+    - Result is a list (may be empty)
+
+    Backend: N/A (DOR only)
+    Duration: ~1 second
+    Requirements: None
+    """
     result = dor_proxy.search()
     assert (result is not None)
 
 
+@pytest.mark.integration
 def test_statistics(dor_proxy):
+    """Test DOR statistics operation.
+
+    Verifies that:
+    - Statistics operation returns results without error
+    - Result contains repository statistics
+
+    Backend: N/A (DOR only)
+    Duration: ~1 second
+    Requirements: None
+    """
     result = dor_proxy.statistics()
     assert (result is not None)
 
 
+@pytest.mark.integration
 def test_add_c_multiple_creators(session_keystore, known_users, dor_proxy, random_content):
+    """Test adding data object with multiple creators.
+
+    Verifies that:
+    - Data object can be created with multiple creator identities
+    - Creator list is correctly recorded in metadata
+    - Data object without explicit creators defaults to owner as creator
+
+    Backend: N/A (DOR only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     owner = session_keystore.identity
     c0 = known_users[0]
     c1 = known_users[1]
@@ -78,7 +167,19 @@ def test_add_c_multiple_creators(session_keystore, known_users, dor_proxy, rando
     assert(owner.id in result.created.creators_iid)
 
 
+@pytest.mark.integration
 def test_add_c_license(session_keystore, dor_proxy, random_content):
+    """Test adding data object with license information.
+
+    Verifies that:
+    - Data object can be created with license flags
+    - License BY flag is correctly recorded
+    - Other license flags (SA, NC, ND) default to false
+
+    Backend: N/A (DOR only)
+    Duration: ~1 second
+    Requirements: None
+    """
     owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', license_by=True)
@@ -89,7 +190,19 @@ def test_add_c_license(session_keystore, dor_proxy, random_content):
     assert(not result.license.nd)
 
 
+@pytest.mark.integration
 def test_add_c(session_keystore, dor_proxy, unknown_user, random_content):
+    """Test adding data object with identity validation.
+
+    Verifies that:
+    - Adding with unknown owner fails with 'Identity not found' error
+    - Adding with unknown creator fails with 'Identity not found' error
+    - Adding with valid identities succeeds
+
+    Backend: N/A (DOR only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     owner = session_keystore.identity
 
     # unknown owner
@@ -106,7 +219,20 @@ def test_add_c(session_keystore, dor_proxy, unknown_user, random_content):
     assert(result is not None)
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_add_c_large(test_context, session_keystore, dor_proxy):
+    """Test adding large data objects and measure upload performance.
+
+    Verifies that:
+    - Large files (252 MB) can be uploaded successfully
+    - Content hash is correctly computed for large files
+    - Upload performance is measured and logged
+
+    Backend: N/A (DOR only)
+    Duration: ~60 seconds
+    Requirements: None
+    """
     # this is necessary to avoid getting thousands of 'Calling on_part_data with data' messages...
     mp_logger = logging.getLogger('python_multipart.multipart')
     mp_logger.setLevel(logging.INFO)
@@ -150,7 +276,20 @@ def test_add_c_large(test_context, session_keystore, dor_proxy):
         print(f"{result[0]}\t{result[1]}\t{result[2]}\t{result[3]}")
 
 
+@pytest.mark.integration
 def test_remove(dor_proxy, random_content, known_users):
+    """Test data object removal with authorization.
+
+    Verifies that:
+    - Deleting non-existent object fails with 'Data object not found' error
+    - Deleting with wrong authority fails with 'user is not the data object owner'
+    - Deleting with correct authority succeeds
+    - Deleted object is no longer retrievable
+
+    Backend: N/A (DOR only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     c0 = known_users[0]
     c1 = known_users[1]
 
@@ -176,7 +315,19 @@ def test_remove(dor_proxy, random_content, known_users):
     assert(result is None)
 
 
+@pytest.mark.integration
 def test_get_meta(session_keystore, dor_proxy, random_content):
+    """Test getting data object metadata.
+
+    Verifies that:
+    - Getting metadata for invalid object returns None
+    - Getting metadata for valid object returns correct information
+    - Object ID matches in returned metadata
+
+    Backend: N/A (DOR only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
@@ -191,7 +342,20 @@ def test_get_meta(session_keystore, dor_proxy, random_content):
     assert(result.obj_id == valid_obj_id)
 
 
+@pytest.mark.integration
 def test_get_content(test_context, session_keystore, dor_proxy, random_content, unknown_user, known_users):
+    """Test getting data object content with access control.
+
+    Verifies that:
+    - Getting content for non-existent object fails with appropriate error
+    - Getting content with unknown authority fails with 'unknown identity'
+    - Getting content without access permission fails with 'user has no access'
+    - Getting content with correct authority succeeds and downloads file
+
+    Backend: N/A (DOR only)
+    Duration: ~3 seconds
+    Requirements: None
+    """
     owner = session_keystore.identity
 
     result = dor_proxy.add_data_object(random_content, owner, True, False, 'JSON', 'json')
@@ -220,7 +384,20 @@ def test_get_content(test_context, session_keystore, dor_proxy, random_content, 
     assert(os.path.isfile(download_path))
 
 
+@pytest.mark.integration
 def test_get_provenance(test_context, session_keystore, dor_proxy):
+    """Test data object provenance tracking.
+
+    Verifies that:
+    - Provenance can be retrieved for data objects
+    - Data nodes are correctly tracked in provenance graph
+    - Recipe information creates proper provenance steps
+    - Processor and input/output hashes are correctly recorded
+
+    Backend: N/A (DOR only)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     processor = {
         'repository': 'github.com/source',
         'commit_id': '34534ab',
@@ -301,7 +478,23 @@ def test_get_provenance(test_context, session_keystore, dor_proxy):
     assert(step.produces['c'] == 'b460644a73d5df6998c57c4eaf43ebc3e595bd06930af6e42d0008f84d91c849')
 
 
+@pytest.mark.integration
 def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_users):
+    """Test granting and revoking access to data objects.
+
+    Verifies that:
+    - Initial access list contains only owner
+    - Non-owner cannot grant access
+    - Owner can grant access to other users
+    - Granting access to user who already has access is idempotent
+    - Non-owner cannot revoke access
+    - Owner can revoke access from users
+    - Revoking access from user without access is idempotent
+
+    Backend: N/A (DOR only)
+    Duration: ~3 seconds
+    Requirements: None
+    """
     owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
@@ -355,7 +548,20 @@ def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_
     assert (user1.identity.id not in meta.access)
 
 
+@pytest.mark.integration
 def test_transfer_ownership(session_keystore, dor_proxy, random_content, known_users, unknown_user):
+    """Test transferring data object ownership.
+
+    Verifies that:
+    - Non-owner cannot transfer ownership
+    - Cannot transfer ownership to unknown user
+    - Owner can transfer ownership to known user
+    - New owner is correctly reflected in metadata
+
+    Backend: N/A (DOR only)
+    Duration: ~2 seconds
+    Requirements: None
+    """
     owner = session_keystore
 
     meta = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
@@ -383,7 +589,24 @@ def test_transfer_ownership(session_keystore, dor_proxy, random_content, known_u
     assert (user0.identity.id == meta.owner_iid)
 
 
+@pytest.mark.integration
 def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_users):
+    """Test updating and removing tags on data objects.
+
+    Verifies that:
+    - Initial object has no tags
+    - Non-owner cannot update tags
+    - Owner can add tags
+    - Owner can update existing tags
+    - Non-owner cannot remove tags
+    - Removing non-existent tag is safe (no error)
+    - Owner can remove existing tags
+    - Complex tag values (nested objects) are supported
+
+    Backend: N/A (DOR only)
+    Duration: ~3 seconds
+    Requirements: None
+    """
     owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
@@ -435,7 +658,20 @@ def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_u
     assert('email' in meta.tags['profile'])
 
 
+@pytest.mark.integration
 def test_content_encryption(test_context, known_users, dor_proxy):
+    """Test content encryption and decryption workflow.
+
+    Verifies that:
+    - Encrypted content can be uploaded as data object
+    - Ownership can be transferred for encrypted objects
+    - Content key can be used to decrypt content after transfer
+    - Decrypted content matches original plaintext
+
+    Backend: N/A (DOR only)
+    Duration: ~3 seconds
+    Requirements: None
+    """
     # create content for the data object and encrypt it
     content_plain = "my little secret..."
     content_enc, content_key = symmetric_encrypt(content_plain.encode('utf-8'))
@@ -463,7 +699,20 @@ def test_content_encryption(test_context, known_users, dor_proxy):
     dor_proxy.delete_data_object(obj_id, owner2)
 
 
+@pytest.mark.integration
 def test_search_by_content_hashes(test_context, known_users, dor_proxy):
+    """Test searching for data objects by content hashes.
+
+    Verifies that:
+    - Multiple data objects can be created with unique content
+    - Search by content hashes returns correct objects
+    - Multiple hashes can be searched simultaneously
+    - Single hash search returns single result
+
+    Backend: N/A (DOR only)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     owner = known_users[0]
 
     # create data objects
@@ -500,7 +749,22 @@ def test_search_by_content_hashes(test_context, known_users, dor_proxy):
     dor_proxy.delete_data_object(obj_id2, owner)
 
 
+@pytest.mark.integration
 def test_touch_data_object(test_context, known_users, dor_proxy, random_content):
+    """Test last_accessed timestamp updates for data objects.
+
+    Verifies that:
+    - Getting metadata does NOT update last_accessed
+    - Getting content DOES update last_accessed
+    - Getting provenance does NOT update last_accessed
+    - Access operations (grant/revoke) DO update last_accessed
+    - Ownership transfer DOES update last_accessed
+    - Tag operations (update/remove) DO update last_accessed
+
+    Backend: N/A (DOR only)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     owner = known_users[0]
 
     # create data object
