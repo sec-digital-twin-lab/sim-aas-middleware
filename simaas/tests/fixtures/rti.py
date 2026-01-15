@@ -174,8 +174,9 @@ def wait_for_processor_ready(rti_proxy: RTIProxy, proc_id: str, timeout: float =
         proc = rti_proxy.get_proc(proc_id)
         if proc and proc.state == Processor.State.READY:
             return proc
-        if proc and proc.state not in [Processor.State.BUSY_DEPLOY, Processor.State.NOT_DEPLOYED]:
-            break
+        # If processor is in a terminal state (FAILED), stop waiting
+        if proc and proc.state == Processor.State.FAILED:
+            raise RuntimeError(f"Processor {proc_id} failed to deploy")
         time.sleep(1)
     raise TimeoutError(f"Processor {proc_id} did not become ready within {timeout}s")
 
@@ -192,11 +193,14 @@ def wait_for_processor_undeployed(rti_proxy: RTIProxy, proc_id: str, timeout: fl
     while time.time() - start_time < timeout:
         try:
             proc = rti_proxy.get_proc(proc_id)
-            if proc is None or proc.state == Processor.State.NOT_DEPLOYED:
+            # Processor is undeployed when get_proc returns None
+            if proc is None:
                 return
+            # If not in BUSY_UNDEPLOY state, it's either done or failed
             if proc.state != Processor.State.BUSY_UNDEPLOY:
                 return
         except Exception:
+            # Exception likely means processor not found (undeployed)
             return
         time.sleep(1)
 

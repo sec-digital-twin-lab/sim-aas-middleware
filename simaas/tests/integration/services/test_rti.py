@@ -1165,3 +1165,583 @@ def test_namespace_resource_limits(
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         print(trace)
         assert False
+
+
+# ==============================================================================
+# AWS Backend Tests
+# ==============================================================================
+# These tests run the same scenarios as Docker tests but against the AWS RTI backend.
+# They require AWS credentials and SSH tunnel configuration to run.
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+def test_aws_processor_get_all(aws_available, aws_rti_proxy):
+    """Test retrieving all deployed processors on AWS.
+
+    Verifies that:
+    - The get_all_procs API returns a valid response on AWS RTI
+    - The result is not None
+
+    Backend: AWS only
+    Duration: ~1 second
+    Requirements: AWS credentials, SSH tunnel
+    """
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    result = aws_rti_proxy.get_all_procs()
+    assert result is not None
+
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+def test_aws_job_submit_and_retrieve(
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_abc_processor, aws_known_user
+):
+    """Test job submission and status retrieval on AWS.
+
+    Verifies that:
+    - Jobs can be submitted with valid task definitions on AWS
+    - Job status can be retrieved by the job owner
+    - Unauthorized users cannot retrieve job status
+    - Job completes successfully with expected output
+
+    Backend: AWS only
+    Duration: ~60 seconds
+    Requirements: AWS credentials, SSH tunnel
+    """
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    proc_id = aws_deployed_abc_processor.obj_id
+    wrong_user = aws_known_user
+    owner = aws_session_node.keystore
+
+    task = Task(
+        proc_id=proc_id,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
+            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
+        ],
+        output=[
+            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                        'restricted_access': False, 'content_encrypted': False,
+                                        'target_node_iid': None})
+        ],
+        name=None,
+        description=None,
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
+    )
+
+    # submit the job
+    result = aws_rti_proxy.submit([task], owner)
+    assert result is not None
+
+    job_id = result[0].id
+
+    # get list of all jobs by correct user
+    result = aws_rti_proxy.get_jobs_by_user(owner)
+    assert result is not None
+    result = {job.id: job for job in result}
+    assert job_id in result
+
+    # get list of all jobs by wrong user
+    result = aws_rti_proxy.get_jobs_by_user(wrong_user)
+    assert result is not None
+    assert len(result) == 0
+
+    # get list of all jobs by proc
+    result = aws_rti_proxy.get_jobs_by_proc(proc_id)
+    assert result is not None
+    assert len(result) == 1
+
+    # try to get the job info as the wrong user
+    try:
+        aws_rti_proxy.get_job_status(job_id, wrong_user)
+        assert False
+
+    except UnsuccessfulRequestError as e:
+        assert e.details['reason'] == 'user is not the job owner or the node owner'
+
+    while True:
+        # get information about the running job
+        try:
+            status: JobStatus = aws_rti_proxy.get_job_status(job_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert status is not None
+
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # check if we have an object id for output object 'c'
+    assert 'c' in status.output
+
+    # get the contents of the output data object
+    download_path = os.path.join(test_context.testing_dir, 'c.json')
+    aws_dor_proxy.get_content(status.output['c'].obj_id, owner, download_path)
+    assert os.path.isfile(download_path)
+
+    with open(download_path, 'r') as f:
+        content = json.load(f)
+        print(content)
+        assert content['v'] == 2
+
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+def test_aws_job_provenance_tracking(
+        docker_available, aws_available, test_context, aws_session_node, aws_rti_proxy, aws_dor_proxy,
+        aws_deployed_abc_processor
+):
+    """Test job provenance tracking on AWS.
+
+    Verifies that:
+    - Jobs can use output from previous jobs as input
+    - Provenance chain is correctly recorded
+    - Provenance can be retrieved for output objects
+
+    Backend: AWS only
+    Duration: ~120 seconds
+    Requirements: AWS credentials, SSH tunnel
+    """
+    from simaas.rti.base import RTIServiceBase
+
+    rti: RTIServiceBase = aws_session_node.rti
+
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    owner = aws_session_node.keystore
+
+    def load_value(obj: DataObject) -> int:
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = os.path.join(tempdir, 'temp.json')
+            aws_dor_proxy.get_content(obj.obj_id, owner, path)
+            with open(path, 'r') as f:
+                content = json.load(f)
+                value = content['v']
+                return value
+
+    # add test data object
+    obj = aws_dor_proxy.add_data_object(
+        test_context.create_file_with_content(f"{generate_random_string(4)}.json", json.dumps({'v': 1})),
+        owner.identity, False, False, 'JSONObject', 'json'
+    )
+
+    # beginning
+    obj_a = obj
+    obj_b = obj
+    value_a = load_value(obj_a)
+    value_b = load_value(obj_b)
+
+    # run 3 iterations
+    log = []
+    for i in range(3):
+        job: Job = execute_job(
+            aws_deployed_abc_processor.obj_id, owner, aws_rti_proxy, aws_session_node, a=obj_a, b=obj_b,
+            memory=2048
+        )
+
+        # wait until the job is done
+        status: JobStatus = rti.get_job_status(job.id)
+        while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+            status: JobStatus = rti.get_job_status(job.id)
+            time.sleep(0.5)
+
+        obj_c = status.output['c']
+        value_c = load_value(obj_c)
+
+        log.append(((value_a, value_b, value_c), (obj_a.c_hash, obj_b.c_hash, obj_c.c_hash)))
+
+        obj_b = obj_c
+        value_b = value_c
+
+    for item in log:
+        print(f"{item[1][0]} + {item[1][1]} = {item[1][2]}\t{item[0][0]} + {item[0][1]} = {item[0][2]}")
+
+    # get the provenance and print it
+    provenance = aws_dor_proxy.get_provenance(log[2][1][2])
+    assert provenance is not None
+    print(json.dumps(provenance.model_dump(), indent=2))
+
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+@pytest.mark.slow
+def test_aws_job_concurrent_execution(
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_abc_processor, n: int = 50
+):
+    """Test concurrent job execution on AWS.
+
+    Verifies that:
+    - Multiple jobs can be submitted and executed concurrently on AWS
+    - All jobs complete successfully
+    - Output objects are correctly created and retrievable
+
+    Backend: AWS only
+    Duration: ~120 seconds
+    Requirements: AWS credentials, SSH tunnel
+
+    Note: This test is marked as slow and may exhibit flaky behavior under
+    high load conditions. Known flaky behavior: race condition where 49/50
+    jobs complete within timeout.
+    """
+    from simaas.rti.base import RTIServiceBase
+
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    wd_path = test_context.testing_dir
+    owner = aws_session_node.keystore
+    results = {}
+    failed = {}
+    logs = {}
+    mutex = threading.Lock()
+    rnd = random.Random()
+    rti: RTIServiceBase = aws_session_node.rti
+
+    def logprint(idx: int, m: str) -> None:
+        print(m)
+        with mutex:
+            logs[idx].append(m)
+
+    def do_a_job(idx: int) -> None:
+        try:
+            with mutex:
+                logs[idx] = []
+
+            dt = rnd.randint(0, 1000) / 1000.0
+            v0 = rnd.randint(2, 6)
+            v1 = rnd.randint(2, 6)
+
+            time.sleep(dt)
+
+            logprint(idx, f"[{idx}] [{time.time()}] submit job")
+            job = execute_job(aws_deployed_abc_processor.obj_id, owner, aws_rti_proxy, aws_session_node, a=v0, b=v1,
+                              memory=2048)
+            logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
+
+            # wait until the job is done
+            status: JobStatus = rti.get_job_status(job.id)
+            while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                status: JobStatus = rti.get_job_status(job.id)
+                time.sleep(1.0)
+
+            logprint(idx, f"[{idx}] [{time.time()}] job {job.id} finished: {status.state}")
+
+            if status.state != JobStatus.State.SUCCESSFUL:
+                raise RuntimeError(f"[{idx}] failed: {status.state}")
+
+            obj_id = status.output['c'].obj_id
+            logprint(idx, f"[{idx}] obj_id: {obj_id}")
+
+            download_path = os.path.join(wd_path, f"{obj_id}.json")
+            while True:
+                try:
+                    logprint(idx, f"[{idx}] do fetch {obj_id}")
+                    aws_dor_proxy.get_content(obj_id, owner, download_path)
+                    logprint(idx, f"[{idx}] fetch returned {obj_id}")
+                    break
+                except UnsuccessfulRequestError as e:
+                    logprint(idx, f"[{idx}] error while get content: {e}")
+                    time.sleep(0.5)
+
+            with open(download_path, 'r') as f:
+                content = json.load(f)
+                with mutex:
+                    results[idx] = content['v']
+
+            logprint(idx, f"[{idx}] done")
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            with mutex:
+                failed[idx] = e
+            logprint(idx, f"[{idx}] failed: {trace}")
+
+    # submit jobs
+    threads = []
+    for i in range(n):
+        thread = threading.Thread(target=do_a_job, kwargs={'idx': i})
+        thread.start()
+        threads.append(thread)
+
+    # wait for all the threads
+    for thread in threads:
+        thread.join(60)
+
+    for i in range(n):
+        print(f"### {i} ###")
+        log = logs[i]
+        for msg in log:
+            print(msg)
+        print("###")
+
+    for i, e in failed.items():
+        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+        print(f"[{i}] failed: {trace}")
+
+    logger.info(failed)
+    assert len(failed) == 0
+    assert len(results) == n
+
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+def test_aws_batch_submit_and_complete(
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_abc_processor, aws_known_user
+):
+    """Test batch job submission and completion on AWS.
+
+    Verifies that:
+    - Multiple tasks can be submitted as a batch on AWS
+    - Batch status can be retrieved by the owner
+    - Unauthorized users cannot retrieve batch status
+    - All batch members complete successfully
+
+    Backend: AWS only
+    Duration: ~120 seconds
+    Requirements: AWS credentials, SSH tunnel
+    """
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    proc_id = aws_deployed_abc_processor.obj_id
+    wrong_user = aws_known_user
+    owner = aws_session_node.keystore
+
+    def create_task(name: str, a: int, b: int) -> Task:
+        return Task(
+            proc_id=proc_id,
+            user_iid=owner.identity.id,
+            input=[
+                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
+                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
+            ],
+            output=[
+                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
+                                            'restricted_access': False, 'content_encrypted': False,
+                                            'target_node_iid': None})
+            ],
+            name=name,
+            description=None,
+            budget=ResourceDescriptor(vcpus=1, memory=2048),
+            namespace=None
+        )
+
+    # create the tasks
+    tasks = [create_task(f'task_{i}', 1, 5) for i in range(20)]
+
+    # submit the job
+    jobs = aws_rti_proxy.submit(tasks, with_authorisation_by=owner)
+    assert len(jobs) == len(tasks)
+
+    # determine batch id
+    batch_id = jobs[0].batch_id
+
+    # try to get the batch info as the wrong user
+    try:
+        aws_rti_proxy.get_batch_status(batch_id, wrong_user)
+        assert False
+
+    except UnsuccessfulRequestError as e:
+        assert e.details['reason'] == 'user is not the batch owner, batch member or the node owner'
+
+    while True:
+        # get information about the running job
+        try:
+            status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert status is not None
+
+            all_finished = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    all_finished = False
+                    break
+
+            if all_finished:
+                break
+
+        except Exception:
+            pass
+
+        time.sleep(1)
+
+    # we should have an object id for output object 'c' for each member of the batch
+    for member in status.members:
+        job_status: JobStatus = aws_rti_proxy.get_job_status(member.job_id, owner)
+        assert 'c' in job_status.output
+
+        # get the contents of the output data object
+        download_path = os.path.join(test_context.testing_dir, 'c.json')
+        aws_dor_proxy.get_content(job_status.output['c'].obj_id, owner, download_path)
+        assert os.path.isfile(download_path)
+
+        with open(download_path, 'r') as f:
+            content = json.load(f)
+            print(content)
+            assert content['v'] == 6
+
+
+@pytest.mark.integration
+@pytest.mark.aws_only
+def test_aws_cosim_room_thermostat(
+        docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
+        aws_deployed_room_processor, aws_deployed_thermostat_processor
+):
+    """Test co-simulation with room and thermostat processors on AWS.
+
+    Verifies that:
+    - Two processors can be submitted as a batch for co-simulation on AWS
+    - Both processors complete successfully
+    - Output results are correctly generated and retrievable
+
+    Backend: AWS only
+    Duration: ~90 seconds
+    Requirements: AWS credentials, SSH tunnel
+    """
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    if not aws_available:
+        pytest.skip("AWS is not available")
+
+    proc_id0 = aws_deployed_room_processor.obj_id
+    proc_id1 = aws_deployed_thermostat_processor.obj_id
+    owner = aws_session_node.keystore
+
+    task0 = Task(
+        proc_id=proc_id0,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'initial_temp': 20,
+                    'heating_rate': 0.5,
+                    'cooling_rate': -0.2,
+                    'max_steps': 100
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name='room',
+        description=None,
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
+    )
+
+    task1 = Task(
+        proc_id=proc_id1,
+        user_iid=owner.identity.id,
+        input=[
+            Task.InputValue.model_validate({
+                'name': 'parameters', 'type': 'value', 'value': {
+                    'threshold_low': 18.0,
+                    'threshold_high': 22.0
+                }
+            })
+        ],
+        output=[
+            Task.Output.model_validate({
+                'name': 'result',
+                'owner_iid': owner.identity.id,
+                'restricted_access': False,
+                'content_encrypted': False,
+                'target_node_iid': None
+            })
+        ],
+        name='thermostat',
+        description=None,
+        budget=ResourceDescriptor(vcpus=1, memory=2048),
+        namespace=None
+    )
+
+    # submit the job
+    result = aws_rti_proxy.submit([task0, task1], with_authorisation_by=owner)
+    jobs = result
+
+    batch_id = jobs[0].batch_id
+    while True:
+        try:
+            status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, with_authorisation_by=owner)
+
+            from pprint import pprint
+            pprint(status.model_dump())
+            assert status is not None
+
+            is_done = True
+            for member in status.members:
+                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                    is_done = False
+
+            if is_done:
+                break
+
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            print(trace)
+
+        time.sleep(1)
+
+    # get the result of the 'room' and the 'thermostat'
+    job_status0: JobStatus = aws_rti_proxy.get_job_status(jobs[0].id, with_authorisation_by=owner)
+    job_status1: JobStatus = aws_rti_proxy.get_job_status(jobs[1].id, with_authorisation_by=owner)
+    assert 'result' in job_status0.output
+    assert 'result' in job_status1.output
+
+    # get the contents of the output data object
+    download_path0 = os.path.join(test_context.testing_dir, 'result0.json')
+    aws_dor_proxy.get_content(job_status0.output['result'].obj_id, owner, download_path0)
+    assert os.path.isfile(download_path0)
+
+    download_path1 = os.path.join(test_context.testing_dir, 'result1.json')
+    aws_dor_proxy.get_content(job_status1.output['result'].obj_id, owner, download_path1)
+    assert os.path.isfile(download_path1)
+
+    # read the results
+    with open(download_path0, 'r') as f:
+        result0: dict = json.load(f)
+        result0: RResult = RResult.model_validate(result0)
+
+    with open(download_path1, 'r') as f:
+        result1: dict = json.load(f)
+        result1: TResult = TResult.model_validate(result1)
+
+    # print the result
+    print(result0.temp)
+    print(result1.state)
