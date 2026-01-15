@@ -201,7 +201,7 @@ def add_test_processor(
     if not existing:
         with tempfile.TemporaryDirectory() as tempdir:
             # don't clone the repo but use this repo (since it's sim-aas-middleware)
-            repo_path = os.path.abspath(os.path.join(os.getcwd(), '..', '..'))
+            repo_path = str(BASE_DIR)
 
             # make full proc path
             abs_proc_path = os.path.join(repo_path, proc_path)
