@@ -1,3 +1,16 @@
+"""Unit tests for core simaas functionality.
+
+This module tests:
+- EC key pair serialization and signing
+- RSA key pair serialization, signing, and encryption
+- Keystore creation, loading, and updating
+- Logging configuration and features
+- Exception handling
+
+Backend: None (unit tests)
+Duration: ~30 seconds
+Requirements: None
+"""
 import logging
 import os
 
@@ -17,21 +30,33 @@ logger = Logging.get(__name__)
 
 @pytest.fixture()
 def ec_keypair():
+    """Create a new EC key pair for testing."""
     return ECKeyPair.create_new()
 
 
 @pytest.fixture()
 def rsa_keypair():
+    """Create a new RSA key pair for testing."""
     return RSAKeyPair.create_new()
 
 
 @pytest.fixture()
 def logging():
+    """Fixture to clean up logging handlers after test."""
     yield
     Logging.remove_all_handlers()
 
 
 def test_ec_serialisation(temp_directory, ec_keypair):
+    """
+    Test EC key pair serialization and deserialization.
+
+    Verifies that:
+    - Public keys can be written to files and read back
+    - Private keys can be written to files and read back
+    - Keys can be serialized to/from bytes and strings
+    - All deserialization methods produce keys with matching IIDs
+    """
     password = 'test'
 
     pubkey_path = os.path.join(temp_directory, 'pubkey.pem')
@@ -83,6 +108,14 @@ def test_ec_serialisation(temp_directory, ec_keypair):
 
 
 def test_ec_signing(ec_keypair):
+    """
+    Test EC key pair signing and verification.
+
+    Verifies that:
+    - Messages can be signed with private key
+    - Signatures can be verified with public key
+    - Wrong messages fail verification
+    """
     message0 = 'test0'.encode('utf-8')
     message1 = 'test1'.encode('utf-8')
 
@@ -92,6 +125,15 @@ def test_ec_signing(ec_keypair):
 
 
 def test_rsa_serialisation(temp_directory, rsa_keypair):
+    """
+    Test RSA key pair serialization and deserialization.
+
+    Verifies that:
+    - Public keys can be written to files and read back
+    - Private keys can be written to files and read back
+    - Keys can be serialized to/from bytes and strings
+    - All deserialization methods produce keys with matching IIDs
+    """
     password = 'test'
 
     pubkey_path = os.path.join(temp_directory, 'pubkey.pem')
@@ -143,6 +185,14 @@ def test_rsa_serialisation(temp_directory, rsa_keypair):
 
 
 def test_rsa_signing(rsa_keypair):
+    """
+    Test RSA key pair signing and verification.
+
+    Verifies that:
+    - Messages can be signed with private key
+    - Signatures can be verified with public key
+    - Wrong messages fail verification
+    """
     message0 = 'test0'.encode('utf-8')
     message1 = 'test1'.encode('utf-8')
 
@@ -152,6 +202,14 @@ def test_rsa_signing(rsa_keypair):
 
 
 def test_rsa_encryption(rsa_keypair):
+    """
+    Test RSA encryption and decryption.
+
+    Verifies that:
+    - Plaintext can be encrypted with public key
+    - Ciphertext can be decrypted with private key
+    - Decrypted text matches original
+    """
     plaintext = "test"
 
     encrypted = rsa_keypair.encrypt(plaintext.encode('utf-8'))
@@ -161,6 +219,15 @@ def test_rsa_encryption(rsa_keypair):
 
 
 def test_create_and_load(temp_directory):
+    """
+    Test keystore creation and loading.
+
+    Verifies that:
+    - New keystore can be created with name and email
+    - Keystore is saved to file
+    - Keystore can be loaded from file
+    - Loaded keystore has correct identity
+    """
     keystore = Keystore.new('name', 'email', path=temp_directory, password='password')
     assert(keystore is not None)
     assert(keystore.identity.name == 'name')
@@ -180,6 +247,15 @@ def test_create_and_load(temp_directory):
 
 
 def test_update(temp_directory):
+    """
+    Test keystore profile update.
+
+    Verifies that:
+    - Profile can be updated with new name and email
+    - Updated identity has valid signature
+    - Changes persist after reload
+    - Nonce is incremented
+    """
     keystore = Keystore.new('name', 'email', path=temp_directory, password='password')
     keystore_id = keystore.identity.id
     assert(keystore.identity.name == 'name')
@@ -207,6 +283,14 @@ def test_update(temp_directory):
 
 
 def test_add_get_object_key(temp_directory):
+    """
+    Test keystore object key management.
+
+    Verifies that:
+    - Object keys can be stored in keystore
+    - Object keys can be retrieved
+    - Keys persist after sync and reload
+    """
     keystore = Keystore.new('name', 'email', path=temp_directory, password='password')
     assert(keystore.identity.name == 'name')
     assert(keystore.identity.email == 'email')
@@ -227,6 +311,14 @@ def test_add_get_object_key(temp_directory):
 
 
 def test_add_credentials(temp_directory):
+    """
+    Test keystore credentials management.
+
+    Verifies that:
+    - GitHub credentials can be stored and retrieved
+    - SSH credentials can be stored and retrieved
+    - Credentials persist after sync and reload
+    """
     url = 'https://github.com/sec-digital-twin-lab/saas-middleware'
     login = 'johndoe'
     personal_access_token = 'token'
@@ -260,6 +352,14 @@ def test_add_credentials(temp_directory):
 
 
 def test_defaults(logging):
+    """
+    Test default logging configuration.
+
+    Verifies that:
+    - Logging can be initialized with defaults
+    - INFO messages are visible
+    - DEBUG messages are not visible (default level)
+    """
     Logging.initialise()
     logger = Logging.get('test')
 
@@ -268,6 +368,14 @@ def test_defaults(logging):
 
 
 def test_log_to_separate_file(logging, temp_directory):
+    """
+    Test logging to separate files.
+
+    Verifies that:
+    - Default logger writes to default log file
+    - Custom logger writes to both default and custom files
+    - Correct number of lines in each file
+    """
     default_log_path = os.path.join(temp_directory, 'log.default')
     custom_log_path = os.path.join(temp_directory, 'log.custom')
 
@@ -291,6 +399,13 @@ def test_log_to_separate_file(logging, temp_directory):
 
 
 def test_rollover(logging, temp_directory):
+    """
+    Test log file rollover.
+
+    Verifies that:
+    - Log files roll over when max size is exceeded
+    - Backup log files are created with correct naming
+    """
     log_path0 = os.path.join(temp_directory, 'log')
     log_path1 = os.path.join(temp_directory, 'log.1')
     log_path2 = os.path.join(temp_directory, 'log.2')
@@ -319,6 +434,13 @@ def test_rollover(logging, temp_directory):
 
 
 def test_json_incompatible_exception():
+    """
+    Test exception handling with non-JSON-compatible details.
+
+    Verifies that:
+    - SaaSRuntimeException handles non-serializable objects
+    - All detail values are converted to strings
+    """
     class SomeClass:
         pass
 
@@ -341,6 +463,17 @@ def test_json_incompatible_exception():
 
 
 def test_logging_aws_cloudwatch_integration(logging):
+    """
+    Test AWS CloudWatch logging integration.
+
+    Verifies that:
+    - Logging can be initialized with AWS CloudWatch enabled
+    - Messages can be logged without errors
+
+    Backend: None (unit test)
+    Duration: <5 seconds
+    Requirements: AWS credentials in .aws directory (optional - test passes without)
+    """
     # Before running this test, ensure that [default] in credentials file is available in .aws directory
     # Initialize logging with AWS CloudWatch enabled
     Logging.initialise(log_to_aws=True)
