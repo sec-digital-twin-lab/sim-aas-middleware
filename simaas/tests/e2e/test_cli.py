@@ -50,7 +50,7 @@ from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRunt
 from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL, PROC_ABC_PATH
 
 logger = Logging.get(__name__)
-repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
 examples_path = os.path.join(repo_root_path, 'examples')
 
 
