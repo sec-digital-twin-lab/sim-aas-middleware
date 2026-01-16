@@ -17,16 +17,7 @@ def assert_job_successful(
     status: JobStatus,
     expected_outputs: Optional[List[str]] = None
 ) -> None:
-    """
-    Assert that a job completed successfully with expected outputs.
-
-    Args:
-        status: The JobStatus to verify.
-        expected_outputs: Optional list of output names that should be present.
-
-    Raises:
-        AssertionError: If the job did not succeed or expected outputs are missing.
-    """
+    """Assert that a job completed successfully with expected outputs."""
     assert status.state == JobStatus.State.SUCCESSFUL, (
         f"Job failed with state: {status.state}. "
         f"Errors: {[e.message for e in status.errors]}"
@@ -46,16 +37,7 @@ def assert_job_failed(
     status: JobStatus,
     expected_error_substring: Optional[str] = None
 ) -> None:
-    """
-    Assert that a job failed.
-
-    Args:
-        status: The JobStatus to verify.
-        expected_error_substring: Optional substring to check for in error messages.
-
-    Raises:
-        AssertionError: If the job did not fail or error message doesn't match.
-    """
+    """Assert that a job failed."""
     assert status.state == JobStatus.State.FAILED, (
         f"Expected job to fail but got state: {status.state}"
     )
@@ -69,15 +51,7 @@ def assert_job_failed(
 
 
 def assert_job_cancelled(status: JobStatus) -> None:
-    """
-    Assert that a job was cancelled.
-
-    Args:
-        status: The JobStatus to verify.
-
-    Raises:
-        AssertionError: If the job was not cancelled.
-    """
+    """Assert that a job was cancelled."""
     assert status.state == JobStatus.State.CANCELLED, (
         f"Expected job to be cancelled but got state: {status.state}"
     )
@@ -90,22 +64,7 @@ def assert_data_object_content(
     expected: Dict[str, Any],
     temp_dir: str
 ) -> None:
-    """
-    Assert that a data object contains expected content.
-
-    Downloads the data object and verifies that it contains all expected
-    key-value pairs.
-
-    Args:
-        dor_proxy: The DOR proxy to download from.
-        obj_id: The ID of the data object to check.
-        owner: The keystore for authorization.
-        expected: Dictionary of expected key-value pairs.
-        temp_dir: Temporary directory for downloading the content.
-
-    Raises:
-        AssertionError: If the content doesn't match expectations.
-    """
+    """Assert that a data object contains expected content."""
     download_path = os.path.join(temp_dir, f'{obj_id}.json')
     dor_proxy.get_content(obj_id, owner, download_path)
 
@@ -127,17 +86,7 @@ def assert_data_object_exists(
     obj_id: str,
     expected_data_type: Optional[str] = None
 ) -> None:
-    """
-    Assert that a data object exists in the DOR.
-
-    Args:
-        dor_proxy: The DOR proxy to query.
-        obj_id: The ID of the data object to check.
-        expected_data_type: Optional expected data type to verify.
-
-    Raises:
-        AssertionError: If the object doesn't exist or type doesn't match.
-    """
+    """Assert that a data object exists in the DOR."""
     obj = dor_proxy.get_meta(obj_id)
     assert obj is not None, f"Data object {obj_id} does not exist"
 

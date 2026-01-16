@@ -19,11 +19,11 @@ from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job
-from simaas.tests.fixtures.core import BASE_DIR
-from simaas.tests.fixtures.mocks import DummyProgressListener, DummyNamespace
-from simaas.tests.helpers.waiters import wait_for_job_completion
-from simaas.tests.helpers.factories import TaskBuilder
-from simaas.tests.helpers.assertions import assert_job_successful
+from simaas.tests.fixture_core import BASE_DIR
+from simaas.tests.fixture_mocks import DummyProgressListener, DummyNamespace
+from simaas.tests.helper_waiters import wait_for_job_completion
+from simaas.tests.helper_factories import TaskBuilder
+from simaas.tests.helper_assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -31,19 +31,7 @@ logger = Logging.get(__name__)
 
 @pytest.mark.integration
 def test_cosim_room_thermostat_local(dummy_namespace):
-    """
-    Test co-simulation of Room and Thermostat processors locally.
-
-    Verifies that:
-    - Both processors run concurrently in separate threads
-    - Socket-based co-simulation communication works
-    - Room temperature simulation responds to thermostat commands
-    - Both processors produce valid result files
-
-    Backend: Local (no Docker)
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test co-simulation of Room and Thermostat processors locally."""
 
     with tempfile.TemporaryDirectory() as temp_dir:
         user: Identity = dummy_namespace.keystore().identity
@@ -189,18 +177,7 @@ def test_cosim_room_thermostat_job(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
         deployed_thermostat_processor
 ):
-    """
-    Test co-simulation job execution via RTI.
-
-    Verifies that:
-    - Both Room and Thermostat jobs can be submitted together
-    - Jobs complete successfully in co-simulation mode
-    - Result data objects are created for both processors
-
-    Backend: Docker
-    Duration: ~60 seconds
-    Requirements: Docker
-    """
+    """Test co-simulation job execution via RTI."""
     if not docker_available:
         pytest.skip("Docker is not available")
 

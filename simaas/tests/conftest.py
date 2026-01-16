@@ -1,10 +1,4 @@
-"""Pytest configuration and shared fixtures.
-
-This module provides:
-- Custom pytest markers configuration
-- Re-exports of fixtures from modular fixture files
-- RTI-related fixtures imported from fixtures/rti.py
-"""
+"""Pytest configuration and shared fixtures."""
 
 import logging
 from pathlib import Path
@@ -24,19 +18,13 @@ logging.getLogger('python_multipart.multipart').setLevel(logging.WARNING)
 
 logger = Logging.get('tests.conftest')
 
-# ==============================================================================
-# Import fixtures from modular fixture files
-# These imports make fixtures available to pytest for discovery
-# ==============================================================================
-
 # Core fixtures: TestContext, environment checks, keystores
-from simaas.tests.fixtures.core import (
+from simaas.tests.fixture_core import (
     TestContext,
     generate_random_file,
     test_context,
     docker_available,
     aws_available,
-    github_credentials_available,
     session_keystore,
     temp_directory,
     extra_keystores,
@@ -45,14 +33,14 @@ from simaas.tests.fixtures.core import (
 )
 
 # Mock classes for testing
-from simaas.tests.fixtures.mocks import (
+from simaas.tests.fixture_mocks import (
     DummyProgressListener,
     DummyNamespace,
     dummy_namespace,
 )
 
 # DOR fixtures: session_node, proxies
-from simaas.tests.fixtures.dor import (
+from simaas.tests.fixture_dor import (
     session_node,
     session_data_dir,
     dor_proxy,
@@ -60,7 +48,7 @@ from simaas.tests.fixtures.dor import (
 )
 
 # RTI fixtures: rti_proxy, deployed processors, backend fixtures
-from simaas.tests.fixtures.rti import (
+from simaas.tests.fixture_rti import (
     RTIBackend,
     RTIBackendConfig,
     add_test_processor,

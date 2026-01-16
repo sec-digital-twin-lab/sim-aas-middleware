@@ -1,15 +1,4 @@
-"""RTI (Runtime Infrastructure) service integration tests.
-
-This module contains tests for:
-- Processor deployment and management
-- Job submission and execution
-- Batch job processing
-- Co-simulation scenarios
-- Namespace resource management
-
-Tests are organized by functionality and marked with appropriate markers
-for Docker-only, AWS-only, or parameterized execution.
-"""
+"""RTI (Runtime Infrastructure) service integration tests."""
 
 import json
 import logging
@@ -41,14 +30,14 @@ from examples.cosim.thermostat.processor import Result as TResult
 
 from plugins.rti_docker import DefaultRTIService
 
-from simaas.tests.fixtures.rti import add_test_processor
-from simaas.tests.helpers.waiters import (
+from simaas.tests.fixture_rti import add_test_processor
+from simaas.tests.helper_waiters import (
     wait_for_job_completion,
     wait_for_processor_ready,
     wait_for_processor_undeployed,
 )
-from simaas.tests.helpers.factories import create_abc_task, TaskBuilder
-from simaas.tests.helpers.assertions import (
+from simaas.tests.helper_factories import create_abc_task, TaskBuilder
+from simaas.tests.helper_assertions import (
     assert_job_successful,
     assert_job_failed,
     assert_job_cancelled,
@@ -66,20 +55,7 @@ logger = Logging.get(__name__)
 def execute_job(proc_id: str, owner: Keystore, rti_proxy: RTIProxy, target_node: NodeInfo,
                 a: Union[int, DataObject] = None, b: Union[int, DataObject] = None,
                 memory: int = 1024) -> Job:
-    """Execute a single job with the ABC processor.
-
-    Args:
-        proc_id: Processor ID to execute
-        owner: Keystore of the job owner
-        rti_proxy: RTI proxy for job submission
-        target_node: Target node for output storage
-        a: First input value or DataObject reference
-        b: Second input value or DataObject reference
-        memory: Memory budget in MB
-
-    Returns:
-        Submitted Job object
-    """
+    """Execute a single job with the ABC processor."""
     if a is None:
         a = 1
 
@@ -116,19 +92,7 @@ def get_cosim_tasks(
         deployed_room_processor, deployed_thermostat_processor, owner: Identity, namespace: Optional[str] = None,
         duplicate_name: Optional[str] = None, memory: int = 1024
 ) -> List[Task]:
-    """Create co-simulation tasks for room and thermostat processors.
-
-    Args:
-        deployed_room_processor: DataObject for the room processor
-        deployed_thermostat_processor: DataObject for the thermostat processor
-        owner: Identity of the task owner
-        namespace: Optional namespace for the tasks
-        duplicate_name: If set, both tasks use this name (for testing duplicate detection)
-        memory: Memory budget in MB
-
-    Returns:
-        List of Task objects for co-simulation
-    """
+    """Create co-simulation tasks for room and thermostat processors."""
     return [
         Task(
             proc_id=deployed_room_processor.obj_id,
@@ -191,16 +155,7 @@ def get_cosim_tasks(
 
 @pytest.mark.integration
 def test_processor_get_all(rti_proxy):
-    """Test retrieving all deployed processors.
-
-    Verifies that:
-    - The get_all_procs API returns a valid response
-    - The result is not None
-
-    Backend: Docker
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test retrieving all deployed processors."""
     result = rti_proxy.get_all_procs()
     assert result is not None
 
@@ -208,17 +163,7 @@ def test_processor_get_all(rti_proxy):
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node, docker_strict_node, known_user):
-    """Test processor deployment and undeployment with strict/non-strict modes.
-
-    Verifies that:
-    - Non-strict nodes allow any user to deploy/undeploy processors
-    - Strict nodes only allow the node owner to deploy/undeploy
-    - Appropriate errors are raised for unauthorized operations
-
-    Backend: Docker only
-    Duration: ~30 seconds
-    Requirements: Docker
-    """
+    """Test processor deployment and undeployment with strict/non-strict modes."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -279,16 +224,7 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_processor_deploy_with_volume(docker_available, docker_non_strict_node):
-    """Test processor deployment with a mounted volume.
-
-    Verifies that:
-    - Processors can be deployed with a volume configuration
-    - The volume is correctly mounted with the specified name
-
-    Backend: Docker only
-    Duration: ~15 seconds
-    Requirements: Docker
-    """
+    """Test processor deployment with a mounted volume."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -325,18 +261,7 @@ def test_processor_deploy_with_volume(docker_available, docker_non_strict_node):
 def test_job_submit_and_retrieve(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
-    """Test job submission and status retrieval.
-
-    Verifies that:
-    - Jobs can be submitted with valid task definitions
-    - Job status can be retrieved by the job owner
-    - Unauthorized users cannot retrieve job status
-    - Job completes successfully with expected output
-
-    Backend: Docker only
-    Duration: ~30 seconds
-    Requirements: Docker
-    """
+    """Test job submission and status retrieval."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -389,17 +314,7 @@ def test_job_submit_and_retrieve(
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
-    """Test job cancellation by the job owner.
-
-    Verifies that:
-    - Unauthorized users cannot cancel jobs
-    - Job owners can cancel running jobs
-    - Cancelled jobs reach the CANCELLED state
-
-    Backend: Docker only
-    Duration: ~15 seconds
-    Requirements: Docker
-    """
+    """Test job cancellation by the job owner."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -440,17 +355,7 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
 @pytest.mark.docker_only
 @pytest.mark.slow
 def test_job_cancel_with_force_kill(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
-    """Test job cancellation with forced container kill after grace period.
-
-    Verifies that:
-    - Jobs that don't respond to interrupt signals continue running
-    - After grace period expires, container is forcefully killed
-    - Job reaches CANCELLED state after force kill
-
-    Backend: Docker only
-    Duration: ~40 seconds
-    Requirements: Docker
-    """
+    """Test job cancellation with forced container kill after grace period."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -503,17 +408,7 @@ def test_job_cancel_with_force_kill(docker_available, session_node, rti_proxy, d
 def test_job_provenance_tracking(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
-    """Test job provenance tracking through iterative computations.
-
-    Verifies that:
-    - Jobs can use output from previous jobs as input
-    - Provenance chain is correctly recorded
-    - Provenance can be retrieved for output objects
-
-    Backend: Docker only
-    Duration: ~60 seconds
-    Requirements: Docker
-    """
+    """Test job provenance tracking through iterative computations."""
     rti: DefaultRTIService = session_node.rti
 
     if not docker_available:
@@ -567,7 +462,7 @@ def test_job_provenance_tracking(
     # get the provenance and print it
     provenance = dor_proxy.get_provenance(log[2][1][2])
     assert provenance is not None
-    print(json.dumps(provenance.dict(), indent=2))
+    print(json.dumps(provenance.model_dump(), indent=2))
 
 
 @pytest.mark.integration
@@ -576,21 +471,7 @@ def test_job_provenance_tracking(
 def test_job_concurrent_execution(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, n: int = 50
 ):
-    """Test concurrent job execution with multiple simultaneous submissions.
-
-    Verifies that:
-    - Multiple jobs can be submitted and executed concurrently
-    - All jobs complete successfully
-    - Output objects are correctly created and retrievable
-
-    Backend: Docker only
-    Duration: ~60 seconds
-    Requirements: Docker
-
-    Note: This test is marked as slow and may exhibit flaky behavior under
-    high load conditions. Known flaky behavior: race condition where 49/50
-    jobs complete within timeout.
-    """
+    """Test concurrent job execution with multiple simultaneous submissions."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -697,18 +578,7 @@ def test_job_concurrent_execution(
 def test_batch_submit_and_complete(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
-    """Test batch job submission and completion.
-
-    Verifies that:
-    - Multiple tasks can be submitted as a batch
-    - Batch status can be retrieved by the owner
-    - Unauthorized users cannot retrieve batch status
-    - All batch members complete successfully
-
-    Backend: Docker only
-    Duration: ~60 seconds
-    Requirements: Docker
-    """
+    """Test batch job submission and completion."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -765,17 +635,7 @@ def test_batch_submit_and_complete(
 def test_batch_cancel_cascade(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor, known_user
 ):
-    """Test batch cancellation cascade when one job fails.
-
-    Verifies that:
-    - When one job in a batch fails, remaining jobs are cancelled
-    - The failed job reaches FAILED state
-    - Other jobs reach CANCELLED state
-
-    Backend: Docker only
-    Duration: ~30 seconds
-    Requirements: Docker
-    """
+    """Test batch cancellation cascade when one job fails."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -834,16 +694,7 @@ def test_batch_cancel_cascade(
 def test_cosim_duplicate_names(
         docker_available, session_node, rti_proxy, deployed_room_processor, deployed_thermostat_processor
 ):
-    """Test that co-simulation rejects duplicate task names.
-
-    Verifies that:
-    - Tasks with duplicate names are rejected
-    - Appropriate error message is returned
-
-    Backend: Docker only
-    Duration: ~5 seconds
-    Requirements: Docker
-    """
+    """Test that co-simulation rejects duplicate task names."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -868,17 +719,7 @@ def test_cosim_room_thermostat(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
         deployed_thermostat_processor
 ):
-    """Test co-simulation with room and thermostat processors.
-
-    Verifies that:
-    - Two processors can be submitted as a batch for co-simulation
-    - Both processors complete successfully
-    - Output results are correctly generated and retrievable
-
-    Backend: Docker only
-    Duration: ~45 seconds
-    Requirements: Docker
-    """
+    """Test co-simulation with room and thermostat processors."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -954,17 +795,7 @@ def test_namespace_resource_limits(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
         deployed_thermostat_processor
 ):
-    """Test namespace resource limit enforcement.
-
-    Verifies that:
-    - Tasks exceeding namespace capacity are rejected
-    - Combined resource budget enforcement works correctly
-    - Tasks within namespace capacity are accepted
-
-    Backend: Docker only
-    Duration: ~60 seconds
-    Requirements: Docker
-    """
+    """Test namespace resource limit enforcement."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1032,16 +863,7 @@ def test_namespace_resource_limits(
 @pytest.mark.integration
 @pytest.mark.aws_only
 def test_aws_processor_get_all(aws_available, aws_rti_proxy):
-    """Test retrieving all deployed processors on AWS.
-
-    Verifies that:
-    - The get_all_procs API returns a valid response on AWS RTI
-    - The result is not None
-
-    Backend: AWS only
-    Duration: ~1 second
-    Requirements: AWS credentials, SSH tunnel
-    """
+    """Test retrieving all deployed processors on AWS."""
     if not aws_available:
         pytest.skip("AWS is not available")
 
@@ -1055,18 +877,7 @@ def test_aws_job_submit_and_retrieve(
         docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
         aws_deployed_abc_processor, aws_known_user
 ):
-    """Test job submission and status retrieval on AWS.
-
-    Verifies that:
-    - Jobs can be submitted with valid task definitions on AWS
-    - Job status can be retrieved by the job owner
-    - Unauthorized users cannot retrieve job status
-    - Job completes successfully with expected output
-
-    Backend: AWS only
-    Duration: ~60 seconds
-    Requirements: AWS credentials, SSH tunnel
-    """
+    """Test job submission and status retrieval on AWS."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1124,17 +935,7 @@ def test_aws_job_provenance_tracking(
         docker_available, aws_available, test_context, aws_session_node, aws_rti_proxy, aws_dor_proxy,
         aws_deployed_abc_processor
 ):
-    """Test job provenance tracking on AWS.
-
-    Verifies that:
-    - Jobs can use output from previous jobs as input
-    - Provenance chain is correctly recorded
-    - Provenance can be retrieved for output objects
-
-    Backend: AWS only
-    Duration: ~120 seconds
-    Requirements: AWS credentials, SSH tunnel
-    """
+    """Test job provenance tracking on AWS."""
     from simaas.rti.base import RTIServiceBase
 
     rti: RTIServiceBase = aws_session_node.rti
@@ -1206,21 +1007,7 @@ def test_aws_job_concurrent_execution(
         docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
         aws_deployed_abc_processor, n: int = 50
 ):
-    """Test concurrent job execution on AWS.
-
-    Verifies that:
-    - Multiple jobs can be submitted and executed concurrently on AWS
-    - All jobs complete successfully
-    - Output objects are correctly created and retrievable
-
-    Backend: AWS only
-    Duration: ~120 seconds
-    Requirements: AWS credentials, SSH tunnel
-
-    Note: This test is marked as slow and may exhibit flaky behavior under
-    high load conditions. Known flaky behavior: race condition where 49/50
-    jobs complete within timeout.
-    """
+    """Test concurrent job execution on AWS."""
     from simaas.rti.base import RTIServiceBase
 
     if not docker_available:
@@ -1330,18 +1117,7 @@ def test_aws_batch_submit_and_complete(
         docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
         aws_deployed_abc_processor, aws_known_user
 ):
-    """Test batch job submission and completion on AWS.
-
-    Verifies that:
-    - Multiple tasks can be submitted as a batch on AWS
-    - Batch status can be retrieved by the owner
-    - Unauthorized users cannot retrieve batch status
-    - All batch members complete successfully
-
-    Backend: AWS only
-    Duration: ~120 seconds
-    Requirements: AWS credentials, SSH tunnel
-    """
+    """Test batch job submission and completion on AWS."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1403,17 +1179,7 @@ def test_aws_cosim_room_thermostat(
         docker_available, aws_available, test_context, aws_session_node, aws_dor_proxy, aws_rti_proxy,
         aws_deployed_room_processor, aws_deployed_thermostat_processor
 ):
-    """Test co-simulation with room and thermostat processors on AWS.
-
-    Verifies that:
-    - Two processors can be submitted as a batch for co-simulation on AWS
-    - Both processors complete successfully
-    - Output results are correctly generated and retrievable
-
-    Backend: AWS only
-    Duration: ~90 seconds
-    Requirements: AWS credentials, SSH tunnel
-    """
+    """Test co-simulation with room and thermostat processors on AWS."""
     if not docker_available:
         pytest.skip("Docker is not available")
 

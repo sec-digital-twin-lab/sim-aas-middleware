@@ -1,10 +1,4 @@
-"""Mock classes and fixtures for testing.
-
-This module contains:
-- DummyProgressListener for testing processor progress callbacks
-- DummyNamespace with DummyDOR and DummyRTI for isolated testing
-- dummy_namespace fixture
-"""
+"""Mock classes and fixtures for testing."""
 
 import json
 import os
@@ -29,7 +23,7 @@ from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.api import RTIInterface
 from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 class DummyProgressListener(ProgressListener):

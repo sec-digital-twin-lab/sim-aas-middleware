@@ -12,19 +12,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from simaas.tests.helpers.waiters import (
+from simaas.tests.helper_waiters import (
     WaitTimeoutError,
     wait_for_condition,
     wait_for_job_completion,
     wait_for_processor_ready,
     wait_for_processor_undeployed,
 )
-from simaas.tests.helpers.factories import (
+from simaas.tests.helper_factories import (
     TaskBuilder,
     create_abc_task,
     create_ping_task,
 )
-from simaas.tests.helpers.assertions import (
+from simaas.tests.helper_assertions import (
     assert_job_successful,
     assert_job_failed,
     assert_job_cancelled,

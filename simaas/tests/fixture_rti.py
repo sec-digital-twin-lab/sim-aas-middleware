@@ -1,13 +1,4 @@
-"""RTI (Runtime Infrastructure) test fixtures.
-
-This module contains:
-- RTIBackend enum for backend type identification
-- RTIBackendConfig dataclass for backend configuration
-- Parameterized rti_backend fixture for testing across backends
-- RTI proxy fixtures
-- Deployed processor fixtures
-- Helper functions for processor deployment
-"""
+"""RTI (Runtime Infrastructure) test fixtures."""
 
 import json
 import logging
@@ -26,7 +17,6 @@ from simaas.cli.cmd_image import build_processor_image
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.core.schemas import GithubCredentials
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject
 from simaas.helpers import docker_export_image, determine_local_ip, PortMaster
@@ -45,7 +35,7 @@ logger = Logging.get('tests.fixtures.rti')
 # Constants
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
 REPOSITORY_COMMIT_ID = 'b9e729d94e5ac55ff04eefef56d199396cdc1ba0'
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Processor paths
 PROC_ABC_PATH = "examples/simple/abc"
@@ -64,15 +54,7 @@ class RTIBackend(Enum):
 
 @dataclass
 class RTIBackendConfig:
-    """Configuration for an RTI backend.
-
-    Attributes:
-        backend: The type of backend (DOCKER or AWS)
-        plugin_class: The RTI service plugin class to use
-        default_memory: Default memory allocation in MB
-        volume_config: Backend-specific volume configuration
-        skip_reason: Message to display when skipping tests for this backend
-    """
+    """Configuration for an RTI backend."""
     backend: RTIBackend
     plugin_class: Type
     default_memory: int
@@ -83,18 +65,7 @@ class RTIBackendConfig:
 def add_test_processor(
         dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str, platform: str = 'linux/amd64'
 ) -> DataObject:
-    """Build and add a processor image to DOR if it doesn't exist.
-
-    Args:
-        dor: DOR proxy to add the processor to
-        keystore: Keystore for authentication
-        proc_name: Name of the processor
-        proc_path: Path to the processor source code
-        platform: Target platform for the image (default: linux/amd64)
-
-    Returns:
-        DataObject representing the processor in DOR
-    """
+    """Build and add a processor image to DOR if it doesn't exist."""
     org = 'sec-digital-twin-lab'
     repo_name = 'sim-aas-middleware'
     repo_url = f'https://github.com/{org}/{repo_name}'
@@ -158,19 +129,7 @@ def add_test_processor(
 
 
 def wait_for_processor_ready(rti_proxy: RTIProxy, proc_id: str, timeout: float = 120.0) -> Processor:
-    """Wait for a processor to become ready.
-
-    Args:
-        rti_proxy: RTI proxy to check processor status
-        proc_id: Processor ID to wait for
-        timeout: Maximum wait time in seconds
-
-    Returns:
-        Processor object in READY state
-
-    Raises:
-        TimeoutError: If processor doesn't become ready within timeout
-    """
+    """Wait for a processor to become ready."""
     start_time = time.time()
     while time.time() - start_time < timeout:
         proc = rti_proxy.get_proc(proc_id)
@@ -184,13 +143,7 @@ def wait_for_processor_ready(rti_proxy: RTIProxy, proc_id: str, timeout: float =
 
 
 def wait_for_processor_undeployed(rti_proxy: RTIProxy, proc_id: str, timeout: float = 120.0) -> None:
-    """Wait for a processor to be undeployed.
-
-    Args:
-        rti_proxy: RTI proxy to check processor status
-        proc_id: Processor ID to wait for
-        timeout: Maximum wait time in seconds
-    """
+    """Wait for a processor to be undeployed."""
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
@@ -228,14 +181,7 @@ def rti_proxy(session_node):
 
 @pytest.fixture(scope="session")
 def deployed_abc_processor(docker_available, rti_proxy, dor_proxy, session_node, session_data_dir) -> DataObject:
-    """Session-scoped fixture that deploys the ABC processor.
-
-    The ABC processor is a simple arithmetic processor that adds two inputs.
-    It's deployed with a data volume for testing volume mounting.
-
-    Yields:
-        DataObject representing the deployed processor
-    """
+    """Session-scoped fixture that deploys the ABC processor."""
     meta = add_test_processor(
         dor_proxy, session_node.keystore, proc_name='proc-abc', proc_path=PROC_ABC_PATH, platform='linux/amd64'
     )
@@ -265,13 +211,7 @@ def deployed_abc_processor(docker_available, rti_proxy, dor_proxy, session_node,
 
 @pytest.fixture(scope="session")
 def deployed_ping_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
-    """Session-scoped fixture that deploys the Ping processor.
-
-    The Ping processor is a simple processor that echoes back inputs.
-
-    Yields:
-        DataObject representing the deployed processor
-    """
+    """Session-scoped fixture that deploys the Ping processor."""
     meta = add_test_processor(
         dor_proxy, session_node.keystore, proc_name='proc-ping', proc_path=PROC_PING_PATH, platform='linux/amd64'
     )
@@ -296,13 +236,7 @@ def deployed_ping_processor(docker_available, rti_proxy, dor_proxy, session_node
 
 @pytest.fixture(scope="session")
 def deployed_room_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
-    """Session-scoped fixture that deploys the Room processor for co-simulation tests.
-
-    The Room processor simulates a room's temperature in a co-simulation scenario.
-
-    Yields:
-        DataObject representing the deployed processor
-    """
+    """Session-scoped fixture that deploys the Room processor for co-simulation tests."""
     meta = add_test_processor(
         dor_proxy, session_node.keystore, 'proc-room', PROC_ROOM_PATH
     )
@@ -326,13 +260,7 @@ def deployed_room_processor(docker_available, rti_proxy, dor_proxy, session_node
 
 @pytest.fixture(scope="session")
 def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
-    """Session-scoped fixture that deploys the Thermostat processor for co-simulation tests.
-
-    The Thermostat processor simulates a thermostat controller in a co-simulation scenario.
-
-    Yields:
-        DataObject representing the deployed processor
-    """
+    """Session-scoped fixture that deploys the Thermostat processor for co-simulation tests."""
     meta = add_test_processor(
         dor_proxy, session_node.keystore, 'proc-thermostat', PROC_THERMOSTAT_PATH
     )
@@ -356,106 +284,56 @@ def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, sessio
 
 @pytest.fixture(scope="session")
 def deployed_factorisation_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+        docker_available, rti_proxy, dor_proxy, session_node
 ) -> DataObject:
-    """Session-scoped fixture that deploys the Factorisation processor.
+    """Session-scoped fixture that deploys the Factorisation processor."""
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-factorisation', PROC_FACTORISATION_PATH
+    )
+    proc_id = meta.obj_id
 
-    The Factorisation processor computes non-trivial factors of a number by
-    spawning sub-jobs to search different ranges.
+    if not docker_available:
+        yield meta
 
-    Yields:
-        DataObject representing the deployed processor
-    """
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
     else:
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-factorisation', PROC_FACTORISATION_PATH
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        wait_for_processor_ready(rti_proxy, proc_id)
+        logger.info(f"Processor deployed: {proc_id}")
 
-        if not docker_available:
-            yield meta
+        yield meta
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            wait_for_processor_ready(rti_proxy, proc_id)
-            logger.info(f"Processor deployed: {proc_id}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            wait_for_processor_undeployed(rti_proxy, proc_id)
-            logger.info(f"Processor undeployed: {proc_id}")
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        wait_for_processor_undeployed(rti_proxy, proc_id)
+        logger.info(f"Processor undeployed: {proc_id}")
 
 
 @pytest.fixture(scope="session")
 def deployed_factor_search_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+        docker_available, rti_proxy, dor_proxy, session_node
 ) -> DataObject:
-    """Session-scoped fixture that deploys the Factor Search processor.
+    """Session-scoped fixture that deploys the Factor Search processor."""
+    meta = add_test_processor(
+        dor_proxy, session_node.keystore, 'proc-factor-search', PROC_FACTOR_SEARCH_PATH
+    )
+    proc_id = meta.obj_id
 
-    The Factor Search processor searches for factors of a number within a
-    specified range. Used as a sub-processor by the Factorisation processor.
+    if not docker_available:
+        yield meta
 
-    Yields:
-        DataObject representing the deployed processor
-    """
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
     else:
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-factor-search', PROC_FACTOR_SEARCH_PATH
-        )
-        proc_id = meta.obj_id
+        # deploy it
+        rti_proxy.deploy(proc_id, session_node.keystore)
+        wait_for_processor_ready(rti_proxy, proc_id)
+        logger.info(f"Processor deployed: {proc_id}")
 
-        if not docker_available:
-            yield meta
+        yield meta
 
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            wait_for_processor_ready(rti_proxy, proc_id)
-            logger.info(f"Processor deployed: {proc_id}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            wait_for_processor_undeployed(rti_proxy, proc_id)
-            logger.info(f"Processor undeployed: {proc_id}")
+        # undeploy it
+        rti_proxy.undeploy(proc_id, session_node.keystore)
+        wait_for_processor_undeployed(rti_proxy, proc_id)
+        logger.info(f"Processor undeployed: {proc_id}")
 
 
 # ==============================================================================
@@ -463,35 +341,25 @@ def deployed_factor_search_processor(
 # ==============================================================================
 
 @pytest.fixture(scope='session')
-def docker_non_strict_node(test_context, github_credentials_available):
+def docker_non_strict_node(test_context):
     """Docker-based node with non-strict deployment mode.
 
     Non-strict mode allows any user to deploy and undeploy processors.
     """
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("docker_non_strict_node", "no-email-provided", path=tempdir, password="password")
-        if github_credentials_available:
-            keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
         _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=False)
         yield _node
 
 
 @pytest.fixture(scope='session')
-def docker_strict_node(test_context, extra_keystores, github_credentials_available):
+def docker_strict_node(test_context, extra_keystores):
     """Docker-based node with strict deployment mode.
 
     Strict mode requires the node owner to deploy and undeploy processors.
     """
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("docker_strict_node", "no-email-provided", path=tempdir, password="password")
-        if github_credentials_available:
-            keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
         _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=True)
         yield _node
 
@@ -502,12 +370,7 @@ def docker_strict_node(test_context, extra_keystores, github_credentials_availab
 
 @pytest.fixture(scope="session")
 def ssh_tunnel():
-    """Set up an SSH tunnel for AWS connectivity.
-
-    This fixture establishes an SSH tunnel to a bastion host for accessing
-    AWS services. It requires SSH_TUNNEL_HOST, SSH_TUNNEL_USER, and
-    SSH_TUNNEL_KEY_PATH environment variables to be set.
-    """
+    """Set up an SSH tunnel for AWS connectivity."""
     ssh_host = os.environ.get("SSH_TUNNEL_HOST")
     ssh_user = os.environ.get("SSH_TUNNEL_USER")
     ssh_key_path = os.environ.get("SSH_TUNNEL_KEY_PATH")
@@ -588,7 +451,7 @@ def aws_node_db_proxy(aws_session_node):
 
 
 @pytest.fixture(scope='session')
-def aws_non_strict_node(aws_available, test_context, github_credentials_available, session_node):
+def aws_non_strict_node(aws_available, test_context, session_node):
     """AWS-based node with non-strict deployment mode."""
     if not aws_available:
         yield session_node
@@ -596,17 +459,12 @@ def aws_non_strict_node(aws_available, test_context, github_credentials_availabl
     else:
         with tempfile.TemporaryDirectory() as tempdir:
             keystore = Keystore.new("aws_non_strict_node", "no-email-provided", path=tempdir, password="password")
-            if github_credentials_available:
-                keystore.github_credentials.update(
-                    REPOSITORY_URL,
-                    GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-                )
             _node = test_context.get_node(keystore, rti_plugin_class=AWSRTIService, enable_rest=True, strict_deployment=False)
             yield _node
 
 
 @pytest.fixture(scope='session')
-def aws_strict_node(aws_available, test_context, extra_keystores, github_credentials_available, session_node):
+def aws_strict_node(aws_available, test_context, extra_keystores, session_node):
     """AWS-based node with strict deployment mode."""
     if not aws_available:
         yield session_node
@@ -614,11 +472,6 @@ def aws_strict_node(aws_available, test_context, extra_keystores, github_credent
     else:
         with tempfile.TemporaryDirectory() as tempdir:
             keystore = Keystore.new("aws_strict_node", "no-email-provided", path=tempdir, password="password")
-            if github_credentials_available:
-                keystore.github_credentials.update(
-                    REPOSITORY_URL,
-                    GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-                )
             _node = test_context.get_node(keystore, rti_plugin_class=AWSRTIService, enable_rest=True, strict_deployment=True)
             yield _node
 
@@ -716,11 +569,7 @@ def aws_deployed_thermostat_processor(
 
 @pytest.fixture()
 def known_user(extra_keystores, node_db_proxy):
-    """Function-scoped fixture providing a known user for authorization tests.
-
-    Creates a user identity that is registered with the node but is not the
-    node owner. Useful for testing authorization restrictions.
-    """
+    """Function-scoped fixture providing a known user for authorization tests."""
     _keystore = extra_keystores[2]
     node_db_proxy.update_identity(_keystore.identity)
     return _keystore

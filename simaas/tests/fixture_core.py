@@ -1,11 +1,4 @@
-"""Core test fixtures and utilities.
-
-This module contains:
-- TestContext class for managing test environment
-- Environment check fixtures (docker_available, aws_available, etc.)
-- Keystore fixtures (session_keystore, extra_keystores)
-- Basic utility fixtures (temp_directory)
-"""
+"""Core test fixtures and utilities."""
 
 import os
 import shutil
@@ -21,7 +14,6 @@ from dotenv import load_dotenv
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.core.schemas import GithubCredentials
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
@@ -36,17 +28,13 @@ load_dotenv()
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
 REPOSITORY_COMMIT_ID = 'b9e729d94e5ac55ff04eefef56d199396cdc1ba0'
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 logger = Logging.get('tests.fixtures.core')
 
 
 class TestContext:
-    """Test context manager for creating and managing test resources.
-
-    Provides utilities for creating keystores, nodes, and temporary files
-    during test execution.
-    """
+    """Test context manager for creating and managing test resources."""
 
     def __init__(self):
         self._temp_testing_dir = os.path.join(os.environ['HOME'], 'testing')
@@ -57,16 +45,13 @@ class TestContext:
 
     def initialise(self) -> None:
         """Initialize the test context by creating the testing directory."""
-        # the testing directory gets deleted after the test is completed. if it already exists (unlikely) then
-        # we abort in order not to end up deleting something that shouldn't be deleted.
         try:
-            # create an empty working directory
             os.makedirs(self.testing_dir)
         except OSError as e:
             raise Exception(f"path to working directory for testing '{self.testing_dir}' already exists!") from e
 
     def cleanup(self) -> None:
-        """Clean up the test context by shutting down nodes and removing temporary files."""
+        """Clean up the test context."""
         for name in self.nodes:
             logger.info(f"stopping node '{name}'")
             node = self.nodes[name]
@@ -78,21 +63,12 @@ class TestContext:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.error(f"exception during cleanup() -> {e} {trace}")
 
-    def create_keystores(self, n: int, use_credentials: bool = False) -> List[Keystore]:
-        """Create n keystores with optional GitHub credentials."""
+    def create_keystores(self, n: int) -> List[Keystore]:
+        """Create n keystores."""
         keystores = []
         for i in range(n):
             keystore = Keystore.new(f"keystore_{i}", "no-email-provided", path=self.testing_dir, password=f"password_{i}")
             keystores.append(keystore)
-
-            # update keystore credentials (if applicable)
-            if use_credentials:
-                keystore.github_credentials.update(
-                    REPOSITORY_URL,
-                    GithubCredentials(login=os.environ['GITHUB_USERNAME'],
-                                      personal_access_token=os.environ['GITHUB_TOKEN'])
-                )
-
         return keystores
 
     def generate_random_file(self, filename: str, size: int) -> str:
@@ -124,7 +100,6 @@ class TestContext:
         storage_path = os.path.join(wd_path if wd_path else self.testing_dir, name)
         os.makedirs(storage_path, exist_ok=True)
 
-        # create node and startup services
         node = DefaultNode(keystore, storage_path, enable_db=True,
                            dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
                            retain_job_history=retain_job_history if rti_plugin_class is not None else None,
@@ -172,25 +147,10 @@ def aws_available():
 
 
 @pytest.fixture(scope="session")
-def github_credentials_available():
-    """Check if GitHub credentials are available in environment."""
-    if all(key in os.environ for key in ['GITHUB_USERNAME', 'GITHUB_TOKEN']):
-        return True
-    else:
-        print("GitHub credentials not available!")
-        return False
-
-
-@pytest.fixture(scope="session")
-def session_keystore(github_credentials_available):
-    """Session-scoped keystore with optional GitHub credentials."""
+def session_keystore():
+    """Session-scoped keystore."""
     with tempfile.TemporaryDirectory() as tempdir:
         _keystore = Keystore.new("keystore1", "no-email-provided", path=tempdir, password="password")
-        if github_credentials_available:
-            _keystore.github_credentials.update(
-                REPOSITORY_URL,
-                GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
-            )
         yield _keystore
 
 
@@ -202,18 +162,11 @@ def temp_directory():
 
 
 @pytest.fixture(scope="session")
-def extra_keystores(github_credentials_available):
-    """Session-scoped list of additional keystores with optional GitHub credentials."""
+def extra_keystores():
+    """Session-scoped list of additional keystores."""
     keystores = []
     with tempfile.TemporaryDirectory() as tempdir:
         for i in range(3):
             keystore = Keystore.new(f"keystore-{i}", "no-email-provided", path=tempdir, password="password")
-            if github_credentials_available:
-                keystore.github_credentials.update(
-                    REPOSITORY_URL,
-                    GithubCredentials(
-                        login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN']
-                    )
-                )
             keystores.append(keystore)
         yield keystores

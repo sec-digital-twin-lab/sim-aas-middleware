@@ -1,15 +1,4 @@
-"""Integration tests for the Node Database (NodeDB) service.
-
-This module tests NodeDB functionality including:
-- Node information retrieval
-- Network membership queries
-- Identity management (get, update)
-- Network join/leave protocols
-- Address conflict handling
-- Identity update propagation
-- Namespace management
-- Resource reservation
-"""
+"""Integration tests for the Node Database (NodeDB) service."""
 
 import pytest
 import os
@@ -41,18 +30,7 @@ logger = Logging.get(__name__)
 
 @pytest.fixture(scope="module")
 def module_node(test_context, extra_keystores) -> Node:
-    """Create a module-scoped node for nodedb testing.
-
-    Creates a node with REST and DOR enabled for testing node database
-    operations. The node persists across all tests in this module.
-
-    Args:
-        test_context: Test context providing node creation utilities.
-        extra_keystores: List of available keystores.
-
-    Yields:
-        A configured Node instance.
-    """
+    """Create a module-scoped node for nodedb testing."""
     _node: Node = test_context.get_node(
         extra_keystores[0], enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None
     )
@@ -64,14 +42,7 @@ def module_node(test_context, extra_keystores) -> Node:
 
 @pytest.fixture(scope="module")
 def module_nodedb_proxy(module_node) -> NodeDBProxy:
-    """Create a module-scoped NodeDB proxy for testing.
-
-    Args:
-        module_node: The module node to connect to.
-
-    Returns:
-        A NodeDBProxy instance connected to the module node.
-    """
+    """Create a module-scoped NodeDB proxy for testing."""
     proxy = NodeDBProxy(module_node.info.rest_address)
     return proxy
 
@@ -82,16 +53,7 @@ def module_nodedb_proxy(module_node) -> NodeDBProxy:
 
 @pytest.mark.integration
 def test_rest_get_node(module_node, module_nodedb_proxy):
-    """Test getting node information via REST API.
-
-    Verifies that:
-    - Node information can be retrieved
-    - Returned node identity matches the actual node
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test getting node information via REST API."""
     result: NodeInfo = module_nodedb_proxy.get_node()
     assert result is not None
     assert result.identity.id == module_node.identity.id
@@ -99,16 +61,7 @@ def test_rest_get_node(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_get_network(module_node, module_nodedb_proxy):
-    """Test getting network information via REST API.
-
-    Verifies that:
-    - Network list can be retrieved
-    - Network contains at least one node
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test getting network information via REST API."""
     result: List[NodeInfo] = module_nodedb_proxy.get_network()
     assert result is not None
     assert len(result) > 0
@@ -116,17 +69,7 @@ def test_rest_get_network(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_get_identities(module_node, module_nodedb_proxy):
-    """Test getting all identities via REST API.
-
-    Verifies that:
-    - Identity list can be retrieved
-    - At least one identity exists
-    - Module node's identity is in the list
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test getting all identities via REST API."""
     result: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     assert result is not None
     assert len(result) > 0
@@ -135,16 +78,7 @@ def test_rest_get_identities(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_get_identity_valid(module_node, module_nodedb_proxy):
-    """Test getting a valid identity via REST API.
-
-    Verifies that:
-    - Valid identity ID returns identity object
-    - Returned identity ID matches requested ID
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test getting a valid identity via REST API."""
     valid_iid = module_node.identity.id
 
     result: Optional[Identity] = module_nodedb_proxy.get_identity(valid_iid)
@@ -154,15 +88,7 @@ def test_rest_get_identity_valid(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_get_identity_invalid(module_node, module_nodedb_proxy):
-    """Test getting an invalid identity via REST API.
-
-    Verifies that:
-    - Invalid identity ID returns None (not found)
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test getting an invalid identity via REST API."""
     invalid_iid = 'f00baa'
 
     result: Optional[Identity] = module_nodedb_proxy.get_identity(invalid_iid)
@@ -171,18 +97,7 @@ def test_rest_get_identity_invalid(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_update_identity_existing(module_node, module_nodedb_proxy):
-    """Test updating an existing identity via REST API.
-
-    Verifies that:
-    - Existing identity can be updated
-    - Name change is reflected in database
-    - Total identity count remains unchanged after update
-    - Identity can be reverted to original name
-
-    Backend: N/A (NodeDB only)
-    Duration: ~2 seconds
-    Requirements: None
-    """
+    """Test updating an existing identity via REST API."""
     identities: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     n0 = len(identities)
 
@@ -213,16 +128,7 @@ def test_rest_update_identity_existing(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_rest_update_identity_extra(module_node, module_nodedb_proxy):
-    """Test adding a new identity via REST API.
-
-    Verifies that:
-    - New identity can be added to database
-    - Identity count increases by one
-
-    Backend: N/A (NodeDB only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test adding a new identity via REST API."""
     identities: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     n0 = len(identities)
 
@@ -237,19 +143,7 @@ def test_rest_update_identity_extra(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_different_address(test_context, module_node, module_nodedb_proxy):
-    """Test handling of nodes with conflicting P2P addresses.
-
-    Verifies that:
-    - New node can join network
-    - Network correctly tracks joined nodes
-    - When a node crashes and another uses same address, network is updated
-    - Original node is removed when address is taken over
-    - Node properly leaves network on shutdown
-
-    Backend: N/A (NodeDB only)
-    Duration: ~15 seconds
-    Requirements: None
-    """
+    """Test handling of nodes with conflicting P2P addresses."""
     p2p_address = PortMaster.generate_p2p_address(test_context.host)
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -338,19 +232,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_join_leave_protocol():
-    """Test network join and leave protocols.
-
-    Verifies that:
-    - Initial nodes only know their own identity
-    - Join protocol correctly adds nodes to network
-    - All nodes sync identities after join
-    - Leave protocol correctly removes nodes from network
-    - Identities persist after node leaves network
-
-    Backend: N/A (NodeDB only)
-    Duration: ~10 seconds
-    Requirements: None
-    """
+    """Test network join and leave protocols."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
         for i in range(3):
@@ -421,17 +303,7 @@ def test_join_leave_protocol():
 
 @pytest.mark.integration
 def test_update_identity():
-    """Test identity update propagation across network.
-
-    Verifies that:
-    - Identity updates without propagation only affect local node
-    - Identity updates with propagation sync to all nodes
-    - Nonce is correctly incremented on updates
-
-    Backend: N/A (NodeDB only)
-    Duration: ~10 seconds
-    Requirements: None
-    """
+    """Test identity update propagation across network."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
         for i in range(3):
@@ -489,16 +361,7 @@ def test_update_identity():
 
 @pytest.mark.integration
 def test_touch_data_object(module_node, module_nodedb_proxy):
-    """Test last_seen timestamp updates for identities.
-
-    Verifies that:
-    - Identity has last_seen timestamp
-    - Updating identity updates last_seen timestamp
-
-    Backend: N/A (NodeDB only)
-    Duration: ~2 seconds
-    Requirements: None
-    """
+    """Test last_seen timestamp updates for identities."""
     # get the identity last seen
     identity: Identity = module_nodedb_proxy.get_identity(module_node.identity.id)
     last_seen = identity.last_seen
@@ -513,19 +376,7 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
 
 @pytest.mark.integration
 def test_namespace_update(test_context):
-    """Test namespace creation and propagation across network.
-
-    Verifies that:
-    - Namespace initially doesn't exist on any node
-    - Creating namespace makes it available on creator node
-    - Other nodes don't know about namespace until they join
-    - After join, namespace is synced to all nodes
-    - Namespace budget updates propagate to all nodes
-
-    Backend: N/A (NodeDB only)
-    Duration: ~10 seconds
-    Requirements: None
-    """
+    """Test namespace creation and propagation across network."""
     namespace = 'my_namespace'
 
     # create nodes
@@ -564,20 +415,7 @@ def test_namespace_update(test_context):
 
 @pytest.mark.integration
 def test_namespace_reserve_cancel(test_context):
-    """Test namespace resource reservation and cancellation.
-
-    Verifies that:
-    - Reservation fails when requesting too many CPUs
-    - Reservation fails when requesting too much memory
-    - Valid reservation succeeds
-    - Reservations are synced across all nodes
-    - Canceling non-existent reservation returns False
-    - Canceling existing reservation succeeds and syncs
-
-    Backend: N/A (NodeDB only)
-    Duration: ~10 seconds
-    Requirements: None
-    """
+    """Test namespace resource reservation and cancellation."""
     namespace = 'my_namespace'
     budget = ResourceDescriptor(vcpus=2, memory=2048)
 

@@ -1,11 +1,4 @@
-"""Integration tests for the REST API service.
-
-This module tests REST API functionality including:
-- CRUD operations (Create, Read, Update, Delete)
-- Error handling for failed operations
-- DELETE requests with body content
-- Authentication and authorization for REST endpoints
-"""
+"""Integration tests for the REST API service."""
 
 import random
 import string
@@ -193,18 +186,7 @@ class TestProxy(EndpointProxy):
 
 @pytest.fixture(scope='session')
 def rest_node(test_context, session_keystore) -> Node:
-    """Create a session-scoped node with test REST service.
-
-    Creates a node with REST enabled and registers the test REST service
-    endpoints for CRUD operation testing.
-
-    Args:
-        test_context: The test context providing node creation utilities.
-        session_keystore: The keystore for the session.
-
-    Returns:
-        A configured Node instance with test REST endpoints.
-    """
+    """Create a session-scoped node with test REST service."""
     _node = test_context.get_node(session_keystore, enable_rest=True)
     rest_service = TestRESTService()
 
@@ -216,14 +198,7 @@ def rest_node(test_context, session_keystore) -> Node:
 
 @pytest.fixture(scope='session')
 def rest_test_proxy(rest_node):
-    """Create a session-scoped test proxy client.
-
-    Args:
-        rest_node: The node with test REST service.
-
-    Returns:
-        A TestProxy instance connected to the test REST service.
-    """
+    """Create a session-scoped test proxy client."""
     proxy = TestProxy(rest_node.rest.address())
     return proxy
 
@@ -234,17 +209,7 @@ def rest_test_proxy(rest_node):
 
 @pytest.mark.integration
 def test_create_read(rest_test_proxy):
-    """Test REST create and read operations.
-
-    Verifies that:
-    - Objects can be created via POST request
-    - Created objects have expected values
-    - Objects can be read back via GET request
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST create and read operations."""
     result = rest_test_proxy.create('hello world')
     assert(result is not None)
     assert(result.value == 'hello world')
@@ -256,16 +221,7 @@ def test_create_read(rest_test_proxy):
 
 @pytest.mark.integration
 def test_update_ok(rest_test_proxy):
-    """Test REST update operation success.
-
-    Verifies that:
-    - Existing objects can be updated via PUT request
-    - Updated values are reflected correctly
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST update operation success."""
     result = rest_test_proxy.create('hello world')
     assert(result is not None)
     assert(result.value == 'hello world')
@@ -278,16 +234,7 @@ def test_update_ok(rest_test_proxy):
 
 @pytest.mark.integration
 def test_update_fails(rest_test_proxy):
-    """Test REST update operation failure for non-existent key.
-
-    Verifies that:
-    - Updating non-existent object raises UnsuccessfulRequestError
-    - Error is raised appropriately for invalid key
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST update operation failure for non-existent key."""
     result = rest_test_proxy.create('hello world')
     assert(result is not None)
     assert(result.value == 'hello world')
@@ -298,16 +245,7 @@ def test_update_fails(rest_test_proxy):
 
 @pytest.mark.integration
 def test_delete_ok(rest_test_proxy):
-    """Test REST delete operation success.
-
-    Verifies that:
-    - Objects can be deleted via DELETE request
-    - Deleted objects are no longer readable
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST delete operation success."""
     result = rest_test_proxy.create('hello world')
     assert(result is not None)
     assert(result.value == 'hello world')
@@ -322,16 +260,7 @@ def test_delete_ok(rest_test_proxy):
 
 @pytest.mark.integration
 def test_delete_fails(rest_test_proxy):
-    """Test REST delete operation failure for non-existent key.
-
-    Verifies that:
-    - Deleting non-existent object raises UnsuccessfulRequestError
-    - Original object remains readable after failed delete
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST delete operation failure for non-existent key."""
     result = rest_test_proxy.create('hello world')
     assert(result is not None)
     assert(result.value == 'hello world')
@@ -345,17 +274,7 @@ def test_delete_fails(rest_test_proxy):
 
 @pytest.mark.integration
 def test_delete_with_body(rest_test_proxy):
-    """Test REST DELETE request with body content.
-
-    Verifies that:
-    - DELETE requests can include body content
-    - Object key can be specified in request body
-    - Deleted objects are no longer readable
-
-    Backend: N/A (REST only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test REST DELETE request with body content."""
     result = rest_test_proxy.create('hello world')
     key = result.key
 
@@ -371,17 +290,7 @@ def test_delete_with_body(rest_test_proxy):
 
 @pytest.mark.integration
 def test_delete_with_auth(test_context, rest_node, rest_test_proxy):
-    """Test REST DELETE with authentication requirement.
-
-    Verifies that:
-    - Unauthenticated requests fail with 'unknown identity' error
-    - Authenticated requests with valid authority succeed
-    - Deleted objects are no longer readable
-
-    Backend: N/A (REST only)
-    Duration: ~2 seconds
-    Requirements: None
-    """
+    """Test REST DELETE with authentication requirement."""
     result = rest_test_proxy.create('hello world')
     key = result.key
 

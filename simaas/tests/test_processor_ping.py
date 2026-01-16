@@ -18,11 +18,11 @@ from examples.simple.ping.server import CombinedTestServer
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
-from simaas.tests.fixtures.core import BASE_DIR
-from simaas.tests.fixtures.mocks import DummyProgressListener
-from simaas.tests.helpers.waiters import wait_for_job_completion
-from simaas.tests.helpers.factories import TaskBuilder
-from simaas.tests.helpers.assertions import assert_job_successful
+from simaas.tests.fixture_core import BASE_DIR
+from simaas.tests.fixture_mocks import DummyProgressListener
+from simaas.tests.helper_waiters import wait_for_job_completion
+from simaas.tests.helper_factories import TaskBuilder
+from simaas.tests.helper_assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -57,19 +57,7 @@ def tcp_udp_server():
 
 @pytest.mark.integration
 def test_tcp_connection(tcp_udp_server):
-    """
-    Test TCP connection functionality.
-
-    Verifies that:
-    - Successful connection to running server returns success=True
-    - Response time is measured
-    - Connection to non-existent port fails appropriately
-    - Invalid hostname produces name resolution error
-
-    Backend: Local
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test TCP connection functionality."""
     tcp_port = tcp_udp_server['tcp_port']
 
     # Test successful connection to running server
@@ -92,19 +80,7 @@ def test_tcp_connection(tcp_udp_server):
 
 @pytest.mark.integration
 def test_udp_connection(tcp_udp_server):
-    """
-    Test UDP connection functionality.
-
-    Verifies that:
-    - Successful connection to running server returns success=True
-    - Response time is measured for UDP
-    - UDP to non-existent port succeeds (connectionless)
-    - Invalid hostname produces name resolution error
-
-    Backend: Local
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test UDP connection functionality."""
     udp_port = tcp_udp_server['udp_port']
 
     # Test successful connection to running server
@@ -126,18 +102,7 @@ def test_udp_connection(tcp_udp_server):
 
 @pytest.mark.integration
 def test_processor_ping_local_only(dummy_namespace):
-    """
-    Test Ping processor local execution with ping only.
-
-    Verifies that:
-    - Processor runs with ping-only configuration
-    - Result file is created
-    - No TCP/UDP tests are executed
-
-    Backend: Local (no Docker)
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test Ping processor local execution with ping only."""
     with tempfile.TemporaryDirectory() as temp_dir:
         with open(os.path.join(temp_dir, 'parameters'), 'w') as f:
             json.dump({
@@ -175,19 +140,7 @@ def test_processor_ping_local_only(dummy_namespace):
 
 @pytest.mark.integration
 def test_processor_ping_local_tcp_udp(dummy_namespace, tcp_udp_server):
-    """
-    Test Ping processor local execution with TCP and UDP tests.
-
-    Verifies that:
-    - Processor runs with TCP and UDP tests enabled
-    - TCP test results are present and successful
-    - UDP test results are present and successful
-    - Response times are measured
-
-    Backend: Local (no Docker)
-    Duration: ~5 seconds
-    Requirements: TCP/UDP test server fixture
-    """
+    """Test Ping processor local execution with TCP and UDP tests."""
     tcp_port = tcp_udp_server['tcp_port']
     udp_port = tcp_udp_server['udp_port']
 
@@ -247,26 +200,13 @@ def test_processor_ping_local_tcp_udp(dummy_namespace, tcp_udp_server):
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_processor_ping_job(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        docker_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_ping_processor, tcp_udp_server
 ):
-    """
-    Test Ping processor job execution via RTI.
-
-    Verifies that:
-    - Job can be submitted with TCP/UDP test parameters
-    - Job completes successfully
-    - Result data object is created and retrievable
-
-    Backend: Docker
-    Duration: ~30 seconds
-    Requirements: Docker, GitHub credentials
-    """
+    """Test Ping processor job execution via RTI."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_ping_processor.obj_id
     owner = session_node.keystore

@@ -26,18 +26,7 @@ def wait_for_condition(
     poll_interval: float = 1.0,
     timeout_message: str = "Condition not met within timeout"
 ) -> None:
-    """
-    Wait for a condition to become true.
-
-    Args:
-        condition: A callable that returns True when the condition is met.
-        timeout: Maximum time to wait in seconds.
-        poll_interval: Time between condition checks in seconds.
-        timeout_message: Message to include in the exception if timeout occurs.
-
-    Raises:
-        WaitTimeoutError: If the condition is not met within the timeout.
-    """
+    """Wait for a condition to become true."""
     start_time = time.time()
     while time.time() - start_time < timeout:
         if condition():
@@ -53,22 +42,7 @@ def wait_for_job_completion(
     timeout: float = 120.0,
     poll_interval: float = 1.0
 ) -> JobStatus:
-    """
-    Wait for a job to reach a terminal state.
-
-    Args:
-        rti_proxy: The RTI proxy to query for job status.
-        job_id: The ID of the job to wait for.
-        owner: The keystore of the job owner (for authorization).
-        timeout: Maximum time to wait in seconds.
-        poll_interval: Time between status checks in seconds.
-
-    Returns:
-        The final JobStatus once the job reaches a terminal state.
-
-    Raises:
-        WaitTimeoutError: If the job does not complete within the timeout.
-    """
+    """Wait for a job to reach a terminal state."""
     terminal_states = {
         JobStatus.State.SUCCESSFUL,
         JobStatus.State.CANCELLED,
@@ -94,21 +68,7 @@ def wait_for_processor_ready(
     timeout: float = 120.0,
     poll_interval: float = 1.0
 ) -> Processor:
-    """
-    Wait for a processor to become ready.
-
-    Args:
-        rti_proxy: The RTI proxy to query for processor state.
-        proc_id: The ID of the processor to wait for.
-        timeout: Maximum time to wait in seconds.
-        poll_interval: Time between state checks in seconds.
-
-    Returns:
-        The Processor object once it reaches the READY state.
-
-    Raises:
-        WaitTimeoutError: If the processor does not become ready within the timeout.
-    """
+    """Wait for a processor to become ready."""
     def is_ready() -> bool:
         proc = rti_proxy.get_proc(proc_id)
         return proc is not None and proc.state == Processor.State.READY
@@ -128,18 +88,7 @@ def wait_for_processor_undeployed(
     timeout: float = 120.0,
     poll_interval: float = 1.0
 ) -> None:
-    """
-    Wait for a processor to be fully undeployed.
-
-    Args:
-        rti_proxy: The RTI proxy to query for processor state.
-        proc_id: The ID of the processor to wait for.
-        timeout: Maximum time to wait in seconds.
-        poll_interval: Time between state checks in seconds.
-
-    Raises:
-        WaitTimeoutError: If the processor is not undeployed within the timeout.
-    """
+    """Wait for a processor to be fully undeployed."""
     def is_undeployed() -> bool:
         proc = rti_proxy.get_proc(proc_id)
         # Processor is undeployed when it's either None or not in BUSY_UNDEPLOY state

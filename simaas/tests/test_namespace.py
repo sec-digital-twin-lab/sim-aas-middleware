@@ -1,11 +1,4 @@
-"""Integration tests for the Namespace service.
-
-This module tests namespace functionality including:
-- Unknown user handling and authorization
-- DOR operations via namespace (add, search, get, remove)
-- Access control operations (grant, revoke, transfer ownership)
-- RTI operations via namespace (get processors, submit jobs)
-"""
+"""Integration tests for the Namespace service."""
 
 import json
 import logging
@@ -36,11 +29,7 @@ logger = Logging.get(__name__)
 
 @pytest.fixture()
 def random_content():
-    """Create a temporary JSON file with random content for testing.
-
-    Yields:
-        Path to a temporary JSON file containing a random integer value.
-    """
+    """Create a temporary JSON file with random content for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         content_path = os.path.join(tmpdir, 'test.json')
         with open(content_path, 'w') as f:
@@ -52,17 +41,7 @@ def random_content():
 
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
-    """Create a session-scoped P2P server node for namespace testing.
-
-    Creates a node with REST and DOR enabled but without RTI,
-    suitable for testing namespace DOR operations.
-
-    Args:
-        test_context: The test context providing node creation utilities.
-
-    Yields:
-        A configured Node instance.
-    """
+    """Create a session-scoped P2P server node for namespace testing."""
     keystore: Keystore = Keystore.new('p2p_server')
     _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
 
@@ -73,17 +52,7 @@ def p2p_server(test_context) -> Node:
 
 @pytest.fixture(scope="session")
 def known_user(p2p_server) -> Keystore:
-    """Create a keystore for a user known to the p2p_server.
-
-    The user's identity is registered with the server's database,
-    allowing them to perform authorized operations.
-
-    Args:
-        p2p_server: The P2P server node.
-
-    Returns:
-        A Keystore for the known user.
-    """
+    """Create a keystore for a user known to the p2p_server."""
     keystore = Keystore.new('unknown')
     p2p_server.db.update_identity(keystore.identity)
     return keystore
@@ -91,17 +60,7 @@ def known_user(p2p_server) -> Keystore:
 
 @pytest.fixture(scope="session")
 def unknown_user(p2p_server) -> Keystore:
-    """Create a keystore for a user unknown to the p2p_server.
-
-    This user's identity is NOT registered with the server,
-    so operations requiring authorization will fail.
-
-    Args:
-        p2p_server: The P2P server node (unused, but ensures ordering).
-
-    Returns:
-        A Keystore for the unknown user.
-    """
+    """Create a keystore for a user unknown to the p2p_server."""
     return Keystore.new('unknown')
 
 
@@ -111,17 +70,7 @@ def unknown_user(p2p_server) -> Keystore:
 
 @pytest.mark.integration
 def test_namespace_unknown_user(p2p_server, unknown_user):
-    """Test that unknown users cannot access namespace services.
-
-    Verifies that:
-    - Creating a namespace with an unknown user succeeds
-    - Attempting DOR operations with unknown user raises authorization error
-    - Error message indicates identity is unknown
-
-    Backend: N/A (DOR only)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test that unknown users cannot access namespace services."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), unknown_user)
 
     with pytest.raises(SaaSRuntimeException) as e:
@@ -131,22 +80,7 @@ def test_namespace_unknown_user(p2p_server, unknown_user):
 
 @pytest.mark.integration
 def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_user, random_content):
-    """Test DOR operations through namespace interface.
-
-    Verifies that:
-    - Adding data object with unknown owner fails with appropriate error
-    - Adding data object with unknown creator fails with appropriate error
-    - Adding data object with valid identities succeeds
-    - Search returns empty for non-matching criteria
-    - Search returns correct results for matching criteria
-    - Get metadata returns correct object information
-    - Get provenance returns object history
-    - Remove successfully deletes data object
-
-    Backend: N/A (DOR only)
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test DOR operations through namespace interface."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
 
     # unknown owner
@@ -202,26 +136,7 @@ def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_use
 
 @pytest.mark.integration
 def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, random_content):
-    """Test DOR access control operations through namespace interface.
-
-    Verifies that:
-    - Data objects can be added with restricted access
-    - Owner can retrieve content of restricted objects
-    - Non-owner cannot retrieve content of restricted objects
-    - Non-owner cannot grant access to objects they don't own
-    - Owner can grant access to other users
-    - Users with granted access can retrieve content
-    - Owner can revoke access from users
-    - Revoked users cannot retrieve content
-    - Non-owner cannot transfer ownership
-    - Owner can transfer ownership
-    - Non-owner (former owner) cannot remove transferred objects
-    - New owner can remove objects
-
-    Backend: N/A (DOR only)
-    Duration: ~10 seconds
-    Requirements: None
-    """
+    """Test DOR access control operations through namespace interface."""
     with tempfile.TemporaryDirectory() as temp_dir:
         other_user = p2p_server.keystore
         namespace0 = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
@@ -285,23 +200,12 @@ def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, rand
 
 @pytest.mark.integration
 def test_namespace_rti_job_procs(
-        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
+        docker_available, session_node, known_user, deployed_abc_processor
 ):
-    """Test RTI processor operations through namespace interface.
-
-    Verifies that:
-    - Deployed processors can be listed via namespace
-    - Individual processor details can be retrieved via namespace
-
-    Backend: Docker
-    Duration: ~5 seconds
-    Requirements: Docker, GitHub credentials, deployed ABC processor
-    """
+    """Test RTI processor operations through namespace interface."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     session_node.db.update_identity(known_user.identity)
     owner = session_node.keystore
@@ -317,27 +221,12 @@ def test_namespace_rti_job_procs(
 
 @pytest.mark.integration
 def test_namespace_rti_job_submit_status(
-        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
+        docker_available, session_node, known_user, deployed_abc_processor
 ):
-    """Test RTI job submission and status retrieval through namespace interface.
-
-    Verifies that:
-    - Jobs can be submitted via namespace
-    - Non-owner cannot retrieve job status (authorization check)
-    - Owner can retrieve job status
-    - Job completes successfully
-    - Output data object is created and retrievable
-    - Output contains expected computed value
-
-    Backend: Docker
-    Duration: ~30 seconds
-    Requirements: Docker, GitHub credentials, deployed ABC processor
-    """
+    """Test RTI job submission and status retrieval through namespace interface."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     session_node.db.update_identity(known_user.identity)
     proc_id = deployed_abc_processor.obj_id

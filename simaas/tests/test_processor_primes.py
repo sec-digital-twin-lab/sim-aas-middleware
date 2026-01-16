@@ -17,11 +17,11 @@ from examples.prime.factorisation.processor import Parameters as FactorisationPa
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, Job
-from simaas.tests.fixtures.core import BASE_DIR
-from simaas.tests.fixtures.mocks import DummyProgressListener
-from simaas.tests.helpers.waiters import wait_for_job_completion
-from simaas.tests.helpers.factories import TaskBuilder
-from simaas.tests.helpers.assertions import assert_job_successful
+from simaas.tests.fixture_core import BASE_DIR
+from simaas.tests.fixture_mocks import DummyProgressListener
+from simaas.tests.helper_waiters import wait_for_job_completion
+from simaas.tests.helper_factories import TaskBuilder
+from simaas.tests.helper_assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -29,18 +29,7 @@ logger = Logging.get(__name__)
 
 @pytest.mark.integration
 def test_processor_factor_search_local(dummy_namespace):
-    """
-    Test Factor Search processor local execution.
-
-    Verifies that:
-    - Processor correctly finds all non-trivial factors of 100
-    - Factors are [2, 4, 5, 10, 20, 25, 50]
-    - Result file is created and parseable
-
-    Backend: Local (no Docker)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test Factor Search processor local execution."""
     N = 100
     num_sub_jobs = 1
     step = N // num_sub_jobs
@@ -85,18 +74,7 @@ def test_processor_factor_search_local(dummy_namespace):
 
 @pytest.mark.integration
 def test_processor_factorisation_local(dummy_namespace):
-    """
-    Test Factorisation processor local execution with multiple sub-jobs.
-
-    Verifies that:
-    - Processor runs with 2 sub-jobs
-    - All non-trivial factors of 100 are found
-    - Sub-job coordination works correctly
-
-    Backend: Local (no Docker)
-    Duration: ~2 seconds
-    Requirements: None
-    """
+    """Test Factorisation processor local execution with multiple sub-jobs."""
     N = 100
     num_sub_jobs = 2
 
@@ -138,18 +116,7 @@ def test_processor_factorisation_local(dummy_namespace):
 
 @pytest.mark.integration
 def test_processor_factorisation_cancel(dummy_namespace):
-    """
-    Test cancelling a long-running factorisation job.
-
-    Verifies that:
-    - Long-running job can be submitted
-    - Job can be cancelled via RTI
-    - Job state becomes CANCELLED after cancellation
-
-    Backend: Local (DummyRTI)
-    Duration: ~5 seconds
-    Requirements: None
-    """
+    """Test cancelling a long-running factorisation job."""
     N = 987654321987
     num_sub_jobs = 2
 
@@ -193,26 +160,13 @@ def test_processor_factorisation_cancel(dummy_namespace):
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_processor_factor_search_job(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        docker_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_factor_search_processor
 ):
-    """
-    Test Factor Search processor job execution via RTI.
-
-    Verifies that:
-    - Job can be submitted with factor search parameters
-    - Job completes successfully
-    - Result contains correct factors of 100
-
-    Backend: Docker
-    Duration: ~30 seconds
-    Requirements: Docker, GitHub credentials
-    """
+    """Test Factor Search processor job execution via RTI."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_factor_search_processor.obj_id
     owner = session_node.keystore
@@ -250,26 +204,13 @@ def test_processor_factor_search_job(
 @pytest.mark.integration
 @pytest.mark.docker_only
 def test_processor_factorisation_job(
-        docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
+        docker_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_factorisation_processor, deployed_factor_search_processor
 ):
-    """
-    Test Factorisation processor job execution via RTI.
-
-    Verifies that:
-    - Job can be submitted with factorisation parameters
-    - Job spawns sub-jobs correctly
-    - All factors of 100 are found
-
-    Backend: Docker
-    Duration: ~60 seconds
-    Requirements: Docker, GitHub credentials
-    """
+    """Test Factorisation processor job execution via RTI."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     proc_id = deployed_factorisation_processor.obj_id
     owner = session_node.keystore

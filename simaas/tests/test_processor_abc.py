@@ -17,11 +17,11 @@ from examples.simple.abc.processor import ProcessorABC, write_value
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
-from simaas.tests.fixtures.core import BASE_DIR
-from simaas.tests.fixtures.mocks import DummyProgressListener
-from simaas.tests.helpers.waiters import wait_for_job_completion
-from simaas.tests.helpers.factories import create_abc_task
-from simaas.tests.helpers.assertions import assert_job_successful, assert_data_object_content
+from simaas.tests.fixture_core import BASE_DIR
+from simaas.tests.fixture_mocks import DummyProgressListener
+from simaas.tests.helper_waiters import wait_for_job_completion
+from simaas.tests.helper_factories import create_abc_task
+from simaas.tests.helper_assertions import assert_job_successful, assert_data_object_content
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -29,18 +29,7 @@ logger = Logging.get(__name__)
 
 @pytest.mark.integration
 def test_processor_abc_local_no_secret(dummy_namespace):
-    """
-    Test ABC processor local execution without secret environment variable.
-
-    Verifies that:
-    - Processor runs correctly with input values a=1 and b=2
-    - Progress messages are sent in expected order
-    - Output file 'c' is created with correct sum (3)
-
-    Backend: Local (no Docker)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test ABC processor local execution without secret environment variable."""
     with tempfile.TemporaryDirectory() as temp_dir:
         write_value(os.path.join(temp_dir, 'a'), 1)
         write_value(os.path.join(temp_dir, 'b'), 2)
@@ -87,18 +76,7 @@ def test_processor_abc_local_no_secret(dummy_namespace):
 
 @pytest.mark.integration
 def test_processor_abc_local_with_secret(dummy_namespace):
-    """
-    Test ABC processor local execution with secret environment variable.
-
-    Verifies that:
-    - Processor reads SECRET_ABC_KEY environment variable
-    - Output is the secret value (123) instead of the sum
-    - Progress messages reflect the secret being defined
-
-    Backend: Local (no Docker)
-    Duration: ~1 second
-    Requirements: None
-    """
+    """Test ABC processor local execution with secret environment variable."""
     with tempfile.TemporaryDirectory() as temp_dir:
         write_value(os.path.join(temp_dir, 'a'), 1)
         write_value(os.path.join(temp_dir, 'b'), 2)
@@ -146,18 +124,7 @@ def test_processor_abc_local_with_secret(dummy_namespace):
 def test_processor_abc_job_no_secret(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
-    """
-    Test ABC processor job execution via RTI without secret.
-
-    Verifies that:
-    - Job can be submitted with input values
-    - Job completes successfully
-    - Output data object is created with correct sum
-
-    Backend: Docker
-    Duration: ~30 seconds
-    Requirements: Docker
-    """
+    """Test ABC processor job execution via RTI without secret."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -185,18 +152,7 @@ def test_processor_abc_job_no_secret(
 def test_processor_abc_job_with_secret(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_abc_processor
 ):
-    """
-    Test ABC processor job execution via RTI with secret.
-
-    Verifies that:
-    - Job can be submitted with input values
-    - SECRET_ABC_KEY environment variable affects output
-    - Output data object contains secret value instead of sum
-
-    Backend: Docker
-    Duration: ~30 seconds
-    Requirements: Docker
-    """
+    """Test ABC processor job execution via RTI with secret."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
