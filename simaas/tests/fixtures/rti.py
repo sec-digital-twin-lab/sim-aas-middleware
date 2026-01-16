@@ -52,6 +52,8 @@ PROC_ABC_PATH = "examples/simple/abc"
 PROC_PING_PATH = "examples/simple/ping"
 PROC_ROOM_PATH = "examples/cosim/room"
 PROC_THERMOSTAT_PATH = "examples/cosim/thermostat"
+PROC_FACTORISATION_PATH = "examples/prime/factorisation"
+PROC_FACTOR_SEARCH_PATH = "examples/prime/factor_search"
 
 
 class RTIBackend(Enum):
@@ -350,6 +352,110 @@ def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, sessio
         # undeploy it
         rti_proxy.undeploy(proc_id, session_node.keystore)
         wait_for_processor_undeployed(rti_proxy, proc_id)
+
+
+@pytest.fixture(scope="session")
+def deployed_factorisation_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> DataObject:
+    """Session-scoped fixture that deploys the Factorisation processor.
+
+    The Factorisation processor computes non-trivial factors of a number by
+    spawning sub-jobs to search different ranges.
+
+    Yields:
+        DataObject representing the deployed processor
+    """
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
+    else:
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, 'proc-factorisation', PROC_FACTORISATION_PATH
+        )
+        proc_id = meta.obj_id
+
+        if not docker_available:
+            yield meta
+
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            wait_for_processor_ready(rti_proxy, proc_id)
+            logger.info(f"Processor deployed: {proc_id}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            wait_for_processor_undeployed(rti_proxy, proc_id)
+            logger.info(f"Processor undeployed: {proc_id}")
+
+
+@pytest.fixture(scope="session")
+def deployed_factor_search_processor(
+        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
+) -> DataObject:
+    """Session-scoped fixture that deploys the Factor Search processor.
+
+    The Factor Search processor searches for factors of a number within a
+    specified range. Used as a sub-processor by the Factorisation processor.
+
+    Yields:
+        DataObject representing the deployed processor
+    """
+    if not github_credentials_available:
+        yield DataObject(
+            obj_id='dummy',
+            c_hash='dummy',
+            data_type='dummy',
+            data_format='dummy',
+            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
+            owner_iid='dummy',
+            access_restricted=False,
+            access=[],
+            tags={},
+            last_accessed=0,
+            custodian=None,
+            content_encrypted=False,
+            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
+            recipe=None
+        )
+    else:
+        meta = add_test_processor(
+            dor_proxy, session_node.keystore, 'proc-factor-search', PROC_FACTOR_SEARCH_PATH
+        )
+        proc_id = meta.obj_id
+
+        if not docker_available:
+            yield meta
+
+        else:
+            # deploy it
+            rti_proxy.deploy(proc_id, session_node.keystore)
+            wait_for_processor_ready(rti_proxy, proc_id)
+            logger.info(f"Processor deployed: {proc_id}")
+
+            yield meta
+
+            # undeploy it
+            rti_proxy.undeploy(proc_id, session_node.keystore)
+            wait_for_processor_undeployed(rti_proxy, proc_id)
+            logger.info(f"Processor undeployed: {proc_id}")
 
 
 # ==============================================================================

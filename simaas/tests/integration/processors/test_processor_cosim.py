@@ -1,3 +1,9 @@
+"""Co-Simulation Processor integration tests.
+
+Tests for the Room and Thermostat co-simulation processors, verifying
+thermal feedback control simulation both locally and via Docker RTI.
+"""
+
 import json
 import logging
 import os
@@ -6,33 +12,34 @@ import threading
 import time
 
 import pytest
-from simaas.dor.schemas import DataObject
 
-from simaas.core.identity import Identity
-from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
-from simaas.core.logging import Logging
 from examples.cosim.room.processor import Parameters as RParameters, RoomProcessor, Result as RResult
 from examples.cosim.thermostat.processor import Parameters as TParameters, ThermostatProcessor, Result as TResult
-from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job, Processor
-from simaas.tests.conftest import BASE_DIR, DummyProgressListener, DummyNamespace, add_test_processor
+from simaas.core.identity import Identity
+from simaas.core.logging import Logging
+from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
+from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job
+from simaas.tests.fixtures.core import BASE_DIR
+from simaas.tests.fixtures.mocks import DummyProgressListener, DummyNamespace
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
-def test_cosim(dummy_namespace):
+@pytest.mark.integration
+def test_cosim_room_thermostat_local(dummy_namespace):
     """
-    Test case for the co-simulation of Room and Thermostat processors.
+    Test co-simulation of Room and Thermostat processors locally.
 
-    This test sets up two job processors — RoomProcessor and ThermostatProcessor — and runs them
-    concurrently using simulated job descriptions and directories. It simulates thermal feedback control
-    where the thermostat decides whether to heat the room based on temperature thresholds.
+    Verifies that:
+    - Both processors run concurrently in separate threads
+    - Socket-based co-simulation communication works
+    - Room temperature simulation responds to thermostat commands
+    - Both processors produce valid result files
 
-    The test verifies:
-    - Creation and use of input parameter files.
-    - Execution of both processors in separate threads.
-    - Successful socket-based co-simulation between the two.
-    - Proper generation of output result files.
+    Backend: Local (no Docker)
+    Duration: ~5 seconds
+    Requirements: None
     """
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -172,80 +179,25 @@ def test_cosim(dummy_namespace):
         print(result0.temp)   # list of room temperatures over time
         print(result1.state)  # list of [temperature, command] pairs from thermostat
 
-@pytest.fixture(scope="session")
-def deployed_room_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
-    # add test processor
-    meta = add_test_processor(
-        dor_proxy, session_node.keystore, 'proc-room', 'examples/cosim/room'
-    )
-    proc_id = meta.obj_id
 
-    if not docker_available:
-        yield meta
-
-    else:
-        # deploy it
-        rti_proxy.deploy(proc_id, session_node.keystore)
-        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-            logger.info(f"Waiting for processor to be ready: {proc}")
-            time.sleep(1)
-
-        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-        logger.info(f"Processor deployed: {proc}")
-
-        yield meta
-
-        # undeploy it
-        rti_proxy.undeploy(proc_id, session_node.keystore)
-        try:
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                logger.info(f"Waiting for processor to be ready: {proc}")
-                time.sleep(1)
-        except Exception as e:
-            print(e)
-
-        logger.info(f"Processor undeployed: {proc}")
-
-
-@pytest.fixture(scope="session")
-def deployed_thermostat_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
-    # add test processor
-    meta = add_test_processor(
-        dor_proxy, session_node.keystore, 'proc-thermostat', 'examples/cosim/thermostat'
-    )
-    proc_id = meta.obj_id
-
-    if not docker_available:
-        yield meta
-
-    else:
-        # deploy it
-        rti_proxy.deploy(proc_id, session_node.keystore)
-        while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-            logger.info(f"Waiting for processor to be ready: {proc}")
-            time.sleep(1)
-
-        assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-        logger.info(f"Processor deployed: {proc}")
-
-        yield meta
-
-        # undeploy it
-        rti_proxy.undeploy(proc_id, session_node.keystore)
-        try:
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                logger.info(f"Waiting for processor to be ready: {proc}")
-                time.sleep(1)
-        except Exception as e:
-            print(e)
-
-        logger.info(f"Processor undeployed: {proc}")
-
-
-def test_cosim_submit_list_get_job(
+@pytest.mark.integration
+@pytest.mark.docker_only
+def test_cosim_room_thermostat_job(
         docker_available, test_context, session_node, dor_proxy, rti_proxy, deployed_room_processor,
         deployed_thermostat_processor
 ):
+    """
+    Test co-simulation job execution via RTI.
+
+    Verifies that:
+    - Both Room and Thermostat jobs can be submitted together
+    - Jobs complete successfully in co-simulation mode
+    - Result data objects are created for both processors
+
+    Backend: Docker
+    Duration: ~60 seconds
+    Requirements: Docker
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 

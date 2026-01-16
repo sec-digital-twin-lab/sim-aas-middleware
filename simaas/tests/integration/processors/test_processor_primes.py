@@ -1,3 +1,9 @@
+"""Primes/Factorisation Processor integration tests.
+
+Tests for the Factor Search and Factorisation processors, verifying
+prime factor computation both locally and via Docker RTI.
+"""
+
 import json
 import logging
 import os
@@ -5,25 +11,32 @@ import tempfile
 import time
 
 import pytest
-from simaas.core.logging import Logging
-from examples.prime.factor_search.processor import Parameters as FactorSearchParameters, ProcessorFactorSearch, \
-    Result
+
+from examples.prime.factor_search.processor import Parameters as FactorSearchParameters, ProcessorFactorSearch, Result
 from examples.prime.factorisation.processor import Parameters as FactorisationParameters, ProcessorFactorisation
-from simaas.dor.schemas import DataObject
+from simaas.core.logging import Logging
 from simaas.nodedb.schemas import ResourceDescriptor
-from simaas.rti.schemas import JobStatus, Task, Job, Processor
-from simaas.tests.conftest import add_test_processor, BASE_DIR, DummyProgressListener
+from simaas.rti.schemas import JobStatus, Task, Job
+from simaas.tests.fixtures.core import BASE_DIR
+from simaas.tests.fixtures.mocks import DummyProgressListener
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
-def test_proc_factor_search(dummy_namespace):
+@pytest.mark.integration
+def test_processor_factor_search_local(dummy_namespace):
     """
-    Test the `ProcessorFactorSearch` processor by computing all non-trivial factors of a given number (N).
+    Test Factor Search processor local execution.
 
-    This test sets up a job to search for factors of 100 in a specified range, writes the input
-    parameters to a file, executes the processor, and then validates the results against known factors.
+    Verifies that:
+    - Processor correctly finds all non-trivial factors of 100
+    - Factors are [2, 4, 5, 10, 20, 25, 50]
+    - Result file is created and parseable
+
+    Backend: Local (no Docker)
+    Duration: ~1 second
+    Requirements: None
     """
     N = 100
     num_sub_jobs = 1
@@ -56,8 +69,8 @@ def test_proc_factor_search(dummy_namespace):
         result_path = os.path.join(temp_dir, 'result')
         assert os.path.isfile(result_path)
         with open(result_path, 'r') as f:
-            result: dict = json.load(f)
-            result: Result = Result.model_validate(result)
+            result_data: dict = json.load(f)
+            result: Result = Result.model_validate(result_data)
 
         print(result.factors)
         assert(result.factors == [2, 4, 5, 10, 20, 25, 50])
@@ -67,12 +80,19 @@ def test_proc_factor_search(dummy_namespace):
             print(f"N={N} is NOT prime")
 
 
-def test_proc_factorisation(dummy_namespace):
+@pytest.mark.integration
+def test_processor_factorisation_local(dummy_namespace):
     """
-    Test the `ProcessorFactorisation` processor by running a full factorisation job with multiple sub-jobs.
+    Test Factorisation processor local execution with multiple sub-jobs.
 
-    This test prepares a factorisation task for the number 100 with two sub-jobs, runs the processor,
-    and verifies that the correct set of factors is returned.
+    Verifies that:
+    - Processor runs with 2 sub-jobs
+    - All non-trivial factors of 100 are found
+    - Sub-job coordination works correctly
+
+    Backend: Local (no Docker)
+    Duration: ~2 seconds
+    Requirements: None
     """
     N = 100
     num_sub_jobs = 2
@@ -102,8 +122,8 @@ def test_proc_factorisation(dummy_namespace):
         result_path = os.path.join(temp_dir, 'result')
         assert os.path.isfile(result_path)
         with open(result_path, 'r') as f:
-            result: dict = json.load(f)
-            result: Result = Result.model_validate(result)
+            result_data: dict = json.load(f)
+            result: Result = Result.model_validate(result_data)
 
         print(result.factors)
         assert(result.factors == [2, 4, 5, 10, 20, 25, 50])
@@ -113,12 +133,19 @@ def test_proc_factorisation(dummy_namespace):
             print(f"N={N} is NOT prime")
 
 
-def test_proc_factorisation_cancel(dummy_namespace):
+@pytest.mark.integration
+def test_processor_factorisation_cancel(dummy_namespace):
     """
-    Test cancelling a long-running factorisation job via the RTI.
+    Test cancelling a long-running factorisation job.
 
-    This test submits a job to factor a large number, waits briefly, cancels it, and verifies
-    that the job's final state is CANCELLED.
+    Verifies that:
+    - Long-running job can be submitted
+    - Job can be cancelled via RTI
+    - Job state becomes CANCELLED after cancellation
+
+    Backend: Local (DummyRTI)
+    Duration: ~5 seconds
+    Requirements: None
     """
     N = 987654321987
     num_sub_jobs = 2
@@ -160,120 +187,24 @@ def test_proc_factorisation_cancel(dummy_namespace):
     assert status.state == JobStatus.State.CANCELLED
 
 
-@pytest.fixture(scope="session")
-def deployed_factorisation_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
-    else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-factorisation', 'examples/prime/factorisation'
-        )
-        proc_id = meta.obj_id
-
-        if not docker_available:
-            yield meta
-
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-                logger.info(f"Waiting for processor to be ready: {proc}")
-                time.sleep(1)
-
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
-
-
-@pytest.fixture(scope="session")
-def deployed_factor_search_processor(
-        docker_available, github_credentials_available, rti_proxy, dor_proxy, session_node
-) -> DataObject:
-    if not github_credentials_available:
-        yield DataObject(
-            obj_id='dummy',
-            c_hash='dummy',
-            data_type='dummy',
-            data_format='dummy',
-            created=DataObject.CreationDetails(timestamp=0, creators_iid=[]),
-            owner_iid='dummy',
-            access_restricted=False,
-            access=[],
-            tags={},
-            last_accessed=0,
-            custodian=None,
-            content_encrypted=False,
-            license=DataObject.License(by=False, sa=False, nc=False, nd=False),
-            recipe=None
-        )
-    else:
-        # add test processor
-        meta = add_test_processor(
-            dor_proxy, session_node.keystore, 'proc-factor-search', 'examples/prime/factor_search'
-        )
-        proc_id = meta.obj_id
-
-        if not docker_available:
-            yield meta
-
-        else:
-            # deploy it
-            rti_proxy.deploy(proc_id, session_node.keystore)
-            while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_DEPLOY:
-                logger.info(f"Waiting for processor to be ready: {proc}")
-                time.sleep(1)
-
-            assert(rti_proxy.get_proc(proc_id).state == Processor.State.READY)
-            logger.info(f"Processor deployed: {proc}")
-
-            yield meta
-
-            # undeploy it
-            rti_proxy.undeploy(proc_id, session_node.keystore)
-            try:
-                while (proc := rti_proxy.get_proc(proc_id)).state == Processor.State.BUSY_UNDEPLOY:
-                    logger.info(f"Waiting for processor to be ready: {proc}")
-                    time.sleep(1)
-            except Exception as e:
-                print(e)
-
-            logger.info(f"Processor undeployed: {proc}")
-
-
-def test_factor_search_submit_list_get_job(
+@pytest.mark.integration
+@pytest.mark.docker_only
+def test_processor_factor_search_job(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_factor_search_processor
 ):
+    """
+    Test Factor Search processor job execution via RTI.
+
+    Verifies that:
+    - Job can be submitted with factor search parameters
+    - Job completes successfully
+    - Result contains correct factors of 100
+
+    Backend: Docker
+    Duration: ~30 seconds
+    Requirements: Docker, GitHub credentials
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -342,18 +273,32 @@ def test_factor_search_submit_list_get_job(
 
     # read the result
     with open(download_path, 'r') as f:
-        result: dict = json.load(f)
-        result: Result = Result.model_validate(result)
+        result_data: dict = json.load(f)
+        result: Result = Result.model_validate(result_data)
 
     # print the result
     print(result.factors)
     assert (result.factors == [2, 4, 5, 10, 20, 25, 50])
 
 
-def test_factorisation_submit_list_get_job(
+@pytest.mark.integration
+@pytest.mark.docker_only
+def test_processor_factorisation_job(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_factorisation_processor, deployed_factor_search_processor
 ):
+    """
+    Test Factorisation processor job execution via RTI.
+
+    Verifies that:
+    - Job can be submitted with factorisation parameters
+    - Job spawns sub-jobs correctly
+    - All factors of 100 are found
+
+    Backend: Docker
+    Duration: ~60 seconds
+    Requirements: Docker, GitHub credentials
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -420,8 +365,8 @@ def test_factorisation_submit_list_get_job(
 
     # read the result
     with open(download_path, 'r') as f:
-        result: dict = json.load(f)
-        result: Result = Result.model_validate(result)
+        result_data: dict = json.load(f)
+        result: Result = Result.model_validate(result_data)
 
     # print the result
     print(result.factors)

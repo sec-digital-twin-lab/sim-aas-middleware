@@ -1,3 +1,9 @@
+"""Ping Processor integration tests.
+
+Tests for the Ping processor, verifying TCP/UDP connectivity testing
+functionality both locally and via Docker RTI.
+"""
+
 import json
 import logging
 import os
@@ -12,7 +18,8 @@ from examples.simple.ping.server import CombinedTestServer
 from simaas.core.logging import Logging
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
-from simaas.tests.conftest import BASE_DIR, DummyProgressListener
+from simaas.tests.fixtures.core import BASE_DIR
+from simaas.tests.fixtures.mocks import DummyProgressListener
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -20,28 +27,46 @@ logger = Logging.get(__name__)
 
 @pytest.fixture
 def tcp_udp_server():
-    """Fixture that starts a test server for TCP/UDP connectivity testing"""
+    """Fixture that starts a test server for TCP/UDP connectivity testing.
+
+    Provides:
+        - TCP server on port 8080
+        - UDP server on port 8081
+    """
     tcp_port = 8080
     udp_port = 8081
     server = CombinedTestServer('localhost', tcp_port, udp_port)
-    
+
     # Start server in a separate thread
     server_thread = threading.Thread(target=server.start)
     server_thread.daemon = True
     server_thread.start()
-    
+
     # Give the server time to start
     time.sleep(1)
-    
+
     yield {'tcp_port': tcp_port, 'udp_port': udp_port, 'server': server}
-    
+
     # Cleanup: stop the server
     server.stop()
     time.sleep(0.5)  # Give time for cleanup
 
 
+@pytest.mark.integration
 def test_tcp_connection(tcp_udp_server):
-    """Test TCP connection functionality"""
+    """
+    Test TCP connection functionality.
+
+    Verifies that:
+    - Successful connection to running server returns success=True
+    - Response time is measured
+    - Connection to non-existent port fails appropriately
+    - Invalid hostname produces name resolution error
+
+    Backend: Local
+    Duration: ~5 seconds
+    Requirements: None
+    """
     tcp_port = tcp_udp_server['tcp_port']
 
     # Test successful connection to running server
@@ -62,8 +87,21 @@ def test_tcp_connection(tcp_udp_server):
     assert 'Name resolution failed' in result['error']
 
 
+@pytest.mark.integration
 def test_udp_connection(tcp_udp_server):
-    """Test UDP connection functionality"""
+    """
+    Test UDP connection functionality.
+
+    Verifies that:
+    - Successful connection to running server returns success=True
+    - Response time is measured for UDP
+    - UDP to non-existent port succeeds (connectionless)
+    - Invalid hostname produces name resolution error
+
+    Backend: Local
+    Duration: ~5 seconds
+    Requirements: None
+    """
     udp_port = tcp_udp_server['udp_port']
 
     # Test successful connection to running server
@@ -83,7 +121,20 @@ def test_udp_connection(tcp_udp_server):
     assert 'Name resolution failed' in result['error']
 
 
-def test_proc_ping_only(dummy_namespace):
+@pytest.mark.integration
+def test_processor_ping_local_only(dummy_namespace):
+    """
+    Test Ping processor local execution with ping only.
+
+    Verifies that:
+    - Processor runs with ping-only configuration
+    - Result file is created
+    - No TCP/UDP tests are executed
+
+    Backend: Local (no Docker)
+    Duration: ~5 seconds
+    Requirements: None
+    """
     with tempfile.TemporaryDirectory() as temp_dir:
         with open(os.path.join(temp_dir, 'parameters'), 'w') as f:
             json.dump({
@@ -119,8 +170,21 @@ def test_proc_ping_only(dummy_namespace):
             print(content)
 
 
-def test_proc_ping_tcp_udp(dummy_namespace, tcp_udp_server):
-    """Test processor with TCP and UDP connectivity tests enabled"""
+@pytest.mark.integration
+def test_processor_ping_local_tcp_udp(dummy_namespace, tcp_udp_server):
+    """
+    Test Ping processor local execution with TCP and UDP tests.
+
+    Verifies that:
+    - Processor runs with TCP and UDP tests enabled
+    - TCP test results are present and successful
+    - UDP test results are present and successful
+    - Response times are measured
+
+    Backend: Local (no Docker)
+    Duration: ~5 seconds
+    Requirements: TCP/UDP test server fixture
+    """
     tcp_port = tcp_udp_server['tcp_port']
     udp_port = tcp_udp_server['udp_port']
 
@@ -177,10 +241,24 @@ def test_proc_ping_tcp_udp(dummy_namespace, tcp_udp_server):
             assert result['udp_test']['error'] is None
 
 
-def test_ping_submit_list_get_job(
+@pytest.mark.integration
+@pytest.mark.docker_only
+def test_processor_ping_job(
         docker_available, github_credentials_available, test_context, session_node, dor_proxy, rti_proxy,
         deployed_ping_processor, tcp_udp_server
 ):
+    """
+    Test Ping processor job execution via RTI.
+
+    Verifies that:
+    - Job can be submitted with TCP/UDP test parameters
+    - Job completes successfully
+    - Result data object is created and retrievable
+
+    Backend: Docker
+    Duration: ~30 seconds
+    Requirements: Docker, GitHub credentials
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 

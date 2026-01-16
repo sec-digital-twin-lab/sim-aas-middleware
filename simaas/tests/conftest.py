@@ -71,6 +71,8 @@ from simaas.tests.fixtures.rti import (
     deployed_ping_processor,
     deployed_room_processor,
     deployed_thermostat_processor,
+    deployed_factorisation_processor,
+    deployed_factor_search_processor,
     docker_non_strict_node,
     docker_strict_node,
     ssh_tunnel,
@@ -89,6 +91,8 @@ from simaas.tests.fixtures.rti import (
     PROC_PING_PATH,
     PROC_ROOM_PATH,
     PROC_THERMOSTAT_PATH,
+    PROC_FACTORISATION_PATH,
+    PROC_FACTOR_SEARCH_PATH,
 )
 
 
