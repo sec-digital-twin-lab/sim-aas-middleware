@@ -1,3 +1,5 @@
+"""Integration tests for the P2P networking service."""
+
 import asyncio
 import json
 import logging
@@ -30,8 +32,13 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
+# ==============================================================================
+# Module-level fixtures
+# ==============================================================================
+
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
+    """Create a session-scoped P2P server node for networking tests."""
     keystore: Keystore = Keystore.new('p2p_server')
     _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
     _node.p2p.add(P2PLatency())
@@ -44,6 +51,7 @@ def p2p_server(test_context) -> Node:
 
 @pytest.fixture(scope="session")
 def p2p_client(test_context) -> Node:
+    """Create a session-scoped P2P client node for networking tests."""
     keystore: Keystore = Keystore.new('p2p_client')
     _node: Node = test_context.get_node(keystore, enable_rest=False, dor_plugin_class=None, rti_plugin_class=None)
 
@@ -52,8 +60,14 @@ def p2p_client(test_context) -> Node:
     _node.shutdown(leave_network=False)
 
 
+# ==============================================================================
+# P2P Tests
+# ==============================================================================
+
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_latency(p2p_server, p2p_client):
+    """Test P2P latency measurement between peers."""
     try:
         peer_address = P2PAddress(
             address=p2p_server.p2p.address(),
@@ -70,8 +84,10 @@ async def test_p2p_latency(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_throughput(p2p_server, p2p_client):
+    """Test P2P throughput measurement between peers."""
     try:
         peer_address = P2PAddress(
             address=p2p_server.p2p.address(),
@@ -89,8 +105,10 @@ async def test_p2p_throughput(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_unreachable(p2p_server, p2p_client):
+    """Test handling of unreachable P2P peers."""
     protocol = P2PUpdateIdentity(p2p_client)
 
     info: NodeInfo = p2p_server.info
@@ -105,8 +123,10 @@ async def test_p2p_unreachable(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_update_identity(p2p_server, p2p_client):
+    """Test P2P identity update protocol."""
     protocol = P2PUpdateIdentity(p2p_client)
 
     try:
@@ -116,8 +136,10 @@ async def test_p2p_update_identity(p2p_server, p2p_client):
         assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_join_leave_network(p2p_server, p2p_client):
+    """Test P2P network join and leave operations."""
     networkS: List[NodeInfo] = p2p_server.db.get_network()
     networkC: List[NodeInfo] = p2p_client.db.get_network()
     assert len(networkS) == 1
@@ -144,8 +166,10 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
     assert len(networkC) == 2
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
+    """Test P2P data object lookup and fetch operations."""
     # client is supposed to be the owner of the data object -> make the server aware of the identity
     owner = p2p_client.identity
     nodedb = NodeDBProxy(p2p_server.rest.address())
@@ -193,8 +217,10 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
             assert False
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_p2p_lookup_fetch_data_object_restricted(p2p_server):
+async def test_p2p_fetch_restricted(p2p_server):
+    """Test P2P fetch of restricted data objects with access control."""
     with tempfile.TemporaryDirectory() as temp_dir:
         # create a fresh client node
         keystore = Keystore.new(f"keystore-{get_timestamp_now()}")

@@ -1,3 +1,5 @@
+"""Integration tests for the Namespace service."""
+
 import json
 import logging
 import os
@@ -21,10 +23,14 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
+# ==============================================================================
+# Module-level fixtures
+# ==============================================================================
+
 @pytest.fixture()
 def random_content():
+    """Create a temporary JSON file with random content for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        # create content
         content_path = os.path.join(tmpdir, 'test.json')
         with open(content_path, 'w') as f:
             f.write(json.dumps({
@@ -35,6 +41,7 @@ def random_content():
 
 @pytest.fixture(scope="session")
 def p2p_server(test_context) -> Node:
+    """Create a session-scoped P2P server node for namespace testing."""
     keystore: Keystore = Keystore.new('p2p_server')
     _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
 
@@ -45,6 +52,7 @@ def p2p_server(test_context) -> Node:
 
 @pytest.fixture(scope="session")
 def known_user(p2p_server) -> Keystore:
+    """Create a keystore for a user known to the p2p_server."""
     keystore = Keystore.new('unknown')
     p2p_server.db.update_identity(keystore.identity)
     return keystore
@@ -52,10 +60,17 @@ def known_user(p2p_server) -> Keystore:
 
 @pytest.fixture(scope="session")
 def unknown_user(p2p_server) -> Keystore:
+    """Create a keystore for a user unknown to the p2p_server."""
     return Keystore.new('unknown')
 
 
+# ==============================================================================
+# Namespace Tests
+# ==============================================================================
+
+@pytest.mark.integration
 def test_namespace_unknown_user(p2p_server, unknown_user):
+    """Test that unknown users cannot access namespace services."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), unknown_user)
 
     with pytest.raises(SaaSRuntimeException) as e:
@@ -63,7 +78,9 @@ def test_namespace_unknown_user(p2p_server, unknown_user):
     assert 'Namespace request authorisation failed: identity unknown' in e.value.reason
 
 
+@pytest.mark.integration
 def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_user, random_content):
+    """Test DOR operations through namespace interface."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
 
     # unknown owner
@@ -117,7 +134,9 @@ def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_use
     assert result is not None
 
 
+@pytest.mark.integration
 def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, random_content):
+    """Test DOR access control operations through namespace interface."""
     with tempfile.TemporaryDirectory() as temp_dir:
         other_user = p2p_server.keystore
         namespace0 = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
@@ -179,14 +198,14 @@ def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, rand
         namespace1.dor.remove(meta.obj_id)
 
 
+@pytest.mark.integration
 def test_namespace_rti_job_procs(
-        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
+        docker_available, session_node, known_user, deployed_abc_processor
 ):
+    """Test RTI processor operations through namespace interface."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     session_node.db.update_identity(known_user.identity)
     owner = session_node.keystore
@@ -200,14 +219,14 @@ def test_namespace_rti_job_procs(
     assert proc is not None
 
 
+@pytest.mark.integration
 def test_namespace_rti_job_submit_status(
-        docker_available, github_credentials_available, session_node, known_user, deployed_abc_processor
+        docker_available, session_node, known_user, deployed_abc_processor
 ):
+    """Test RTI job submission and status retrieval through namespace interface."""
     if not docker_available:
         pytest.skip("Docker is not available")
 
-    if not github_credentials_available:
-        pytest.skip("Github credentials not available")
 
     session_node.db.update_identity(known_user.identity)
     proc_id = deployed_abc_processor.obj_id

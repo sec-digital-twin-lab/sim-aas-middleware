@@ -1,5 +1,6 @@
 import socket
 import traceback
+from contextlib import asynccontextmanager
 from typing import List, Optional
 
 import uvicorn
@@ -25,11 +26,16 @@ DOCS_ENDPOINT_PREFIX = "/api/v1"
 
 class RESTApp:
     def __init__(self, origins: list[str] = None) -> None:
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            yield
+            await self.close()
+
         self.api = FastAPI(
             openapi_url=f"{DOCS_ENDPOINT_PREFIX}/openapi.json",
-            docs_url=f"{DOCS_ENDPOINT_PREFIX}/docs"
+            docs_url=f"{DOCS_ENDPOINT_PREFIX}/docs",
+            lifespan=lifespan
         )
-        self.api.on_event("shutdown")(self.close)
 
         @self.api.exception_handler(SaaSRuntimeException)
         async def saas_exception_handler(_: Request, e: SaaSRuntimeException):

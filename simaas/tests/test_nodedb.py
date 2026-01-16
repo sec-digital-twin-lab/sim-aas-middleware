@@ -1,3 +1,5 @@
+"""Integration tests for the Node Database (NodeDB) service."""
+
 import pytest
 import os
 import logging
@@ -22,8 +24,13 @@ Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
 
 
+# ==============================================================================
+# Module-level fixtures
+# ==============================================================================
+
 @pytest.fixture(scope="module")
 def module_node(test_context, extra_keystores) -> Node:
+    """Create a module-scoped node for nodedb testing."""
     _node: Node = test_context.get_node(
         extra_keystores[0], enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None
     )
@@ -35,30 +42,43 @@ def module_node(test_context, extra_keystores) -> Node:
 
 @pytest.fixture(scope="module")
 def module_nodedb_proxy(module_node) -> NodeDBProxy:
+    """Create a module-scoped NodeDB proxy for testing."""
     proxy = NodeDBProxy(module_node.info.rest_address)
     return proxy
 
 
+# ==============================================================================
+# NodeDB Tests
+# ==============================================================================
+
+@pytest.mark.integration
 def test_rest_get_node(module_node, module_nodedb_proxy):
+    """Test getting node information via REST API."""
     result: NodeInfo = module_nodedb_proxy.get_node()
     assert result is not None
     assert result.identity.id == module_node.identity.id
 
 
+@pytest.mark.integration
 def test_rest_get_network(module_node, module_nodedb_proxy):
+    """Test getting network information via REST API."""
     result: List[NodeInfo] = module_nodedb_proxy.get_network()
     assert result is not None
     assert len(result) > 0
 
 
+@pytest.mark.integration
 def test_rest_get_identities(module_node, module_nodedb_proxy):
+    """Test getting all identities via REST API."""
     result: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     assert result is not None
     assert len(result) > 0
     assert module_node.identity.id in result
 
 
+@pytest.mark.integration
 def test_rest_get_identity_valid(module_node, module_nodedb_proxy):
+    """Test getting a valid identity via REST API."""
     valid_iid = module_node.identity.id
 
     result: Optional[Identity] = module_nodedb_proxy.get_identity(valid_iid)
@@ -66,14 +86,18 @@ def test_rest_get_identity_valid(module_node, module_nodedb_proxy):
     assert result.id == valid_iid
 
 
+@pytest.mark.integration
 def test_rest_get_identity_invalid(module_node, module_nodedb_proxy):
+    """Test getting an invalid identity via REST API."""
     invalid_iid = 'f00baa'
 
     result: Optional[Identity] = module_nodedb_proxy.get_identity(invalid_iid)
     assert result is None
 
 
+@pytest.mark.integration
 def test_rest_update_identity_existing(module_node, module_nodedb_proxy):
+    """Test updating an existing identity via REST API."""
     identities: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     n0 = len(identities)
 
@@ -102,7 +126,9 @@ def test_rest_update_identity_existing(module_node, module_nodedb_proxy):
     assert n0 == n2
 
 
+@pytest.mark.integration
 def test_rest_update_identity_extra(module_node, module_nodedb_proxy):
+    """Test adding a new identity via REST API."""
     identities: Dict[str, Identity] = module_nodedb_proxy.get_identities()
     n0 = len(identities)
 
@@ -115,7 +141,9 @@ def test_rest_update_identity_extra(module_node, module_nodedb_proxy):
     assert n1 == n0 + 1
 
 
+@pytest.mark.integration
 def test_different_address(test_context, module_node, module_nodedb_proxy):
+    """Test handling of nodes with conflicting P2P addresses."""
     p2p_address = PortMaster.generate_p2p_address(test_context.host)
 
     with tempfile.TemporaryDirectory() as tempdir:
@@ -202,7 +230,9 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         assert node1.identity.id not in network
 
 
+@pytest.mark.integration
 def test_join_leave_protocol():
+    """Test network join and leave protocols."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
         for i in range(3):
@@ -271,7 +301,9 @@ def test_join_leave_protocol():
                 assert network[0].identity.id == node.identity.id
 
 
+@pytest.mark.integration
 def test_update_identity():
+    """Test identity update propagation across network."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
         for i in range(3):
@@ -327,7 +359,9 @@ def test_update_identity():
         assert nonce0_by2_after == nonce0_by2_before + 2
 
 
+@pytest.mark.integration
 def test_touch_data_object(module_node, module_nodedb_proxy):
+    """Test last_seen timestamp updates for identities."""
     # get the identity last seen
     identity: Identity = module_nodedb_proxy.get_identity(module_node.identity.id)
     last_seen = identity.last_seen
@@ -340,7 +374,9 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
     assert identity.last_seen > last_seen
 
 
+@pytest.mark.integration
 def test_namespace_update(test_context):
+    """Test namespace creation and propagation across network."""
     namespace = 'my_namespace'
 
     # create nodes
@@ -377,7 +413,9 @@ def test_namespace_update(test_context):
         assert ns_info.budget.memory == 4096
 
 
+@pytest.mark.integration
 def test_namespace_reserve_cancel(test_context):
+    """Test namespace resource reservation and cancellation."""
     namespace = 'my_namespace'
     budget = ResourceDescriptor(vcpus=2, memory=2048)
 

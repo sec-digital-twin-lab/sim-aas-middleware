@@ -521,7 +521,7 @@ class DefaultDORService(DORRESTService):
         """
         with self._Session() as session:
             # do we have an object with this id?
-            record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+            record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
             if record is None:
                 return None
 
@@ -605,7 +605,7 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
@@ -632,7 +632,7 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
@@ -659,7 +659,7 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
@@ -680,7 +680,7 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
@@ -701,7 +701,7 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
@@ -719,11 +719,11 @@ class DefaultDORService(DORRESTService):
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
                     raise DataObjectNotFoundError(obj_id)
 
                 # update the last accessed timestamp of this data object
-                record: DataObjectRecord = session.query(DataObjectRecord).get(obj_id)
+                record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 record.last_accessed = get_timestamp_now()
                 session.commit()

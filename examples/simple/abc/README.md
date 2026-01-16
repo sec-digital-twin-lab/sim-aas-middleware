@@ -46,13 +46,13 @@ Test cases with working code can be found in [test_example_abc.py](../../simaas/
 The first step is to build the Processor Docker Image for the example. Use a terminal and
 navigate to the `abc` folder, then use the CLI build command:
 ```shell
-simaas-cli build-local .
+simaas-cli image build-local .
 ```
 
 You may want to specify the target platform explicitly (e.g., when planning to run it on 
 a node using AWS RTI service):
 ```shell
-simaas-cli build-local --arch linux/amd64 .
+simaas-cli image build-local --arch linux/amd64 .
 ```
 
 An example dialogue will look like this:

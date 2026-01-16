@@ -517,7 +517,7 @@ class AWSRTIService(RTIServiceBase):
         # remove the record from the db
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBDeployedProcessor).get(proc.id)
+                record = session.get(DBDeployedProcessor, proc.id)
                 if record:
                     session.delete(record)
                     session.commit()

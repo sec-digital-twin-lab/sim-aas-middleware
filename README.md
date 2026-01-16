@@ -3,7 +3,7 @@ The Sim-aaS Middleware provides the infrastructure to facilitate deployment and 
 of federations of computational models.
 
 ## Prerequisites
-- Python 3.12
+- Python 3.13
 - Linux or MacOS operating system (not tested with Windows)
 - Docker (needed to build Processor Docker Images)
 
@@ -12,21 +12,31 @@ of federations of computational models.
 Clone the repository:
 ```shell
 git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware
+cd sim-aas-middleware
 ```
 
 Create and activate the virtual environment:
 ```shell
-python3.12 -m venv venv
-source venv/bin/activate
+python3.13 -m venv .venv
+source .venv/bin/activate
 ```
 
-Install the Sim-aaS Middleware:
+Install dependencies and the Sim-aaS Middleware:
 ```shell
-pip install ./sim-aas-middleware
+pip install -r requirements.txt
+pip install -e .
 ```
+
+The repository includes built-in plugins for storage and execution:
+- `plugins/dor_default` - Default Data Object Repository (SQLite-based storage)
+- `plugins/rti_docker` - Local Docker-based job execution
+- `plugins/rti_aws` - AWS Batch-based cloud execution
+
+Plugin dependencies are included in `requirements.txt`. For AWS RTI usage, additional
+environment configuration is required - see [AWS RTI Service](docs/usage_run_simaas_node.md#aws-rti-service).
 
 Once done, you may deactivate the virtual environment - or keep it activated if you want
-to starting using the Sim-aaS Middleware:
+to start using the Sim-aaS Middleware:
 ```shell
 deactivate
 ```
@@ -62,6 +72,7 @@ some of the examples (see next section):
 ### Examples
 Learn more about building and running processors by looking at example implementations:
 - [Simple Example: Basic Input/Output Processor](examples/simple/abc/README.md)
+- [Ping Example: Network Connectivity Testing](examples/simple/ping/README.md)
 - [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
 - [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
 
@@ -105,3 +116,25 @@ Learn more about related topics:
 - [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
 - [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
 - [Processor Dockerfile](docs/processor_dockerfile.md)
+
+## Development
+
+For contributing to the Sim-aaS Middleware:
+
+- [Architecture Overview](docs/dev_overview.md) - Design principles, system architecture, core services
+- [Component Reference](docs/dev_components.md) - DOR, RTI, P2P, NodeDB, REST, CLI internals
+- [Plugin Development](docs/dev_plugins.md) - Creating custom DOR and RTI plugins
+- [Testing Guide](docs/dev_testing.md) - Environment setup, running tests, coverage
+
+### Quick Start
+
+```bash
+# Run all tests
+.venv/bin/python -m pytest simaas/tests/ -v
+
+# Run with coverage
+.venv/bin/python -m coverage run -m pytest simaas/tests/ -v
+.venv/bin/python -m coverage report --ignore-errors --include="simaas/*" --omit="simaas/tests/*"
+```
+
+See [TEST_STATS.md](TEST_STATS.md) for test timings and coverage details.
