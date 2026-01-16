@@ -24,7 +24,8 @@ from simaas.core.helpers import get_timestamp_now
 
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork
 from simaas.nodedb.schemas import NamespaceInfo
-from simaas.rti.default import DBJobInfo, DefaultRTIService
+from simaas.rti.base import DBJobInfo
+from plugins.rti_docker import DefaultRTIService
 from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
     DORAccessGrant, DORAccessRevoke
 from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
@@ -41,7 +42,7 @@ from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
 from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip, find_processors
 from simaas.node.base import Node
-from simaas.node.default import DefaultNode, DORType, RTIType
+from simaas.node.default import DefaultNode
 from simaas.p2p.base import P2PAddress
 from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
@@ -1251,7 +1252,7 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
         target_node = DefaultNode.create(
             keystore=Keystore.new('dor-target'), storage_path=target_node_storage_path,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-            enable_db=True, dor_type=DORType.NONE, rti_type=RTIType.DOCKER,
+            enable_db=True, dor_plugin_class=None, rti_plugin_class=DefaultRTIService,
             retain_job_history=True, strict_deployment=False
         )
 
@@ -2658,8 +2659,8 @@ def test_cli_service(temp_dir):
             'rest-address': f'{host}:{rest_port}',
             'p2p-address': p2p_address,
             'boot-node': f'{host}:{p2p_port}',
-            'dor_type': 'basic',
-            'rti_type': 'docker',
+            'dor': 'default',
+            'rti': 'docker',
             'retain-job-history': False,
             'strict-deployment': False,
             'bind-all-address': False,

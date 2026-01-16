@@ -1094,15 +1094,93 @@ class CustomProtocol(P2PProtocol):
 ```python
 def add_custom_endpoints(rest_service: RESTService) -> None:
     """Add domain-specific REST endpoints"""
-    
+
     router = APIRouter()
-    
+
     @router.get("/custom/endpoint")
     async def custom_endpoint(auth: Identity = Depends(authenticate)):
         return {"custom": "response"}
-    
+
     rest_service.add_custom_endpoints(router)
 ```
+
+### DOR/RTI Plugin Development
+
+The DOR (Data Object Repository) and RTI (Runtime Infrastructure) services are implemented
+as plugins, allowing custom implementations for different storage backends or execution
+environments.
+
+#### Plugin Directory Structure
+Plugins are organized in the `plugins/` directory with the following structure:
+```
+plugins/
+  dor_default/           # DOR plugin using SQLite
+    __init__.py          # Exports the service class
+    service.py           # Implementation
+    requirements.txt     # Plugin-specific dependencies
+  rti_docker/            # RTI plugin for local Docker execution
+    __init__.py
+    service.py
+    requirements.txt
+  rti_aws/               # RTI plugin for AWS Batch execution
+    __init__.py
+    service.py
+    requirements.txt
+```
+
+#### Creating a DOR Plugin
+DOR plugins must implement the `DORInterface` and provide a `plugin_name()` class method:
+
+```python
+# plugins/dor_custom/__init__.py
+from .service import CustomDORService
+__all__ = ['CustomDORService']
+
+# plugins/dor_custom/service.py
+from simaas.dor.api import DORInterface
+
+class CustomDORService(DORInterface):
+    @classmethod
+    def plugin_name(cls) -> str:
+        return "custom"  # Name shown in CLI selection
+
+    def __init__(self, node, db_path: str):
+        # Initialize your storage backend
+        pass
+
+    # Implement all DORInterface methods...
+```
+
+#### Creating an RTI Plugin
+RTI plugins must extend `RTIServiceBase` and provide a `plugin_name()` class method:
+
+```python
+# plugins/rti_custom/__init__.py
+from .service import CustomRTIService
+__all__ = ['CustomRTIService']
+
+# plugins/rti_custom/service.py
+from simaas.rti.base import RTIServiceBase
+
+class CustomRTIService(RTIServiceBase):
+    @classmethod
+    def plugin_name(cls) -> str:
+        return "custom"  # Name shown in CLI selection
+
+    def __init__(self, node, db_path: str, retain_job_history: bool = False,
+                 strict_deployment: bool = True):
+        super().__init__(node, db_path, retain_job_history, strict_deployment)
+
+    # Override methods for custom execution environment...
+```
+
+#### Plugin Discovery
+Plugins are discovered automatically at startup from:
+1. The built-in `plugins/` directory in the Sim-aaS Middleware repository
+2. Additional directories specified via `--plugins` CLI argument
+
+The plugin name (returned by `plugin_name()`) is used for CLI selection. Plugin folder
+names should use underscores (e.g., `dor_postgres`, `rti_kubernetes`).
 
 ### Security and Compliance Extensions
 

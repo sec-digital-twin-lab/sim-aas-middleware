@@ -15,8 +15,8 @@ from simaas.core.identity import Identity
 from simaas.helpers import docker_container_list
 from examples.cosim.room.processor import Result as RResult
 from examples.cosim.thermostat.processor import Result as TResult
-from simaas.node.default import RTIType
-from simaas.rti.default import DefaultRTIService
+
+from plugins.rti_docker import DefaultRTIService
 
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
@@ -44,7 +44,7 @@ def non_strict_node(test_context, github_credentials_available):
                 REPOSITORY_URL,
                 GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
             )
-        _node = test_context.get_node(keystore, rti_type=RTIType.DOCKER, enable_rest=True, strict_deployment=False)
+        _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=False)
         yield _node
 
 
@@ -57,7 +57,7 @@ def strict_node(test_context, extra_keystores, github_credentials_available):
                 REPOSITORY_URL,
                 GithubCredentials(login=os.environ['GITHUB_USERNAME'], personal_access_token=os.environ['GITHUB_TOKEN'])
             )
-        _node = test_context.get_node(keystore, rti_type=RTIType.DOCKER, enable_rest=True, strict_deployment=True)
+        _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=True)
         yield _node
 
 

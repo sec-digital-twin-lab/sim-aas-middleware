@@ -358,6 +358,10 @@ class AWSRTIService(RTIServiceBase):
         os.makedirs(self._jobs_path, exist_ok=True)
         os.makedirs(self._procs_path, exist_ok=True)
 
+    @classmethod
+    def plugin_name(cls) -> str:
+        return 'aws'
+
     def type(self) -> str:
         return 'aws'
 

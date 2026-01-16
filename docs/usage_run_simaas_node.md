@@ -19,27 +19,51 @@ The boot node will be referenced by its REST address and can be any node in the 
 If the node that is the first node in the network, it can connect to itself. 
 
 ## Storage and Execution Nodes
-Nodes can be configured to act as storage-only nodes (by only starting the DOR service), 
-execution-only nodes (by only starting the RTI service), or as full nodes (by starting DOR 
-and RTI services). If starting a node interactively, the user is prompted to select what DOR 
-service to use:
+Nodes can be configured to act as storage-only nodes (by only starting the DOR service),
+execution-only nodes (by only starting the RTI service), or as full nodes (by starting DOR
+and RTI services).
+
+DOR and RTI services are provided through **plugins**. The available options depend on which
+plugins are discovered at startup. Built-in plugins are located in the `plugins/` directory
+of the Sim-aaS Middleware repository. Additional plugins can be loaded using the `--plugins`
+argument (see below).
+
+If starting a node interactively, the user is prompted to select what DOR service to use:
 ```
-? Select the type of DOR service: 
+? Select the type of DOR service:
 ❯ None
-  Basic
+  Default
 ```
 Similarly, the user is prompted to select what RTI service to use:
 ```
-? Select the type of RTI service: 
+? Select the type of RTI service:
 ❯ None
   Docker
-  AWS
+  Aws
 ```
-If 'None' is chosen for either DOR or RTI service, the node effectively acts as storage-only
-node (if 'None' is selected for RTI service) or execution-only node (if 'None' is selected 
-for DOR service). It is possible for a node to provide neither DOR nor RTI services. Such a
-node will still provide the P2P interface and may be used to obtain information about the
-network and known identities but would otherwise be of limited use.
+The available choices are dynamically determined based on discovered plugins.
+
+Depending on the DOR and RTI selection, the node operates in one of four configurations:
+
+| Configuration | DOR | RTI | Description |
+|---------------|-----|-----|-------------|
+| Full node | Yes | Yes | Provides both storage and execution services |
+| Storage node | Yes | No | Provides data storage only |
+| Execution node | No | Yes | Provides job execution only |
+| Network node | No | No | Provides P2P and network services only |
+
+A **network node** (neither DOR nor RTI) can be useful as a dedicated boot node for network
+discovery or for monitoring network health. It provides the P2P interface and maintains
+information about the network and known identities.
+
+### Using External Plugins
+To load plugins from additional directories, use the `--plugins` argument:
+```shell
+simaas-cli service --plugins /path/to/my-plugins --plugins /path/to/other-plugins
+```
+Each plugin directory should contain subdirectories with the plugin implementations
+(e.g., `dor_custom/`, `rti_kubernetes/`). See the Developer Documentation for details
+on creating custom plugins.
 
 ### Other Configurations
 There are a number of options (and corresponding command line flags) that the user can specify:
@@ -59,7 +83,7 @@ simaas-cli service
 Without specifying any arguments, the command will ask the user to input a number of settings:
 ```
 ? Enter path to datastore: /Users/aydth/.datastore
-? Select the type of DOR service: Basic
+? Select the type of DOR service: Default
 ? Select the type of RTI service: Docker
 ? Retain RTI job history? No
 ? Bind service to all network addresses? No
@@ -75,7 +99,7 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://192.168.50.126:5001 (Press CTRL+C to quit)
 INFO:     192.168.50.126:64460 - "GET /api/v1/db/node HTTP/1.1" 200 OK
-Created 'basic/docker' Sim-aaS node instance at 192.168.50.126:5001/tcp://192.168.50.126:4001(keep RTI job history: No) (strict: Yes) 
+Created 'default/docker' Sim-aaS node instance at 192.168.50.126:5001/tcp://192.168.50.126:4001 (keep RTI job history: No) (strict: Yes) 
 ```
 
 The example above shows a node running with a REST service at address `192.168.50.126:5001`. 
