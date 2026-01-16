@@ -1,53 +1,22 @@
-import asyncio
 import json
-import logging
 import os
-import shutil
-import socket
 import tempfile
-import threading
 import time
-import traceback
-from typing import List, Union, Any, Optional, Tuple
+from typing import List
 
 import pytest
-from docker.errors import ImageNotFound
-from git import Repo
 
-from simaas.cli.cmd_image import clone_repository, build_processor_image, PDIBuildLocal, PDIBuildGithub, PDIExport, \
-    PDIImport, PDIMetaInformation
-from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
-from simaas.cli.cmd_service import Service
+from simaas.cli.cmd_image import PDIBuildLocal, PDIImport
 
-from examples.simple.abc.processor import write_value
 from simaas.core.helpers import get_timestamp_now
 
-from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork
-from simaas.nodedb.schemas import NamespaceInfo
-from simaas.rti.base import DBJobInfo
-from plugins.rti_docker import DefaultRTIService
-from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearch, DORTag, DORUntag, DORAccessShow, \
-    DORAccessGrant, DORAccessRevoke
-from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
-    IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
-from simaas.cli.cmd_job_runner import JobRunner
-from simaas.cli.cmd_network import NetworkList
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel, RTIVolumeCreateFSRef, RTIVolumeList, RTIVolumeDelete, RTIVolumeCreateEFSRef
 from simaas.cli.exceptions import CLIRuntimeError
-from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
-from simaas.dor.api import DORProxy
-from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
-from simaas.helpers import find_available_port, docker_export_image, PortMaster, determine_local_ip, find_processors
-from simaas.node.base import Node
-from simaas.node.default import DefaultNode
-from simaas.p2p.base import P2PAddress
-from simaas.rti.protocol import P2PInterruptJob
-from simaas.rti.schemas import Task, Job, JobStatus, Severity, ExitCode, JobResult, Processor
-from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, Namespace
-from simaas.tests.conftest import REPOSITORY_COMMIT_ID, REPOSITORY_URL, PROC_ABC_PATH
+from simaas.dor.schemas import DataObject
+from simaas.rti.schemas import Task, Job, JobStatus, Processor
 
 logger = Logging.get(__name__)
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))

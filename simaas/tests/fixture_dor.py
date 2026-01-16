@@ -9,7 +9,6 @@ This module contains:
 
 import os
 import tempfile
-import time
 
 import pytest
 

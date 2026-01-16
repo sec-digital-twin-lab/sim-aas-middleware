@@ -5,10 +5,8 @@ without requiring external services.
 """
 
 import json
-import os
 import tempfile
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,8 +29,7 @@ from simaas.tests.helper_assertions import (
     assert_data_object_content,
     assert_data_object_exists,
 )
-from simaas.rti.schemas import JobStatus, Processor, Task
-from simaas.dor.schemas import DataObject
+from simaas.rti.schemas import JobStatus, Processor
 
 
 # =============================================================================

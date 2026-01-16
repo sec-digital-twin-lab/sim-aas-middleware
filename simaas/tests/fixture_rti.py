@@ -1,7 +1,6 @@
 """RTI (Runtime Infrastructure) test fixtures."""
 
 import json
-import logging
 import os
 import subprocess
 import tempfile
@@ -9,7 +8,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Type, Optional
+from typing import Type
 
 import pytest
 
@@ -19,7 +18,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, GitProcessorPointer, DataObject
-from simaas.helpers import docker_export_image, determine_local_ip, PortMaster
+from simaas.helpers import docker_export_image
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.api import RTIProxy

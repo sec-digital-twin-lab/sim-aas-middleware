@@ -16,8 +16,7 @@ import pytest
 from examples.simple.ping.processor import ProcessorPing, tcp_connect, udp_connect
 from examples.simple.ping.server import CombinedTestServer
 from simaas.core.logging import Logging
-from simaas.nodedb.schemas import ResourceDescriptor
-from simaas.rti.schemas import JobStatus, Task
+from simaas.rti.schemas import JobStatus
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener
 from simaas.tests.helper_waiters import wait_for_job_completion

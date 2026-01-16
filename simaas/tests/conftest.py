@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-import pytest
+import pytest  # noqa: F401 - used by pytest
 from dotenv import load_dotenv
 
 from simaas.core.logging import Logging
@@ -19,7 +19,8 @@ logging.getLogger('python_multipart.multipart').setLevel(logging.WARNING)
 logger = Logging.get('tests.conftest')
 
 # Core fixtures: TestContext, environment checks, keystores
-from simaas.tests.fixture_core import (
+# noqa: F401, E402 - fixtures must be imported here for pytest discovery
+from simaas.tests.fixture_core import (  # noqa: E402, F401
     TestContext,
     generate_random_file,
     test_context,
@@ -33,14 +34,14 @@ from simaas.tests.fixture_core import (
 )
 
 # Mock classes for testing
-from simaas.tests.fixture_mocks import (
+from simaas.tests.fixture_mocks import (  # noqa: E402, F401
     DummyProgressListener,
     DummyNamespace,
     dummy_namespace,
 )
 
 # DOR fixtures: session_node, proxies
-from simaas.tests.fixture_dor import (
+from simaas.tests.fixture_dor import (  # noqa: E402, F401
     session_node,
     session_data_dir,
     dor_proxy,
@@ -48,7 +49,7 @@ from simaas.tests.fixture_dor import (
 )
 
 # RTI fixtures: rti_proxy, deployed processors, backend fixtures
-from simaas.tests.fixture_rti import (
+from simaas.tests.fixture_rti import (  # noqa: E402, F401
     RTIBackend,
     RTIBackendConfig,
     RTIContext,

@@ -15,7 +15,6 @@ import pytest
 from examples.prime.factor_search.processor import Parameters as FactorSearchParameters, ProcessorFactorSearch, Result
 from examples.prime.factorisation.processor import Parameters as FactorisationParameters, ProcessorFactorisation
 from simaas.core.logging import Logging
-from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, Job
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener

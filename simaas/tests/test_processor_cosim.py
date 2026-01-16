@@ -9,7 +9,6 @@ import logging
 import os
 import tempfile
 import threading
-import time
 
 import pytest
 
@@ -17,7 +16,7 @@ from examples.cosim.room.processor import Parameters as RParameters, RoomProcess
 from examples.cosim.thermostat.processor import Parameters as TParameters, ThermostatProcessor, Result as TResult
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
-from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
+from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener, DummyNamespace
