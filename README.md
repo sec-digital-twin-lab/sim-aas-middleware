@@ -3,7 +3,7 @@ The Sim-aaS Middleware provides the infrastructure to facilitate deployment and 
 of federations of computational models.
 
 ## Prerequisites
-- Python 3.12
+- Python 3.13
 - Linux or MacOS operating system (not tested with Windows)
 - Docker (needed to build Processor Docker Images)
 
@@ -17,8 +17,8 @@ cd sim-aas-middleware
 
 Create and activate the virtual environment:
 ```shell
-python3.12 -m venv venv
-source venv/bin/activate
+python3.13 -m venv .venv
+source .venv/bin/activate
 ```
 
 Install dependencies and the Sim-aaS Middleware:
@@ -72,6 +72,7 @@ some of the examples (see next section):
 ### Examples
 Learn more about building and running processors by looking at example implementations:
 - [Simple Example: Basic Input/Output Processor](examples/simple/abc/README.md)
+- [Ping Example: Network Connectivity Testing](examples/simple/ping/README.md)
 - [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
 - [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
 
@@ -118,13 +119,22 @@ Learn more about related topics:
 
 ## Development
 
-For contributing to the Sim-aaS Middleware, see [DEVELOPER.md](DEVELOPER.md) for:
-- System architecture and design
-- Component documentation
-- Plugin development
-- [Testing guide](DEVELOPER.md#5-testing) (environment setup, running tests)
+For contributing to the Sim-aaS Middleware:
 
-### Quick Test Command
+- [Architecture Overview](docs/dev_overview.md) - Design principles, system architecture, core services
+- [Component Reference](docs/dev_components.md) - DOR, RTI, P2P, NodeDB, REST, CLI internals
+- [Plugin Development](docs/dev_plugins.md) - Creating custom DOR and RTI plugins
+- [Testing Guide](docs/dev_testing.md) - Environment setup, running tests, coverage
+
+### Quick Start
+
 ```bash
+# Run all tests
 .venv/bin/python -m pytest simaas/tests/ -v
+
+# Run with coverage
+.venv/bin/python -m coverage run -m pytest simaas/tests/ -v
+.venv/bin/python -m coverage report --ignore-errors --include="simaas/*" --omit="simaas/tests/*"
 ```
+
+See [TEST_STATS.md](TEST_STATS.md) for test timings and coverage details.
