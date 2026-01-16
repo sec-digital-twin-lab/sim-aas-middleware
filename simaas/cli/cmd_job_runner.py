@@ -246,7 +246,7 @@ class StatusHandler(threading.Thread):
             if is_dirty:
                 self._last_update = get_timestamp_now()
 
-    def _handle(self, last_update: int) -> None:
+    def _push_status(self, last_update: int) -> None:
         # update the last push timestamp to reflect the timestamp of the update that has been
         # attempted to pushed.
         self._last_push = last_update
@@ -284,10 +284,10 @@ class StatusHandler(threading.Thread):
 
             # push only if dirty
             if dirty:
-                self._handle(last_update)
+                self._push_status(last_update)
 
         # before ending the thread. send a final update.
-        self._handle(get_timestamp_now())
+        self._push_status(get_timestamp_now())
 
         self._logger.info("END status handler.")
 
