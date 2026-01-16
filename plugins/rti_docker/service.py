@@ -176,7 +176,7 @@ class DefaultRTIService(RTIServiceBase):
         # remove the record from the db
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBDeployedProcessor).get(proc.id)
+                record = session.get(DBDeployedProcessor, proc.id)
                 if record:
                     session.delete(record)
                     session.commit()
@@ -269,7 +269,7 @@ class DefaultRTIService(RTIServiceBase):
 
             with self._session_maker() as session:
                 # get the record and status
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 container_id = record.runner['container_id']
 
                 deadline = get_timestamp_now() + grace_period * 1000
@@ -320,7 +320,7 @@ class DefaultRTIService(RTIServiceBase):
             if not self.retain_job_history:
                 # delete the container
                 with self._session_maker() as session:
-                    record: DBJobInfo = session.query(DBJobInfo).get(job_id)
+                    record: DBJobInfo = session.get(DBJobInfo, job_id)
 
                     # wait for docker container to be shutdown
                     container_id: str = record.runner['container_id']
