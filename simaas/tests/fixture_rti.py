@@ -62,6 +62,31 @@ class RTIBackendConfig:
     skip_reason: str
 
 
+@dataclass
+class RTIContext:
+    """Backend-agnostic context for RTI tests.
+
+    Provides all dependencies needed to run RTI tests against either
+    the Docker or AWS backend. Tests should use this context instead
+    of directly using backend-specific fixtures.
+    """
+    backend: str                          # "docker" or "aws"
+    session_node: 'DefaultNode'           # The node instance
+    rti_proxy: RTIProxy                   # RTI API proxy
+    dor_proxy: DORProxy                   # DOR API proxy
+    node_db_proxy: NodeDBProxy            # NodeDB API proxy
+    deployed_abc_processor: DataObject    # Pre-deployed ABC processor
+    deployed_room_processor: DataObject   # Pre-deployed Room processor
+    deployed_thermostat_processor: DataObject  # Pre-deployed Thermostat processor
+    default_memory: int                   # Default memory for tasks (1024 or 2048)
+
+    def get_known_user(self, extra_keystores) -> Keystore:
+        """Register and return a known user for authorization tests."""
+        keystore = extra_keystores[2]
+        self.node_db_proxy.update_identity(keystore.identity)
+        return keystore
+
+
 def add_test_processor(
         dor: DORProxy, keystore: Keystore, proc_name: str, proc_path: str, platform: str = 'linux/amd64'
 ) -> DataObject:
@@ -581,3 +606,64 @@ def aws_known_user(extra_keystores, aws_node_db_proxy):
     _keystore = extra_keystores[2]
     aws_node_db_proxy.update_identity(_keystore.identity)
     return _keystore
+
+
+# ==============================================================================
+# Parameterized RTI Context Fixture
+# ==============================================================================
+
+@pytest.fixture(scope="session", params=["docker", "aws"])
+def rti_context(
+    request,
+    docker_available,
+    aws_available,
+    # Docker fixtures
+    session_node,
+    rti_proxy,
+    dor_proxy,
+    node_db_proxy,
+    deployed_abc_processor,
+    deployed_room_processor,
+    deployed_thermostat_processor,
+    # AWS fixtures
+    aws_session_node,
+    aws_rti_proxy,
+    aws_dor_proxy,
+    aws_node_db_proxy,
+    aws_deployed_abc_processor,
+    aws_deployed_room_processor,
+    aws_deployed_thermostat_processor,
+) -> RTIContext:
+    """Parameterized fixture providing RTI context for either Docker or AWS backend.
+
+    Tests using this fixture will automatically run twice: once for Docker
+    and once for AWS. Test output will show as test_name[docker] and test_name[aws].
+    """
+    if request.param == "docker":
+        if not docker_available:
+            pytest.skip("Docker is not available")
+        return RTIContext(
+            backend="docker",
+            session_node=session_node,
+            rti_proxy=rti_proxy,
+            dor_proxy=dor_proxy,
+            node_db_proxy=node_db_proxy,
+            deployed_abc_processor=deployed_abc_processor,
+            deployed_room_processor=deployed_room_processor,
+            deployed_thermostat_processor=deployed_thermostat_processor,
+            default_memory=1024,
+        )
+    else:  # aws
+        if not aws_available:
+            pytest.skip("AWS is not available")
+        return RTIContext(
+            backend="aws",
+            session_node=aws_session_node,
+            rti_proxy=aws_rti_proxy,
+            dor_proxy=aws_dor_proxy,
+            node_db_proxy=aws_node_db_proxy,
+            deployed_abc_processor=aws_deployed_abc_processor,
+            deployed_room_processor=aws_deployed_room_processor,
+            deployed_thermostat_processor=aws_deployed_thermostat_processor,
+            default_memory=2048,
+        )

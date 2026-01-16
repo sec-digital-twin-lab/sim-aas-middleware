@@ -51,10 +51,12 @@ from simaas.tests.fixture_dor import (
 from simaas.tests.fixture_rti import (
     RTIBackend,
     RTIBackendConfig,
+    RTIContext,
     add_test_processor,
     wait_for_processor_ready,
     wait_for_processor_undeployed,
     rti_proxy,
+    rti_context,
     deployed_abc_processor,
     deployed_ping_processor,
     deployed_room_processor,
