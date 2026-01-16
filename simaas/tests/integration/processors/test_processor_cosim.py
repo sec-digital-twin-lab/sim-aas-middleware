@@ -21,6 +21,9 @@ from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job
 from simaas.tests.fixtures.core import BASE_DIR
 from simaas.tests.fixtures.mocks import DummyProgressListener, DummyNamespace
+from simaas.tests.helpers.waiters import wait_for_job_completion
+from simaas.tests.helpers.factories import TaskBuilder
+from simaas.tests.helpers.assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -205,82 +208,33 @@ def test_cosim_room_thermostat_job(
     proc_thermostat_id = deployed_thermostat_processor.obj_id
     owner = session_node.keystore
 
-    task0 = Task(
-        proc_id=proc_room_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    "initial_temp": 15.0,
-                    "heating_rate": 0.5,
-                    "cooling_rate": -0.2,
-                    "max_steps": 50
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name='room',
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create Room processor task using TaskBuilder
+    task0 = (TaskBuilder(proc_room_id, owner.identity.id)
+             .with_name('room')
+             .with_input_value('parameters', {
+                 "initial_temp": 15.0,
+                 "heating_rate": 0.5,
+                 "cooling_rate": -0.2,
+                 "max_steps": 50
+             })
+             .with_output('result', owner.identity.id)
+             .build())
 
-    task1 = Task(
-        proc_id=proc_thermostat_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    "threshold_low": 18.0,
-                    "threshold_high": 22.0
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name='thermostat',
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create Thermostat processor task using TaskBuilder
+    task1 = (TaskBuilder(proc_thermostat_id, owner.identity.id)
+             .with_name('thermostat')
+             .with_input_value('parameters', {
+                 "threshold_low": 18.0,
+                 "threshold_high": 22.0
+             })
+             .with_output('result', owner.identity.id)
+             .build())
 
     # submit the jobs
-    result = rti_proxy.submit([task0, task1], with_authorisation_by=owner)
-    assert len(result) == 2
-    status_by_jobid = {}
-    for job in result:
-        while True:
-            try:
-                status: JobStatus = rti_proxy.get_job_status(job.id, owner)
-                status_by_jobid[job.id] = status
+    jobs = rti_proxy.submit([task0, task1], with_authorisation_by=owner)
+    assert len(jobs) == 2
 
-                from pprint import pprint
-                pprint(status.model_dump())
-                assert (status is not None)
-
-                if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                    break
-
-            except Exception:
-                pass
-
-            time.sleep(1)
-
-    # check if we have an object id for output object
-    for status in status_by_jobid.values():
-        assert status.state == JobStatus.State.SUCCESSFUL
+    # Wait for all jobs to complete and verify success
+    for job in jobs:
+        status = wait_for_job_completion(rti_proxy, job.id, owner)
+        assert_job_successful(status, expected_outputs=['result'])

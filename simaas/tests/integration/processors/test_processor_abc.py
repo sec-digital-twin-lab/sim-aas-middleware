@@ -19,6 +19,9 @@ from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
 from simaas.tests.fixtures.core import BASE_DIR
 from simaas.tests.fixtures.mocks import DummyProgressListener
+from simaas.tests.helpers.waiters import wait_for_job_completion
+from simaas.tests.helpers.factories import create_abc_task
+from simaas.tests.helpers.assertions import assert_job_successful, assert_data_object_content
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -161,70 +164,20 @@ def test_processor_abc_job_no_secret(
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
 
-    # submit the task
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'a', 'type': 'value', 'value': {
-                    'v': 1
-                }
-            }),
-            Task.InputValue.model_validate({
-                'name': 'b', 'type': 'value', 'value': {
-                    'v': 2
-                }
-            }),
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'c',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create and submit task using factory
+    task = create_abc_task(proc_id, owner, a=1, b=2)
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]
 
-    job_id = job.id
+    # Wait for job completion
+    status = wait_for_job_completion(rti_proxy, job.id, owner)
 
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert (status is not None)
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert ('c' in status.output)
-
-    # get the contents of the output data object
-    download_path = os.path.join(test_context.testing_dir, 'c.json')
-    dor_proxy.get_content(status.output['c'].obj_id, owner, download_path)
-    assert (os.path.isfile(download_path))
-
-    # read the result
-    with open(download_path, 'r') as f:
-        result: dict = json.load(f)
-        value = result['v']
-        assert value == 3
+    # Verify job succeeded with expected output
+    assert_job_successful(status, expected_outputs=['c'])
+    assert_data_object_content(
+        dor_proxy, status.output['c'].obj_id, owner,
+        expected={'v': 3}, temp_dir=test_context.testing_dir
+    )
 
 
 @pytest.mark.integration
@@ -253,70 +206,21 @@ def test_processor_abc_job_with_secret(
     # define the secret
     os.environ['SECRET_ABC_KEY'] = '123'
 
-    # submit the task
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'a', 'type': 'value', 'value': {
-                    'v': 1
-                }
-            }),
-            Task.InputValue.model_validate({
-                'name': 'b', 'type': 'value', 'value': {
-                    'v': 2
-                }
-            }),
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'c',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None,
-    )
-    result = rti_proxy.submit([task], with_authorisation_by=owner)
-    job = result[0]
+    try:
+        # Create and submit task using factory
+        task = create_abc_task(proc_id, owner, a=1, b=2)
+        result = rti_proxy.submit([task], with_authorisation_by=owner)
+        job = result[0]
 
-    job_id = job.id
+        # Wait for job completion
+        status = wait_for_job_completion(rti_proxy, job.id, owner)
 
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert (status is not None)
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert ('c' in status.output)
-
-    # get the contents of the output data object
-    download_path = os.path.join(test_context.testing_dir, 'c.json')
-    dor_proxy.get_content(status.output['c'].obj_id, owner, download_path)
-    assert (os.path.isfile(download_path))
-
-    # read the result
-    with open(download_path, 'r') as f:
-        result: dict = json.load(f)
-        value = result['v']
-        assert value == 123
-
-    # undefine the secret
-    os.environ.pop('SECRET_ABC_KEY')
+        # Verify job succeeded with expected output (secret value overrides sum)
+        assert_job_successful(status, expected_outputs=['c'])
+        assert_data_object_content(
+            dor_proxy, status.output['c'].obj_id, owner,
+            expected={'v': 123}, temp_dir=test_context.testing_dir
+        )
+    finally:
+        # undefine the secret
+        os.environ.pop('SECRET_ABC_KEY', None)

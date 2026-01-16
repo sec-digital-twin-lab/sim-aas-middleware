@@ -19,6 +19,9 @@ from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task, Job
 from simaas.tests.fixtures.core import BASE_DIR
 from simaas.tests.fixtures.mocks import DummyProgressListener
+from simaas.tests.helpers.waiters import wait_for_job_completion
+from simaas.tests.helpers.factories import TaskBuilder
+from simaas.tests.helpers.assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -214,71 +217,34 @@ def test_processor_factor_search_job(
     proc_id = deployed_factor_search_processor.obj_id
     owner = session_node.keystore
 
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    'start': 2,
-                    'end': 100,
-                    'number': 100
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create task using TaskBuilder
+    task = (TaskBuilder(proc_id, owner.identity.id)
+            .with_input_value('parameters', {'start': 2, 'end': 100, 'number': 100})
+            .with_output('result', owner.identity.id)
+            .build())
 
     # submit the job
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]
 
-    job_id = job.id
+    # Wait for job completion
+    status = wait_for_job_completion(rti_proxy, job.id, owner)
 
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert (status is not None)
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert ('result' in status.output)
+    # Verify job succeeded
+    assert_job_successful(status, expected_outputs=['result'])
 
     # get the contents of the output data object
     download_path = os.path.join(test_context.testing_dir, 'result.json')
     dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
-    assert (os.path.isfile(download_path))
+    assert os.path.isfile(download_path)
 
-    # read the result
+    # read and validate the result
     with open(download_path, 'r') as f:
         result_data: dict = json.load(f)
         result: Result = Result.model_validate(result_data)
 
-    # print the result
     print(result.factors)
-    assert (result.factors == [2, 4, 5, 10, 20, 25, 50])
+    assert result.factors == [2, 4, 5, 10, 20, 25, 50]
 
 
 @pytest.mark.integration
@@ -308,66 +274,31 @@ def test_processor_factorisation_job(
     proc_id = deployed_factorisation_processor.obj_id
     owner = session_node.keystore
 
+    # Create task using TaskBuilder
+    task = (TaskBuilder(proc_id, owner.identity.id)
+            .with_input_value('parameters', {'N': 100, 'num_sub_jobs': 2})
+            .with_output('result', owner.identity.id)
+            .build())
+
     # submit the job
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    'N': 100,
-                    'num_sub_jobs': 2
-                }
-            })
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
-            })
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]
 
-    job_id = job.id
+    # Wait for job completion
+    status = wait_for_job_completion(rti_proxy, job.id, owner)
 
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert (status is not None)
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert ('result' in status.output)
+    # Verify job succeeded
+    assert_job_successful(status, expected_outputs=['result'])
 
     # get the contents of the output data object
     download_path = os.path.join(test_context.testing_dir, 'result.json')
     dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
-    assert (os.path.isfile(download_path))
+    assert os.path.isfile(download_path)
 
-    # read the result
+    # read and validate the result
     with open(download_path, 'r') as f:
         result_data: dict = json.load(f)
         result: Result = Result.model_validate(result_data)
 
-    # print the result
     print(result.factors)
-    assert (result.factors == [2, 4, 5, 10, 20, 25, 50])
+    assert result.factors == [2, 4, 5, 10, 20, 25, 50]

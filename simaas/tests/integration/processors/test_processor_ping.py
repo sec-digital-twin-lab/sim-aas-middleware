@@ -20,6 +20,9 @@ from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.schemas import JobStatus, Task
 from simaas.tests.fixtures.core import BASE_DIR
 from simaas.tests.fixtures.mocks import DummyProgressListener
+from simaas.tests.helpers.waiters import wait_for_job_completion
+from simaas.tests.helpers.factories import TaskBuilder
+from simaas.tests.helpers.assertions import assert_job_successful
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -270,69 +273,36 @@ def test_processor_ping_job(
     tcp_port = tcp_udp_server['tcp_port']
     udp_port = tcp_udp_server['udp_port']
 
-    # submit the task
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({
-                'name': 'parameters', 'type': 'value', 'value': {
-                    "address": "192.168.50.117",
-                    "do_ping": False,
-                    "do_traceroute": False,
-                    "do_tcp_test": True,
-                    "tcp_port": tcp_port,
-                    "tcp_timeout": 5,
-                    "do_udp_test": True,
-                    "udp_port": udp_port,
-                    "udp_timeout": 5
-                }
-            }),
-        ],
-        output=[
-            Task.Output.model_validate({
-                'name': 'result',
-                'owner_iid': owner.identity.id,
-                'restricted_access': False,
-                'content_encrypted': False,
-                'target_node_iid': None
+    # Create task using TaskBuilder
+    task = (TaskBuilder(proc_id, owner.identity.id)
+            .with_input_value('parameters', {
+                "address": "192.168.50.117",
+                "do_ping": False,
+                "do_traceroute": False,
+                "do_tcp_test": True,
+                "tcp_port": tcp_port,
+                "tcp_timeout": 5,
+                "do_udp_test": True,
+                "udp_port": udp_port,
+                "udp_timeout": 5
             })
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+            .with_output('result', owner.identity.id)
+            .build())
+
     result = rti_proxy.submit([task], with_authorisation_by=owner)
     job = result[0]
 
-    job_id = job.id
+    # Wait for job completion
+    status = wait_for_job_completion(rti_proxy, job.id, owner)
 
-    while True:
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
+    # Verify job succeeded with expected output
+    assert_job_successful(status, expected_outputs=['result'])
 
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert (status is not None)
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert ('result' in status.output)
-
-    # get the contents of the output data object
+    # Download and print result
     download_path = os.path.join(test_context.testing_dir, 'result.json')
     dor_proxy.get_content(status.output['result'].obj_id, owner, download_path)
-    assert (os.path.isfile(download_path))
+    assert os.path.isfile(download_path)
 
-    # read the result
     with open(download_path, 'r') as f:
         result: dict = json.load(f)
         print(json.dumps(result, indent=4))

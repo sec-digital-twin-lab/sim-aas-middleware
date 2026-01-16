@@ -42,6 +42,18 @@ from examples.cosim.thermostat.processor import Result as TResult
 from plugins.rti_docker import DefaultRTIService
 
 from simaas.tests.fixtures.rti import add_test_processor
+from simaas.tests.helpers.waiters import (
+    wait_for_job_completion,
+    wait_for_processor_ready,
+    wait_for_processor_undeployed,
+)
+from simaas.tests.helpers.factories import create_abc_task, TaskBuilder
+from simaas.tests.helpers.assertions import (
+    assert_job_successful,
+    assert_job_failed,
+    assert_job_cancelled,
+    assert_data_object_content,
+)
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -239,13 +251,7 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
 
     # try to deploy the processor with the wrong user on node0 (should succeed - non-strict)
     rti0.deploy(proc_id0, wrong_user)
-
-    # wait for deployment to be done
-    while True:
-        proc = rti0.get_proc(proc_id0)
-        if proc.state == Processor.State.READY:
-            break
-        time.sleep(0.5)
+    wait_for_processor_ready(rti0, proc_id0)
 
     # try to deploy the processor with the wrong user on node1 (should fail - strict)
     with pytest.raises(UnsuccessfulRequestError) as e:
@@ -254,25 +260,11 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
 
     # try to deploy the processor with the correct user on node1
     rti1.deploy(proc_id1, node1.keystore)
-
-    while True:
-        proc = rti1.get_proc(proc_id1)
-        if proc.state == Processor.State.READY:
-            break
-        time.sleep(0.5)
-
-    # wait for deployment to be done
-    while rti1.get_proc(proc_id1).state != Processor.State.READY:
-        time.sleep(0.5)
+    wait_for_processor_ready(rti1, proc_id1)
 
     # try to undeploy the processor with the wrong user on node0 (should succeed - non-strict)
     rti0.undeploy(proc_id0, wrong_user)
-
-    try:
-        while rti1.get_proc(proc_id0) is not None:
-            time.sleep(0.5)
-    except UnsuccessfulRequestError as e:
-        assert 'Processor not deployed' in e.reason
+    wait_for_processor_undeployed(rti0, proc_id0)
 
     # try to undeploy the processor with the wrong user on node1 (should fail - strict)
     with pytest.raises(UnsuccessfulRequestError) as e:
@@ -281,12 +273,7 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
 
     # try to undeploy the processor with the correct user on node1
     rti1.undeploy(proc_id1, node1.keystore)
-
-    try:
-        while rti1.get_proc(proc_id1) is not None:
-            time.sleep(0.5)
-    except UnsuccessfulRequestError as e:
-        assert 'Processor not deployed' in e.reason
+    wait_for_processor_undeployed(rti1, proc_id1)
 
 
 @pytest.mark.integration
@@ -321,13 +308,9 @@ def test_processor_deploy_with_volume(docker_available, docker_non_strict_node):
         ])
 
         # wait for deployment to be done
-        while True:
-            proc_status: Optional[Processor] = rti.get_proc(proc_id)
-            if proc_status.state == Processor.State.READY:
-                print(proc_status.volumes)
-                assert proc_status.volumes[0].name == 'data_volume'
-                break
-            time.sleep(0.5)
+        proc_status = wait_for_processor_ready(rti, proc_id)
+        print(proc_status.volumes)
+        assert proc_status.volumes[0].name == 'data_volume'
 
         # undeploy the processor
         rti.undeploy(proc_id, user)
@@ -361,23 +344,8 @@ def test_job_submit_and_retrieve(
     wrong_user = known_user
     owner = session_node.keystore
 
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-        ],
-        output=[
-            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                        'restricted_access': False, 'content_encrypted': False,
-                                        'target_node_iid': None})
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create task using factory
+    task = create_abc_task(proc_id, owner, a=1, b=1)
 
     # submit the job
     jobs = rti_proxy.submit([task], with_authorisation_by=owner)
@@ -403,42 +371,19 @@ def test_job_submit_and_retrieve(
     assert len(result) == 1
 
     # try to get the job info as the wrong user
-    try:
+    with pytest.raises(UnsuccessfulRequestError) as e:
         rti_proxy.get_job_status(job_id, wrong_user)
-        assert False
+    assert e.value.details['reason'] == 'user is not the job owner or the node owner'
 
-    except UnsuccessfulRequestError as e:
-        assert e.details['reason'] == 'user is not the job owner or the node owner'
+    # Wait for job completion
+    status = wait_for_job_completion(rti_proxy, job_id, owner)
 
-    while True:
-        # get information about the running job
-        try:
-            status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert status is not None
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert 'c' in status.output
-
-    # get the contents of the output data object
-    download_path = os.path.join(test_context.testing_dir, 'c.json')
-    dor_proxy.get_content(status.output['c'].obj_id, owner, download_path)
-    assert os.path.isfile(download_path)
-
-    with open(download_path, 'r') as f:
-        content = json.load(f)
-        print(content)
-        assert content['v'] == 2
+    # Verify job succeeded with expected output
+    assert_job_successful(status, expected_outputs=['c'])
+    assert_data_object_content(
+        dor_proxy, status.output['c'].obj_id, owner,
+        expected={'v': 2}, temp_dir=test_context.testing_dir
+    )
 
 
 @pytest.mark.integration
@@ -462,23 +407,8 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     wrong_user = known_user
     owner = session_node.keystore
 
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 100}}),
-            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
-        ],
-        output=[
-            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                        'restricted_access': False, 'content_encrypted': False,
-                                        'target_node_iid': None})
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # Create task with large input values for longer execution
+    task = create_abc_task(proc_id, owner, a=100, b=100)
 
     # submit the job
     results = rti_proxy.submit([task], owner)
@@ -496,19 +426,14 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
         status: JobStatus = rti_proxy.get_job_status(job_id, owner)
         if status.state == JobStatus.State.RUNNING:
             break
-        else:
-            time.sleep(0.5)
+        time.sleep(0.5)
 
     # cancel the job (correct user)
     rti_proxy.cancel_job(job_id, owner)
 
-    # give it a bit...
-    time.sleep(5)
-
-    # get information about the job
-    status: JobStatus = rti_proxy.get_job_status(job_id, owner)
-    print(json.dumps(status.model_dump(), indent=4))
-    assert status.state == JobStatus.State.CANCELLED
+    # Wait for cancellation to complete
+    status = wait_for_job_completion(rti_proxy, job_id, owner)
+    assert_job_cancelled(status)
 
 
 @pytest.mark.integration
@@ -532,23 +457,8 @@ def test_job_cancel_with_force_kill(docker_available, session_node, rti_proxy, d
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
 
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': -100}}),
-            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 100}})
-        ],
-        output=[
-            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                        'restricted_access': False, 'content_encrypted': False,
-                                        'target_node_iid': None})
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=1024),
-        namespace=None
-    )
+    # a=-100 triggers special behavior in ABC processor that ignores interrupt signals
+    task = create_abc_task(proc_id, owner, a=-100, b=100)
 
     # submit the job
     result = rti_proxy.submit([task], owner)
@@ -561,8 +471,7 @@ def test_job_cancel_with_force_kill(docker_available, session_node, rti_proxy, d
         status: JobStatus = rti_proxy.get_job_status(job_id, owner)
         if status.state == JobStatus.State.RUNNING:
             break
-        else:
-            time.sleep(0.5)
+        time.sleep(0.5)
 
     containers = docker_container_list()
     n0 = len(containers)
@@ -807,29 +716,18 @@ def test_batch_submit_and_complete(
     wrong_user = known_user
     owner = session_node.keystore
 
-    def create_task(name: str, a: int, b: int) -> Task:
-        return Task(
-            proc_id=proc_id,
-            user_iid=owner.identity.id,
-            input=[
-                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
-                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
-            ],
-            output=[
-                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                            'restricted_access': False, 'content_encrypted': False,
-                                            'target_node_iid': None})
-            ],
-            name=name,
-            description=None,
-            budget=ResourceDescriptor(vcpus=1, memory=1024),
-            namespace=None
-        )
+    # Create batch tasks using TaskBuilder for named tasks
+    tasks = [
+        (TaskBuilder(proc_id, owner.identity.id)
+         .with_name(f'task_{i}')
+         .with_input_value('a', {'v': 1})
+         .with_input_value('b', {'v': 5})
+         .with_output('c', owner.identity.id)
+         .build())
+        for i in range(20)
+    ]
 
-    # create the tasks
-    tasks = [create_task(f'task_{i}', 1, 5) for i in range(20)]
-
-    # submit the job
+    # submit the batch
     jobs = rti_proxy.submit(tasks, with_authorisation_by=owner)
     assert len(jobs) == len(tasks)
 
@@ -837,50 +735,29 @@ def test_batch_submit_and_complete(
     batch_id = jobs[0].batch_id
 
     # try to get the batch info as the wrong user
-    try:
+    with pytest.raises(UnsuccessfulRequestError) as e:
         rti_proxy.get_batch_status(batch_id, wrong_user)
-        assert False
+    assert e.value.details['reason'] == 'user is not the batch owner, batch member or the node owner'
 
-    except UnsuccessfulRequestError as e:
-        assert e.details['reason'] == 'user is not the batch owner, batch member or the node owner'
-
+    # Wait for all batch members to complete
     while True:
-        # get information about the running job
-        try:
-            status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert status is not None
-
-            all_finished = True
-            for member in status.members:
-                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                    all_finished = False
-                    break
-
-            if all_finished:
-                break
-
-        except Exception:
-            pass
-
+        status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
+        all_finished = all(
+            member.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]
+            for member in status.members
+        )
+        if all_finished:
+            break
         time.sleep(1)
 
-    # we should have an object id for output object 'c' for each member of the batch
+    # Verify all batch members completed with expected output
     for member in status.members:
         job_status: JobStatus = rti_proxy.get_job_status(member.job_id, owner)
-        assert 'c' in job_status.output
-
-        # get the contents of the output data object
-        download_path = os.path.join(test_context.testing_dir, 'c.json')
-        dor_proxy.get_content(job_status.output['c'].obj_id, owner, download_path)
-        assert os.path.isfile(download_path)
-
-        with open(download_path, 'r') as f:
-            content = json.load(f)
-            print(content)
-            assert content['v'] == 6
+        assert_job_successful(job_status, expected_outputs=['c'])
+        assert_data_object_content(
+            dor_proxy, job_status.output['c'].obj_id, owner,
+            expected={'v': 6}, temp_dir=test_context.testing_dir
+        )
 
 
 @pytest.mark.integration
@@ -905,68 +782,47 @@ def test_batch_cancel_cascade(
     proc_id = deployed_abc_processor.obj_id
     owner = session_node.keystore
 
-    def create_task(name: str, a: int, b: int) -> Task:
-        return Task(
-            proc_id=proc_id,
-            user_iid=owner.identity.id,
-            input=[
-                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
-                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
-            ],
-            output=[
-                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                            'restricted_access': False, 'content_encrypted': False,
-                                            'target_node_iid': None})
-            ],
-            name=name,
-            description=None,
-            budget=ResourceDescriptor(vcpus=1, memory=1024),
-            namespace=None
-        )
+    # Create batch tasks using TaskBuilder
+    tasks = [
+        (TaskBuilder(proc_id, owner.identity.id)
+         .with_name(f'task_{i}')
+         .with_input_value('a', {'v': 30})
+         .with_input_value('b', {'v': 30})
+         .with_output('c', owner.identity.id)
+         .build())
+        for i in range(10)
+    ]
 
-    # create the tasks
-    tasks = [create_task(f'task_{i}', 30, 30) for i in range(10)]
-
-    # modify the a-value for one task to an invalid value which should cause an exception and the job to fail.
-    # this should trigger the cancellation cascade.
+    # Modify the first task to trigger a failure (invalid values cause exception)
+    # This should trigger the cancellation cascade.
     tasks[0].input[0].value = {'v': 5}
     tasks[0].input[1].value = {'v': 1000}
 
-    # submit the job
+    # submit the batch
     jobs = rti_proxy.submit(tasks, with_authorisation_by=owner)
     assert len(jobs) == len(tasks)
 
     # determine batch id
     batch_id = jobs[0].batch_id
 
+    # Wait for all batch members to complete
     while True:
-        # get information about the running job
-        try:
-            status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
-
-            assert status is not None
-
-            all_finished = True
-            for member in status.members:
-                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                    all_finished = False
-                    break
-
-            if all_finished:
-                break
-
-        except Exception:
-            pass
-
+        status: BatchStatus = rti_proxy.get_batch_status(batch_id, owner)
+        all_finished = all(
+            member.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]
+            for member in status.members
+        )
+        if all_finished:
+            break
         time.sleep(1)
 
-    for i in range(len(status.members)):
-        job_id = status.members[i].job_id
-        job_status: JobStatus = rti_proxy.get_job_status(job_id, owner)
+    # Verify first job failed and others were cancelled
+    for i, member in enumerate(status.members):
+        job_status: JobStatus = rti_proxy.get_job_status(member.job_id, owner)
         if i == 0:
-            assert job_status.state == 'failed'
+            assert_job_failed(job_status)
         else:
-            assert job_status.state == 'cancelled'
+            assert_job_cancelled(job_status)
 
 
 # ==============================================================================
@@ -1221,23 +1077,8 @@ def test_aws_job_submit_and_retrieve(
     wrong_user = aws_known_user
     owner = aws_session_node.keystore
 
-    task = Task(
-        proc_id=proc_id,
-        user_iid=owner.identity.id,
-        input=[
-            Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': 1}}),
-            Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': 1}})
-        ],
-        output=[
-            Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                        'restricted_access': False, 'content_encrypted': False,
-                                        'target_node_iid': None})
-        ],
-        name=None,
-        description=None,
-        budget=ResourceDescriptor(vcpus=1, memory=2048),
-        namespace=None
-    )
+    # Create task using factory (AWS requires higher memory)
+    task = create_abc_task(proc_id, owner, a=1, b=1, memory=2048)
 
     # submit the job
     result = aws_rti_proxy.submit([task], owner)
@@ -1262,42 +1103,19 @@ def test_aws_job_submit_and_retrieve(
     assert len(result) == 1
 
     # try to get the job info as the wrong user
-    try:
+    with pytest.raises(UnsuccessfulRequestError) as e:
         aws_rti_proxy.get_job_status(job_id, wrong_user)
-        assert False
+    assert e.value.details['reason'] == 'user is not the job owner or the node owner'
 
-    except UnsuccessfulRequestError as e:
-        assert e.details['reason'] == 'user is not the job owner or the node owner'
+    # Wait for job completion
+    status = wait_for_job_completion(aws_rti_proxy, job_id, owner)
 
-    while True:
-        # get information about the running job
-        try:
-            status: JobStatus = aws_rti_proxy.get_job_status(job_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert status is not None
-
-            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                break
-
-        except Exception:
-            pass
-
-        time.sleep(1)
-
-    # check if we have an object id for output object 'c'
-    assert 'c' in status.output
-
-    # get the contents of the output data object
-    download_path = os.path.join(test_context.testing_dir, 'c.json')
-    aws_dor_proxy.get_content(status.output['c'].obj_id, owner, download_path)
-    assert os.path.isfile(download_path)
-
-    with open(download_path, 'r') as f:
-        content = json.load(f)
-        print(content)
-        assert content['v'] == 2
+    # Verify job succeeded with expected output
+    assert_job_successful(status, expected_outputs=['c'])
+    assert_data_object_content(
+        aws_dor_proxy, status.output['c'].obj_id, owner,
+        expected={'v': 2}, temp_dir=test_context.testing_dir
+    )
 
 
 @pytest.mark.integration
@@ -1534,29 +1352,19 @@ def test_aws_batch_submit_and_complete(
     wrong_user = aws_known_user
     owner = aws_session_node.keystore
 
-    def create_task(name: str, a: int, b: int) -> Task:
-        return Task(
-            proc_id=proc_id,
-            user_iid=owner.identity.id,
-            input=[
-                Task.InputValue.model_validate({'name': 'a', 'type': 'value', 'value': {'v': a}}),
-                Task.InputValue.model_validate({'name': 'b', 'type': 'value', 'value': {'v': b}})
-            ],
-            output=[
-                Task.Output.model_validate({'name': 'c', 'owner_iid': owner.identity.id,
-                                            'restricted_access': False, 'content_encrypted': False,
-                                            'target_node_iid': None})
-            ],
-            name=name,
-            description=None,
-            budget=ResourceDescriptor(vcpus=1, memory=2048),
-            namespace=None
-        )
+    # Create batch tasks using TaskBuilder (AWS requires higher memory)
+    tasks = [
+        (TaskBuilder(proc_id, owner.identity.id)
+         .with_name(f'task_{i}')
+         .with_input_value('a', {'v': 1})
+         .with_input_value('b', {'v': 5})
+         .with_output('c', owner.identity.id)
+         .with_budget(memory=2048)
+         .build())
+        for i in range(20)
+    ]
 
-    # create the tasks
-    tasks = [create_task(f'task_{i}', 1, 5) for i in range(20)]
-
-    # submit the job
+    # submit the batch
     jobs = aws_rti_proxy.submit(tasks, with_authorisation_by=owner)
     assert len(jobs) == len(tasks)
 
@@ -1564,50 +1372,29 @@ def test_aws_batch_submit_and_complete(
     batch_id = jobs[0].batch_id
 
     # try to get the batch info as the wrong user
-    try:
+    with pytest.raises(UnsuccessfulRequestError) as e:
         aws_rti_proxy.get_batch_status(batch_id, wrong_user)
-        assert False
+    assert e.value.details['reason'] == 'user is not the batch owner, batch member or the node owner'
 
-    except UnsuccessfulRequestError as e:
-        assert e.details['reason'] == 'user is not the batch owner, batch member or the node owner'
-
+    # Wait for all batch members to complete
     while True:
-        # get information about the running job
-        try:
-            status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, owner)
-
-            from pprint import pprint
-            pprint(status.model_dump())
-            assert status is not None
-
-            all_finished = True
-            for member in status.members:
-                if member.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                    all_finished = False
-                    break
-
-            if all_finished:
-                break
-
-        except Exception:
-            pass
-
+        status: BatchStatus = aws_rti_proxy.get_batch_status(batch_id, owner)
+        all_finished = all(
+            member.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]
+            for member in status.members
+        )
+        if all_finished:
+            break
         time.sleep(1)
 
-    # we should have an object id for output object 'c' for each member of the batch
+    # Verify all batch members completed with expected output
     for member in status.members:
         job_status: JobStatus = aws_rti_proxy.get_job_status(member.job_id, owner)
-        assert 'c' in job_status.output
-
-        # get the contents of the output data object
-        download_path = os.path.join(test_context.testing_dir, 'c.json')
-        aws_dor_proxy.get_content(job_status.output['c'].obj_id, owner, download_path)
-        assert os.path.isfile(download_path)
-
-        with open(download_path, 'r') as f:
-            content = json.load(f)
-            print(content)
-            assert content['v'] == 6
+        assert_job_successful(job_status, expected_outputs=['c'])
+        assert_data_object_content(
+            aws_dor_proxy, job_status.output['c'].obj_id, owner,
+            expected={'v': 6}, temp_dir=test_context.testing_dir
+        )
 
 
 @pytest.mark.integration
