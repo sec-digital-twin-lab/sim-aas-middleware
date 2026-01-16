@@ -61,6 +61,21 @@ def temp_dir():
 
 
 def test_cli_identity_list_create_show_remove(temp_dir):
+    """
+    Test CLI identity management workflow (list, create, show, remove).
+
+    Verifies that:
+    - Empty identity list returns no identities
+    - New identity can be created with name, email, and password
+    - Keystore file is created for new identity
+    - Identity list reflects newly created identity
+    - Identity details can be shown
+    - Identity can be removed with correct password
+    - Removed identity no longer appears in list
+
+    Duration: ~5 seconds
+    Requirements: None (local filesystem only)
+    """
     # list all identities
     try:
         args = {
@@ -161,6 +176,20 @@ def test_cli_identity_list_create_show_remove(temp_dir):
 
 
 def test_cli_identity_discover_publish_update(session_node, temp_dir):
+    """
+    Test CLI identity discovery, publishing, and update workflow.
+
+    Verifies that:
+    - Unpublished identity is not discovered by the node
+    - Identity can be published to a node
+    - Published identity is discoverable
+    - Identity name can be updated locally
+    - Updated identity can be re-published
+    - Discovered identity reflects the updates
+
+    Duration: ~10 seconds
+    Requirements: Running session node
+    """
     address = session_node.rest.address()
 
     # create an identity
@@ -283,6 +312,19 @@ def test_cli_identity_discover_publish_update(session_node, temp_dir):
 
 
 def test_cli_identity_credentials_list_add_remove(temp_dir):
+    """
+    Test CLI credentials management workflow (list, add, remove).
+
+    Verifies that:
+    - New identity starts with no credentials
+    - GitHub credentials can be added with URL, login, and token
+    - Credentials list reflects added credential
+    - Credentials can be removed by identifier
+    - Removed credentials no longer appear in list
+
+    Duration: ~5 seconds
+    Requirements: None (local filesystem only)
+    """
     # create an identity
     try:
         args = {
@@ -396,6 +438,16 @@ def test_cli_identity_credentials_list_add_remove(temp_dir):
 
 
 def test_cli_network_show(session_node, temp_dir):
+    """
+    Test CLI network list command.
+
+    Verifies that:
+    - Network list can be retrieved from node
+    - Network contains expected number of nodes (2-node test network)
+
+    Duration: ~5 seconds
+    Requirements: Running session node
+    """
     address = session_node.rest.address()
 
     # get network information
@@ -415,6 +467,22 @@ def test_cli_network_show(session_node, temp_dir):
 
 
 def test_cli_dor_add_meta_download_tag_search_untag_remove(session_node, temp_dir):
+    """
+    Test CLI DOR data object management workflow.
+
+    Verifies that:
+    - Data objects can be added with JSON content
+    - Metadata can be retrieved for data objects
+    - Content can be downloaded to local filesystem
+    - Tags can be added to data objects
+    - Data objects can be found by tag search
+    - Tags can be removed from data objects
+    - Tag removal affects search results
+    - Data objects can be removed from the repository
+
+    Duration: ~30 seconds
+    Requirements: Running session node
+    """
     address = session_node.rest.address()
 
     # create an identity
@@ -611,6 +679,19 @@ def test_cli_dor_add_meta_download_tag_search_untag_remove(session_node, temp_di
 
 
 def test_cli_dor_grant_show_revoke(session_node, temp_dir):
+    """
+    Test CLI DOR access control workflow (grant, show, revoke).
+
+    Verifies that:
+    - New data object has owner in access list
+    - Access can be revoked from owner
+    - Access list is empty after revocation
+    - Access can be re-granted to user
+    - Grant is reflected in access list
+
+    Duration: ~20 seconds
+    Requirements: Running session node
+    """
     address = session_node.rest.address()
 
     # create an identity
@@ -1043,6 +1124,17 @@ class ProcessorRunner(threading.Thread, ProgressListener):
 
 
 def test_job_worker_done(temp_dir):
+    """
+    Test job worker successful completion.
+
+    Verifies that:
+    - Job worker executes processor successfully
+    - Expected output files are created (c, job.exitcode, job.status, job.log)
+    - Exit code is DONE for successful completion
+
+    Duration: ~5 seconds
+    Requirements: None (local processor execution)
+    """
     job_id = 'abcd1234_00'
     job_path = os.path.join(temp_dir, job_id)
     prepare_plain_job_folder(temp_dir, job_id, 1, 1)
@@ -1069,6 +1161,17 @@ def test_job_worker_done(temp_dir):
 
 
 def test_job_worker_interrupted(temp_dir):
+    """
+    Test job worker interruption handling.
+
+    Verifies that:
+    - Job worker can be interrupted during execution
+    - Expected files are created (job.exitcode, job.status, job.log)
+    - Exit code is INTERRUPTED when job is interrupted
+
+    Duration: ~5 seconds
+    Requirements: None (local processor execution)
+    """
     job_id = 'abcd1234_01'
     job_path = os.path.join(temp_dir, job_id)
     prepare_plain_job_folder(temp_dir, job_id, 5, 5)
@@ -1096,6 +1199,18 @@ def test_job_worker_interrupted(temp_dir):
 
 
 def test_job_worker_error(temp_dir):
+    """
+    Test job worker error handling.
+
+    Verifies that:
+    - Job worker handles processor errors gracefully
+    - Expected files are created (job.exitcode, job.status, job.log)
+    - Exit code is ERROR when processor fails
+    - Error trace contains expected exception message
+
+    Duration: ~5 seconds
+    Requirements: None (local processor execution)
+    """
     job_id = 'abcd1234_02'
     job_path = os.path.join(temp_dir, job_id)
     prepare_plain_job_folder(temp_dir, job_id, 1, 'sdf')
@@ -1124,6 +1239,16 @@ def test_job_worker_error(temp_dir):
 
 @pytest.mark.asyncio
 async def test_cli_runner_success_by_value(temp_dir, session_node):
+    """
+    Test job runner with input values.
+
+    Verifies that:
+    - Job runner executes successfully with direct value inputs
+    - Job progress reaches 100% on completion
+
+    Duration: ~10 seconds
+    Requirements: Running session node
+    """
     a: int = 1
     b: int = 1
     job_id = '398h36g3_00'
@@ -1135,6 +1260,17 @@ async def test_cli_runner_success_by_value(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_validation(temp_dir, session_node):
+    """
+    Test job runner input validation failure.
+
+    Verifies that:
+    - Job runner fails when input doesn't match expected schema
+    - Progress stays at 0% on validation failure
+    - Error message indicates schema compliance issue
+
+    Duration: ~10 seconds
+    Requirements: Running session node
+    """
     a: int = {'wrong': 55}
     b: int = 1
     job_id = '398h36g3_01'
@@ -1147,6 +1283,17 @@ async def test_cli_runner_failing_validation(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_success_by_reference(temp_dir, session_node):
+    """
+    Test job runner with data object reference inputs.
+
+    Verifies that:
+    - Job runner executes successfully with data object references
+    - Input data objects are resolved correctly
+    - Job progress reaches 100% on completion
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
@@ -1159,6 +1306,17 @@ async def test_cli_runner_success_by_reference(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keystores):
+    """
+    Test job runner access control enforcement.
+
+    Verifies that:
+    - Job runner fails when user lacks access to input data objects
+    - Progress stays at 0% on access failure
+    - Error trace contains AccessNotPermittedError
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     user = extra_keystores[0]
     session_node.db.update_identity(user.identity)
 
@@ -1175,6 +1333,17 @@ async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keysto
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_no_signature(temp_dir, session_node):
+    """
+    Test job runner signature requirement enforcement.
+
+    Verifies that:
+    - Job runner fails when restricted data objects lack user signature
+    - Progress stays at 0% on signature failure
+    - Error trace contains MissingUserSignatureError
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
     job_id = '398h36g3_04'
@@ -1188,6 +1357,17 @@ async def test_cli_runner_failing_no_signature(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_no_data_object(temp_dir, session_node):
+    """
+    Test job runner missing data object handling.
+
+    Verifies that:
+    - Job runner fails when input data object doesn't exist
+    - Progress stays at 0% when data object is missing
+    - Error trace contains UnresolvedInputDataObjectsError
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
     job_id = '398h36g3_05'
@@ -1205,6 +1385,17 @@ async def test_cli_runner_failing_no_data_object(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_wrong_data_type(temp_dir, session_node):
+    """
+    Test job runner data type validation.
+
+    Verifies that:
+    - Job runner fails when input data type doesn't match processor spec
+    - Progress stays at 0% on data type mismatch
+    - Error trace contains DataTypeMismatchError
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='wrong')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
     job_id = '398h36g3_06'
@@ -1218,6 +1409,17 @@ async def test_cli_runner_failing_wrong_data_type(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_wrong_data_format(temp_dir, session_node):
+    """
+    Test job runner data format validation.
+
+    Verifies that:
+    - Job runner fails when input data format doesn't match processor spec
+    - Progress stays at 0% on data format mismatch
+    - Error trace contains MismatchingDataTypeOrFormatError
+
+    Duration: ~15 seconds
+    Requirements: Running session node with DOR
+    """
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='data_format')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
     job_id = '398h36g3_07'
@@ -1231,6 +1433,18 @@ async def test_cli_runner_failing_wrong_data_format(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_cancelled(temp_dir, session_node):
+    """
+    Test job runner cancellation handling.
+
+    Verifies that:
+    - Running job can be cancelled
+    - Cancelled job has no errors
+    - Progress is less than 100% for cancelled jobs
+    - Job state is CANCELLED after cancellation
+
+    Duration: ~10 seconds
+    Requirements: Running session node
+    """
     a: int = 5
     b: int = 6
     job_id = '398h36g3_08'
@@ -1244,6 +1458,17 @@ async def test_cli_runner_cancelled(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
+    """
+    Test job runner target node DOR capability validation.
+
+    Verifies that:
+    - Job runner fails when target node lacks DOR capability
+    - Error message indicates target node doesn't support DOR
+    - Target node can be properly cleaned up after test
+
+    Duration: ~30 seconds
+    Requirements: Running session node, ability to create additional nodes
+    """
     # create a new node as DOR target
     with tempfile.TemporaryDirectory() as target_node_storage_path:
         local_ip = determine_local_ip()
@@ -1281,6 +1506,16 @@ async def test_cli_runner_failing_non_dor_target(temp_dir, session_node):
 
 @pytest.mark.asyncio
 async def test_cli_runner_coupled_success_by_value(temp_dir, session_node):
+    """
+    Test job runner with batch coupling.
+
+    Verifies that:
+    - Job runner executes successfully with batch ID
+    - Batch-coupled job completes to 100% progress
+
+    Duration: ~10 seconds
+    Requirements: Running session node
+    """
     a: int = 1
     b: int = 1
     job_id = '398h36g3_100'
@@ -1292,6 +1527,17 @@ async def test_cli_runner_coupled_success_by_value(temp_dir, session_node):
 
 
 def test_find_open_port():
+    """
+    Test find_available_port utility function.
+
+    Verifies that:
+    - Available port is found when ports in range are free
+    - Blocked ports are skipped when searching
+    - Correct port is returned based on availability
+
+    Duration: ~1 second
+    Requirements: None (local network only)
+    """
     # block port 5995
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(('localhost', 5995))
@@ -1305,6 +1551,20 @@ def test_find_open_port():
 
 
 def test_helper_image_clone_build_export(docker_available, github_credentials_available, session_node, temp_dir):
+    """
+    Test image helper functions for clone, build, and export workflows.
+
+    Verifies that:
+    - clone_repository fails for non-existent repository
+    - clone_repository fails for non-existent commit ID
+    - clone_repository succeeds with valid repository and commit
+    - build_processor_image fails for wrong path
+    - build_processor_image succeeds with correct path
+    - docker_export_image creates tarball correctly
+
+    Duration: ~60 seconds
+    Requirements: Docker, GitHub credentials, local repository clone
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1394,6 +1654,18 @@ def test_helper_image_clone_build_export(docker_available, github_credentials_av
 
 
 def test_cli_image_build_local(docker_available, temp_dir):
+    """
+    Test CLI image build from local processor source.
+
+    Verifies that:
+    - PDI (Processor Docker Image) can be built from local source
+    - Build creates valid PDI file with correct naming
+    - Second build uses cached image (significantly faster)
+    - PDI metadata is correctly generated
+
+    Duration: ~90 seconds
+    Requirements: Docker
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1456,6 +1728,18 @@ def test_cli_image_build_local(docker_available, temp_dir):
 
 
 def test_cli_image_build_github(docker_available, github_credentials_available, temp_dir):
+    """
+    Test CLI image build from GitHub repository.
+
+    Verifies that:
+    - PDI can be built from GitHub repository source
+    - Cloning and building from remote repository works correctly
+    - PDI file is created with correct naming convention
+    - PDI metadata contains processor descriptor information
+
+    Duration: ~120 seconds
+    Requirements: Docker, GitHub credentials
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1488,6 +1772,20 @@ def test_cli_image_build_github(docker_available, github_credentials_available, 
 
 
 def test_cli_image_export_import(docker_available, session_node, temp_dir):
+    """
+    Test CLI PDI export and import workflow.
+
+    Verifies that:
+    - PDI can be built from local source
+    - Import fails for non-existent PDI file
+    - Import fails for invalid PDI content
+    - Valid PDI can be imported to DOR
+    - Export fails for non-existent data object
+    - PDI can be exported from DOR with correct naming
+
+    Duration: ~60 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1617,6 +1915,22 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
 
 
 def test_cli_rti_volumes_list_add_delete(temp_dir):
+    """
+    Test CLI RTI volume management workflow.
+
+    Verifies that:
+    - Empty volume list returns no volumes
+    - Creating volume with non-existent path fails
+    - Filesystem volume reference can be created
+    - Volume list reflects created volume
+    - EFS volume reference can be created
+    - Multiple volume types can coexist
+    - Volumes can be deleted
+    - Deletion removes volume from list
+
+    Duration: ~5 seconds
+    Requirements: None (local datastore only)
+    """
     try:
         cmd = RTIVolumeList()
         result = cmd.execute({
@@ -1710,6 +2024,22 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
 
 
 def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, temp_dir):
+    """
+    Test CLI RTI processor deployment lifecycle.
+
+    Verifies that:
+    - PDI can be built and imported
+    - Initial processor list returns current count
+    - Processor can be deployed from PDI
+    - Deployed processor appears in list
+    - Processor details can be retrieved (including state)
+    - Processor reaches READY state
+    - Processor can be undeployed
+    - Undeployed processor no longer in list
+
+    Duration: ~90 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -1894,6 +2224,20 @@ def test_cli_rti_proc_deploy_list_show_undeploy(docker_available, session_node, 
 
 
 def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, session_node, temp_dir):
+    """
+    Test CLI RTI processor deployment with volume mounting.
+
+    Verifies that:
+    - Volume reference can be created
+    - PDI can be built and imported
+    - Processor can be deployed with volume configuration
+    - Volume mount path and read-only flag are correctly set
+    - Processor reaches READY state with volume attached
+    - Processor with volume can be undeployed
+
+    Duration: ~90 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -2093,6 +2437,21 @@ def test_cli_rti_proc_deploy_with_volume_undeploy(docker_available, session_node
 
 
 def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_node, temp_dir):
+    """
+    Test CLI RTI single job lifecycle (submit, list, status, cancel).
+
+    Verifies that:
+    - PDI can be built, imported, and deployed
+    - Task can be defined and submitted as a job
+    - Submitted job appears in job list
+    - Job status can be retrieved
+    - Job can be cancelled
+    - Cancelled job status reflects cancellation
+    - Processor can be undeployed after job operations
+
+    Duration: ~120 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -2352,6 +2711,20 @@ def test_cli_rti_job_submit_single_list_status_cancel(docker_available, session_
 
 
 def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_node, temp_dir, n=2):
+    """
+    Test CLI RTI batch job lifecycle (submit multiple, list, status, cancel).
+
+    Verifies that:
+    - Multiple tasks can be submitted as a batch
+    - All batch jobs appear in job list
+    - Individual job status can be retrieved
+    - Jobs can be cancelled individually
+    - Batch completion can be monitored
+    - Processor can be undeployed after batch operations
+
+    Duration: ~120 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
@@ -2620,6 +2993,18 @@ def test_cli_rti_job_submit_batch_list_status_cancel(docker_available, session_n
 
 
 def test_cli_service(temp_dir):
+    """
+    Test CLI service startup command.
+
+    Verifies that:
+    - Identity can be created for service
+    - Service can be started with various configuration options
+    - REST and P2P addresses can be configured
+    - DOR and RTI plugins can be specified
+
+    Duration: ~10 seconds
+    Requirements: None (service starts without blocking)
+    """
     password = 'password'
 
     # create an identity
@@ -2674,6 +3059,21 @@ def test_cli_service(temp_dir):
 
 
 def test_cli_namespace_create_list_update(docker_available, session_node, temp_dir):
+    """
+    Test CLI namespace management workflow (create, list, show, update).
+
+    Verifies that:
+    - Invalid resource specifications are rejected
+    - Namespace list starts empty
+    - Namespace can be created with CPU and memory budget
+    - Created namespace appears in list
+    - Showing non-existent namespace returns None
+    - Namespace details can be retrieved
+    - Namespace resources can be updated
+
+    Duration: ~30 seconds
+    Requirements: Docker, running session node
+    """
     if not docker_available:
         pytest.skip("Docker is not available")
 
