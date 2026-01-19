@@ -298,14 +298,20 @@ class RTIProcDeploy(CLICommand):
         custodian = {}
         for node in nodes:
             dor = DORProxy(node.rest_address)
-            result = dor.search(data_type='ProcessorDockerImage')
-            for item in result:
-                pdi: DataObject = dor.get_meta(item.obj_id)
-                proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
+            try:
+                result = dor.search(data_type='ProcessorDockerImage')
+                for item in result:
+                    pdi: DataObject = dor.get_meta(item.obj_id)
+                    proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
 
-                choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name} <{shorten_id(pdi.obj_id)}> "
-                                                  f"{pdi.tags['repository']}:{pdi.tags['commit_id'][:6]}..."))
-                custodian[item.obj_id] = node
+                    choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name}:{pdi.tags['content_hash'][:6]} "
+                                                      f"<{shorten_id(pdi.obj_id)}> "
+                                                      f"{pdi.tags['repository']}:{pdi.tags['commit_id'][:6]}..."))
+                    custodian[item.obj_id] = node
+
+            except Exception:
+                logger.warning(f"Failed to send request (dor.search) to "
+                               f"node {node.identity.id} at {node.rest_address}")
 
         # do we have any processors to choose from?
         if len(choices) == 0:

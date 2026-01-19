@@ -28,7 +28,6 @@ class RTIAdminInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_node_ownership_if_strict
-    @requires_proc_deployed
     @requires_proc_not_busy
     def undeploy(self, proc_id: str) -> Optional[Processor]:
         """

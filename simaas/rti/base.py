@@ -105,7 +105,7 @@ class RTIServiceBase(RTIRESTService):
     def update_proc_db(self, proc: Processor) -> None:
         # update or create db record
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc.id)
+            record = session.get(DBDeployedProcessor, proc.id)
             if record:
                 record.state = proc.state.value
                 record.image_name = proc.image_name
@@ -157,7 +157,7 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # get the DB record for the job (if any)
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist")
 
@@ -178,12 +178,12 @@ class RTIServiceBase(RTIRESTService):
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
+            record = session.get(DBDeployedProcessor, proc_id)
             return record is not None
 
     def get_all_procs(self) -> List[Processor]:
         """
-        Retrieves a dict of all deployed processors by their id.
+        Retrieves a list of all deployed processors
         """
         with self._session_maker() as session:
             records = session.query(DBDeployedProcessor).all()
@@ -202,7 +202,7 @@ class RTIServiceBase(RTIRESTService):
         Retrieves a specific processors given its id.
         """
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
+            record = session.get(DBDeployedProcessor, proc_id)
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
@@ -245,7 +245,7 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # do we have a db record for this processor?
-                record = session.query(DBDeployedProcessor).get(proc_id)
+                record = session.get(DBDeployedProcessor, proc_id)
                 if not record:
                     return None
 
@@ -480,7 +480,7 @@ class RTIServiceBase(RTIRESTService):
             with self._session_maker() as session:
                 for job, status, _ in batch:
                     # purge job that may already be running
-                    record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job.id)
+                    record: Optional[DBJobInfo] = session.get(DBJobInfo, job.id)
                     if record is not None:
                         try:
                             self.perform_purge(record)
@@ -495,7 +495,7 @@ class RTIServiceBase(RTIRESTService):
                             id='', reason=f"Submission of batch {batch_id} failed", details={'trace': trace}
                         )
                     ))
-                    record = session.query(DBJobInfo).get(job.id)
+                    record = session.get(DBJobInfo, job.id)
                     record.status = status
 
                 session.commit()
@@ -589,7 +589,7 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # get the record
-                record: DBJobInfo = session.query(DBJobInfo).get(job_id)
+                record: DBJobInfo = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
@@ -654,7 +654,7 @@ class RTIServiceBase(RTIRESTService):
     def get_job_owner_iid(self, job_id: str) -> str:
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
                 return record.user_iid
@@ -667,7 +667,7 @@ class RTIServiceBase(RTIRESTService):
         # get the record
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
@@ -743,7 +743,7 @@ class RTIServiceBase(RTIRESTService):
         # get the record
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 
@@ -757,7 +757,7 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # get the record
-                record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job_id)
+                record: Optional[DBJobInfo] = session.get(DBJobInfo, job_id)
                 if record is None:
                     raise RTIException(f"Job {job_id} does not exist.")
 

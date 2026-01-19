@@ -8,3 +8,15 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 # Same as PyCharm
 line-length = 120
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "serial: mark test to run serially (not in parallel)",
+    "docker_only: mark test to run only with Docker backend",
+    "aws_only: mark test to run only with AWS backend",
+    "slow: mark test as slow running",
+    "integration: mark as integration test",
+    "e2e: mark as end-to-end test",
+]

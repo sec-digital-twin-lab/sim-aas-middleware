@@ -45,39 +45,47 @@ A standard processor Dockerfile typically:
 
 
 ## Example
-The following is an example and recommended template for processor dockerfiles:
-```shell
-FROM ubuntu:24.04
+The following is an example and recommended template for processor dockerfiles using a multi-stage build:
+```dockerfile
+########################################
+# -------- 1. Builder stage ----------
+########################################
+FROM python:3.13-slim-bookworm AS builder
 
-# Install system packages and Python 3.12
-RUN apt update -y && \
-    apt install -y tzdata software-properties-common && \
-    add-apt-repository ppa:deadsnakes/ppa && \
-    apt update -y && \
-    apt install -y python3.12 python3-pip python3.12-venv git
+# Build-time packages
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git build-essential libffi-dev tzdata && \
+    rm -rf /var/lib/apt/lists/*
 
-# Clone sim-aas-middleware (optionally using Git credentials)
-RUN --mount=type=secret,id=git_credentials \
-    if [ -f /run/secrets/git_credentials ]; then \
-        GIT_CREDENTIALS=$(cat /run/secrets/git_credentials); \
-        git clone https://$GIT_CREDENTIALS@github.com/sec-digital-twin-lab/sim-aas-middleware; \
-    else \
-        git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware; \
-    fi
+# Virtual-env with everything pre-built
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Checkout specific commit
-WORKDIR /sim-aas-middleware
-RUN git checkout f98a2b97622da01b08857977c94859424cd4fd3c
+# Copy the processor and move the sim-aas-middleware out
+COPY . /processor
+RUN mv /processor/sim-aas-middleware /sim-aas-middleware
 
-# Install processor code
+# Install sim-aas-middleware
+RUN /opt/venv/bin/pip install --no-cache-dir /sim-aas-middleware
+
+# Processor code + its own deps
 WORKDIR /processor
-COPY . .
+RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# Set up virtual environment
-RUN python3.12 -m venv /venv
-RUN /venv/bin/pip install --upgrade pip setuptools
-RUN /venv/bin/pip install -r requirements.txt
-RUN /venv/bin/pip install /sim-aas-middleware
+########################################
+# -------- 2. Runtime stage ----------
+########################################
+FROM python:3.13-slim-bookworm
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /processor /processor
+
+ENV PATH="/opt/venv/bin:${PATH}"
 
 # Create job working directory
 RUN mkdir /job
@@ -89,9 +97,8 @@ EXPOSE 6000
 EXPOSE 7001
 
 # Start job runner
-ENTRYPOINT ["/venv/bin/simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--service-address", "tcp://0.0.0.0:6000"]
+ENTRYPOINT ["simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--service-address", "tcp://0.0.0.0:6000"]
 ```
 
-> Note:  the `git checkout f98a...` part should be modified to point at
-> the specific version of the middleware that is being used. Since the Sim-aaS Middleware is under
-> active development, this may have to change frequently.
+> Note: The sim-aas-middleware is copied into the build context and installed during the build process.
+> The build system automatically includes the middleware sources when building processor images.

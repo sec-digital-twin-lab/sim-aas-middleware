@@ -71,7 +71,7 @@ class DefaultNodeDBService(NodeDBService):
         Retrieves information about the node.
         """
         with self._Session() as session:
-            record = session.query(NodeRecord).get(self._node.identity.id)
+            record = session.get(NodeRecord, self._node.identity.id)
             return NodeInfo(
                 identity=self._node.identity,
                 last_seen=record.last_seen,
@@ -292,7 +292,7 @@ class DefaultNodeDBService(NodeDBService):
     def touch_identity(self, identity: Identity) -> None:
         with self._Session() as session:
             # do we have the identity already on record?
-            record = session.query(IdentityRecord).get(identity.id)
+            record = session.get(IdentityRecord, identity.id)
             if record is None:
                 raise IdentityNotFoundError(identity.id)
 
@@ -304,7 +304,7 @@ class DefaultNodeDBService(NodeDBService):
         Returns information about a namespace (if it exists).
         """
         with self._Session() as session:
-            record = session.query(NamespaceRecord).get(name)
+            record = session.get(NamespaceRecord,name)
             return NamespaceInfo(
                 name=record.name,
                 budget=ResourceDescriptor.model_validate(record.budget),
@@ -377,7 +377,7 @@ class DefaultNodeDBService(NodeDBService):
     def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:
         with self._mutex:
             with self._Session() as session:
-                record = session.query(NamespaceRecord).get(ns_info.name)
+                record = session.get(NamespaceRecord,ns_info.name)
                 if record is None:
                     record = NamespaceRecord(
                         name=ns_info.name,
@@ -396,7 +396,7 @@ class DefaultNodeDBService(NodeDBService):
     def handle_namespace_update(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         with self._mutex:
             with self._Session() as session:
-                record = session.query(NamespaceRecord).get(name)
+                record = session.get(NamespaceRecord,name)
                 if record is None:
                     record = NamespaceRecord(
                         name=name,
@@ -421,7 +421,7 @@ class DefaultNodeDBService(NodeDBService):
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(name)
+                record: Optional[NamespaceRecord] = session.get(NamespaceRecord,name)
                 if record is None:
                     raise NamespaceNotFoundError(name)
 
@@ -452,7 +452,7 @@ class DefaultNodeDBService(NodeDBService):
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
-                record: Optional[NamespaceRecord] = session.query(NamespaceRecord).get(name)
+                record: Optional[NamespaceRecord] = session.get(NamespaceRecord,name)
                 if record is not None:
                     # do we have this reservation?
                     reservations = dict(record.reservations)
