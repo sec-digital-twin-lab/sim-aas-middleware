@@ -27,10 +27,10 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-The repository includes built-in plugins for storage and execution:
-- `plugins/dor_default` - Default Data Object Repository (SQLite-based storage)
-- `plugins/rti_docker` - Local Docker-based job execution
-- `plugins/rti_aws` - AWS Batch-based cloud execution
+The package includes built-in plugins for storage and execution:
+- `simaas/plugins/builtins/dor_default` - Default Data Object Repository (SQLite-based storage)
+- `simaas/plugins/builtins/rti_docker` - Local Docker-based job execution
+- `simaas/plugins/builtins/rti_aws` - AWS Batch-based cloud execution
 
 Plugin dependencies are included in `requirements.txt`. For AWS RTI usage, additional
 environment configuration is required - see [AWS RTI Service](docs/usage_run_simaas_node.md#aws-rti-service).

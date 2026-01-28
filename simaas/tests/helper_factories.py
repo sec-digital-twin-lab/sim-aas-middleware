@@ -231,7 +231,7 @@ async def execute_job(
         batch_id: Optional[str] = None
 ) -> JobStatus:
     """Execute a job and wait for completion."""
-    from plugins.rti_docker import DefaultRTIService
+    from simaas.plugins.builtins.rti_docker import DefaultRTIService
 
     rti: DefaultRTIService = custodian.rti
     user = user if user else custodian.identity

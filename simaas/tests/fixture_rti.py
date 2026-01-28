@@ -25,9 +25,9 @@ from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Processor, ProcessorVolume
 
 # Import plugin classes
-from plugins.dor_default import DefaultDORService
-from plugins.rti_docker import DefaultRTIService
-from plugins.rti_aws import AWSRTIService
+from simaas.plugins.builtins.dor_default import DefaultDORService
+from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.rti_aws import AWSRTIService
 
 logger = Logging.get('tests.fixtures.rti')
 

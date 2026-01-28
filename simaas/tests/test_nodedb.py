@@ -16,7 +16,7 @@ from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
-from plugins.dor_default import DefaultDORService
+from simaas.plugins.builtins.dor_default import DefaultDORService
 from simaas.nodedb.exceptions import NodeDBException
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 

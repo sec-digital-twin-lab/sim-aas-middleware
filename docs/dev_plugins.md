@@ -4,22 +4,20 @@ The DOR (Data Object Repository) and RTI (Runtime Infrastructure) services are i
 
 ## Plugin Directory Structure
 
-Plugins are organized in the `plugins/` directory:
+Built-in plugins are bundled inside the `simaas` package:
 
 ```
-plugins/
-  dor_default/           # DOR plugin using SQLite
-    __init__.py          # Exports the service class
-    service.py           # Implementation
-    requirements.txt     # Plugin-specific dependencies
-  rti_docker/            # RTI plugin for local Docker execution
+simaas/plugins/builtins/
+  __init__.py              # Builtins package marker
+  dor_default/             # DOR plugin using SQLite
+    __init__.py            # Exports the service class
+    service.py             # Implementation
+  rti_docker/              # RTI plugin for local Docker execution
     __init__.py
     service.py
-    requirements.txt
-  rti_aws/               # RTI plugin for AWS Batch execution
+  rti_aws/                 # RTI plugin for AWS Batch execution
     __init__.py
     service.py
-    requirements.txt
 ```
 
 ## Built-in Plugins
@@ -35,11 +33,11 @@ plugins/
 DOR plugins must implement the `DORInterface` and provide a `plugin_name()` class method:
 
 ```python
-# plugins/dor_custom/__init__.py
+# simaas/plugins/builtins/dor_custom/__init__.py
 from .service import CustomDORService
 __all__ = ['CustomDORService']
 
-# plugins/dor_custom/service.py
+# simaas/plugins/builtins/dor_custom/service.py
 from simaas.dor.api import DORInterface
 
 class CustomDORService(DORInterface):
@@ -72,11 +70,11 @@ class CustomDORService(DORInterface):
 RTI plugins must extend `RTIServiceBase` and provide a `plugin_name()` class method:
 
 ```python
-# plugins/rti_custom/__init__.py
+# simaas/plugins/builtins/rti_custom/__init__.py
 from .service import CustomRTIService
 __all__ = ['CustomRTIService']
 
-# plugins/rti_custom/service.py
+# simaas/plugins/builtins/rti_custom/service.py
 from simaas.rti.base import RTIServiceBase
 
 class CustomRTIService(RTIServiceBase):
@@ -98,7 +96,7 @@ class CustomRTIService(RTIServiceBase):
 ## Plugin Discovery
 
 Plugins are discovered automatically at startup from:
-1. The built-in `plugins/` directory in the repository
+1. The built-in `simaas/plugins/builtins/` directory (bundled with the package)
 2. Additional directories specified via `--plugins` CLI argument
 
 The plugin name (returned by `plugin_name()`) is used for CLI selection. Plugin folder names should use underscores (e.g., `dor_postgres`, `rti_kubernetes`).
