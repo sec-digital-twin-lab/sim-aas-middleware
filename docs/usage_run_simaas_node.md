@@ -24,8 +24,8 @@ execution-only nodes (by only starting the RTI service), or as full nodes (by st
 and RTI services).
 
 DOR and RTI services are provided through **plugins**. The available options depend on which
-plugins are discovered at startup. Built-in plugins are located in the `plugins/` directory
-of the Sim-aaS Middleware repository. Additional plugins can be loaded using the `--plugins`
+plugins are discovered at startup. Built-in plugins are bundled with the `simaas` package
+in `simaas/plugins/builtins/`. Additional plugins can be loaded using the `--plugins`
 argument (see below).
 
 If starting a node interactively, the user is prompted to select what DOR service to use:

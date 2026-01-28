@@ -17,7 +17,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.namespace.default import DefaultNamespace
 from simaas.node.base import Node
-from plugins.dor_default import DefaultDORService
+from simaas.plugins.builtins.dor_default import DefaultDORService
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)

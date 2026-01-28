@@ -16,6 +16,7 @@ from simaas.helpers import determine_default_rest_address, determine_default_p2p
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.plugins import discover_plugins, get_plugin_class
+from simaas.plugins import builtins
 
 logger = Logging.get('cli')
 
@@ -119,7 +120,7 @@ class Service(CLICommand):
         use_ssh_tunneling = False
 
         # discover plugins from built-in and user-specified paths
-        plugin_paths = [os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'plugins')]
+        plugin_paths = [os.path.dirname(builtins.__file__)]
         if args.get('plugins'):
             plugin_paths.extend(args['plugins'])
         plugin_registry = discover_plugins(plugin_paths)
