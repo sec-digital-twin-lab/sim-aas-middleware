@@ -40,7 +40,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ".[dev]"
+          pip install -e ".[dev]"
           pip install pytest-timeout pytest-cov
 
       - name: Run tests with coverage
