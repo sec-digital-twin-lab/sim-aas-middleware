@@ -13,10 +13,15 @@ A clear and concise description of the feature you would like to have.
 -->
 
 
+**Use case**
+<!--
+Describe the problem this feature would solve or the use case it addresses.
+-->
+
+
 **Pitch**
 <!--
 Explain why this feature should be implemented and how it would benefit the project.
-If applicable, include examples of how you imagine it would be used.
 -->
 
 

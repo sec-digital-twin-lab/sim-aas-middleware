@@ -20,3 +20,17 @@ markers = [
     "integration: mark as integration test",
     "e2e: mark as end-to-end test",
 ]
+
+[tool.coverage.run]
+source = ["simaas"]
+omit = [
+    "simaas/cli/*",
+    "simaas/tests/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

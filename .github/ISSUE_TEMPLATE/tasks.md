@@ -2,7 +2,7 @@
 name: Tasks
 about: Tasks to be completed
 title: ''
-labels: ''
+labels: 'task'
 assignees: ''
 
 ---
