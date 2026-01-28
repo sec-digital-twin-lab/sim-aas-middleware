@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from plugins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.rti_docker import DefaultRTIService
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy

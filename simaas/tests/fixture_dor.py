@@ -20,8 +20,8 @@ from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 
 # Import plugin classes
-from plugins.dor_default import DefaultDORService
-from plugins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.dor_default import DefaultDORService
+from simaas.plugins.builtins.rti_docker import DefaultRTIService
 
 logger = Logging.get('tests.fixtures.dor')
 

@@ -19,9 +19,9 @@ from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 
 # Import plugin classes
-from plugins.dor_default import DefaultDORService
-from plugins.rti_docker import DefaultRTIService
-from plugins.rti_aws.service import get_default_aws_config
+from simaas.plugins.builtins.dor_default import DefaultDORService
+from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.rti_aws.service import get_default_aws_config
 
 load_dotenv()
 
