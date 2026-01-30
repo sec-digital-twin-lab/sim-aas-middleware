@@ -1,11 +1,11 @@
 import asyncio
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict
 
 from simaas.core.keystore import Keystore
 from simaas.core.identity import Identity
 from simaas.core.helpers import generate_random_string
 from simaas.dor.api import DORInterface
-from simaas.dor.schemas import DataObject, DataObjectProvenance, DORStatistics, DataObjectRecipe
+from simaas.dor.schemas import DataObject, DataObjectProvenance, DORStatistics, DataObjectRecipe, TagValueType
 from simaas.namespace.api import Namespace
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.p2p.base import P2PAddress
@@ -52,7 +52,7 @@ class NamespaceDOR(DORInterface):
     def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
-            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None,
+            tags: Optional[Dict[str, TagValueType]] = None,
             recipe: Optional[DataObjectRecipe] = None) -> DataObject:
         reply: Optional[dict] = asyncio.run(P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'add', args={

@@ -216,7 +216,7 @@ async def p2p_respond(
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        print(f"Unexpected P2P error: {trace}")
+        logger.error(f"Unexpected P2P error: {trace}")
         raise UnexpectedP2PError(details={
             'trace': trace
         })

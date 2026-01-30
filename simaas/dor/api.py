@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import abc
-from typing import Optional, List, Tuple, Dict, Union
+from typing import Optional, List, Tuple, Dict
 from fastapi import Response, Form, UploadFile, File
 
-from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe
+from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe, TagValueType
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
@@ -45,7 +45,7 @@ class DORInterface(abc.ABC):
             self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
-            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None,
+            tags: Optional[Dict[str, TagValueType]] = None,
             recipe: Optional[DataObjectRecipe] = None
     ) -> DataObject:
         """
