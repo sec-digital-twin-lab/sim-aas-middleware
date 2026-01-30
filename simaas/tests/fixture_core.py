@@ -19,8 +19,8 @@ from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 
 # Import plugin classes
-from simaas.plugins.builtins.dor_default import DefaultDORService
-from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
+from simaas.plugins.builtins.rti_docker import DockerRTIService
 from simaas.plugins.builtins.rti_aws.service import get_default_aws_config
 
 load_dotenv()
@@ -86,7 +86,7 @@ class TestContext:
         return path
 
     def get_node(self, keystore: Keystore, enable_rest: bool = False,
-                 dor_plugin_class: type = DefaultDORService, rti_plugin_class: type = DefaultRTIService,
+                 dor_plugin_class: type = FilesystemDORService, rti_plugin_class: type = DockerRTIService,
                  retain_job_history: bool = True, strict_deployment: bool = False,
                  wd_path: str = None) -> Node:
         """Get or create a node for the given keystore."""

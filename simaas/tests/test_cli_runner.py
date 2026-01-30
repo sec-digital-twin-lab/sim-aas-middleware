@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.rti_docker import DockerRTIService
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
@@ -267,7 +267,7 @@ async def test_runner_non_dor(temp_dir, session_node):
         target_node = DefaultNode.create(
             keystore=Keystore.new('dor-target'), storage_path=target_node_storage_path,
             p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-            enable_db=True, dor_plugin_class=None, rti_plugin_class=DefaultRTIService,
+            enable_db=True, dor_plugin_class=None, rti_plugin_class=DockerRTIService,
             retain_job_history=True, strict_deployment=False
         )
 

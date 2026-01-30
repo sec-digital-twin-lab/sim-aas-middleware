@@ -125,7 +125,7 @@ class DataObjectProvenanceRecord(Base):
     provenance = Column(NestedMutableJson, nullable=False)
 
 
-class DefaultDORService(DORRESTService):
+class FilesystemDORService(DORRESTService):
     def __init__(self, node, db_path: str):
         # initialise properties
         self._db_mutex = Lock()
@@ -143,10 +143,10 @@ class DefaultDORService(DORRESTService):
 
     @classmethod
     def plugin_name(cls) -> str:
-        return 'default'
+        return 'fs'
 
     def type(self) -> str:
-        return 'default'
+        return 'fs'
 
     def obj_content_path(self, c_hash: str) -> str:
         return os.path.join(self._node.datastore, DOR_INFIX_MASTER_PATH, c_hash)

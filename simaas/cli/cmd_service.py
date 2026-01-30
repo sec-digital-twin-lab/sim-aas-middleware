@@ -95,7 +95,7 @@ class Service(CLICommand):
                      help=f"REST address of an existing node for joining a network "
                           f"(default: '{self.default_boot_node_address}')."),
             Argument('--dor', dest='dor', action='store',
-                     help=f"DOR plugin name (e.g., 'default', 'postgres'). "
+                     help=f"DOR plugin name (e.g., 'fs', 'postgres'). "
                           f"(default: '{self.default_dor_service}')."),
             Argument('--rti', dest='rti', action='store',
                      help=f"RTI plugin name (e.g., 'docker', 'aws'). "
