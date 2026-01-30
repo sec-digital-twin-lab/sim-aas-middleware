@@ -26,8 +26,9 @@ logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
 
 def main():
     try:
-        default_keystore = os.path.join(os.environ['HOME'], '.keystore')
-        default_temp_dir = os.path.join(os.environ['HOME'], '.temp')
+        home_dir = os.environ.get('HOME', os.path.expanduser('~'))
+        default_keystore = os.path.join(home_dir, '.keystore')
+        default_temp_dir = os.path.join(home_dir, '.temp')
         default_log_level = 'INFO'
 
         cli = CLIParser(f'SaaS Middleware v{__version__} command line interface (CLI)', arguments=[

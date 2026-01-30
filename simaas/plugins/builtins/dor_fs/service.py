@@ -5,7 +5,7 @@ import os
 import shutil
 from stat import S_IREAD, S_IRGRP
 from threading import Lock
-from typing import Optional, List, Dict, Union
+from typing import Optional, List, Dict
 
 from fastapi import UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
@@ -22,7 +22,7 @@ from simaas.core.logging import Logging
 from simaas.nodedb.exceptions import IdentityNotFoundError
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
-    AddDataObjectParameters, DORFilePartInfo
+    AddDataObjectParameters, DORFilePartInfo, TagValueType
 
 logger = Logging.get('dor.service')
 
@@ -329,7 +329,7 @@ class FilesystemDORService(DORRESTService):
             self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
-            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None,
+            tags: Optional[Dict[str, TagValueType]] = None,
             recipe: Optional[DataObjectRecipe] = None
     ) -> DataObject:
 

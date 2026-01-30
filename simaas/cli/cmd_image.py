@@ -160,7 +160,10 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
         try:
             # does the destination already exist?
-            shutil.rmtree(repository_path, ignore_errors=True)
+            try:
+                shutil.rmtree(repository_path)
+            except OSError as e:
+                logger.warning(f"Failed to remove directory {repository_path}: {e}")
 
             # clone the repo
             Repo.clone_from(repository_url, repository_path)

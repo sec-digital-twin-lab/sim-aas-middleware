@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Optional, Dict, Tuple, Union
+from typing import List, Optional, Dict, Tuple
 
 from pydantic import BaseModel
 
@@ -10,7 +10,7 @@ from simaas.core.keystore import Keystore
 
 from simaas.core.logging import Logging
 from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
-from simaas.dor.schemas import DataObject, DataObjectRecipe
+from simaas.dor.schemas import DataObject, DataObjectRecipe, TagValueType
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
@@ -201,7 +201,7 @@ class PushRequest(BaseModel):
     content_encrypted: bool
     license: DataObject.License
     recipe: Optional[DataObjectRecipe]
-    tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]]
+    tags: Optional[Dict[str, TagValueType]]
 
 
 class PushResponse(BaseModel):
@@ -223,7 +223,7 @@ class P2PPushDataObject(P2PProtocol):
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
             access_restricted: bool, content_encrypted: bool, license: DataObject.License,
             recipe: Optional[DataObjectRecipe] = None,
-            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None
+            tags: Optional[Dict[str, TagValueType]] = None
     ) -> DataObject:
         peer_address = P2PAddress(
             address=p2p_address,
