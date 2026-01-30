@@ -16,7 +16,7 @@ from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
-from simaas.plugins.builtins.dor_default import DefaultDORService
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.exceptions import NodeDBException
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 
@@ -32,7 +32,7 @@ logger = Logging.get(__name__)
 def module_node(test_context, extra_keystores) -> Node:
     """Create a module-scoped node for nodedb testing."""
     _node: Node = test_context.get_node(
-        extra_keystores[0], enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None
+        extra_keystores[0], enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None
     )
 
     yield _node
@@ -382,7 +382,7 @@ def test_namespace_update(test_context):
     # create nodes
     keystores: List[Keystore] = [Keystore.new(f"keystore_{i}", "email") for i in range(3)]
     nodes: List[Node] = [
-        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
+        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None)
         for keystore in keystores
     ]
 
@@ -422,7 +422,7 @@ def test_namespace_reserve_cancel(test_context):
     # create nodes
     keystores: List[Keystore] = [Keystore.new(f"keystore_{i}", "email") for i in range(3)]
     nodes: List[Node] = [
-        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
+        test_context.get_node(keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None)
         for keystore in keystores
     ]
 

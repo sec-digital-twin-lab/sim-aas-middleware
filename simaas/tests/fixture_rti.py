@@ -25,8 +25,8 @@ from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Processor, ProcessorVolume
 
 # Import plugin classes
-from simaas.plugins.builtins.dor_default import DefaultDORService
-from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
+from simaas.plugins.builtins.rti_docker import DockerRTIService
 from simaas.plugins.builtins.rti_aws import AWSRTIService
 
 logger = Logging.get('tests.fixtures.rti')
@@ -372,7 +372,7 @@ def docker_non_strict_node(test_context):
     """
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("docker_non_strict_node", "no-email-provided", path=tempdir, password="password")
-        _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=False)
+        _node = test_context.get_node(keystore, rti_plugin_class=DockerRTIService, enable_rest=True, strict_deployment=False)
         yield _node
 
 
@@ -384,7 +384,7 @@ def docker_strict_node(test_context, extra_keystores):
     """
     with tempfile.TemporaryDirectory() as tempdir:
         keystore = Keystore.new("docker_strict_node", "no-email-provided", path=tempdir, password="password")
-        _node = test_context.get_node(keystore, rti_plugin_class=DefaultRTIService, enable_rest=True, strict_deployment=True)
+        _node = test_context.get_node(keystore, rti_plugin_class=DockerRTIService, enable_rest=True, strict_deployment=True)
         yield _node
 
 
@@ -444,7 +444,7 @@ def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
             _node = DefaultNode.create(
                 keystore=session_keystore, storage_path=tempdir,
                 p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
-                enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=AWSRTIService,
+                enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=AWSRTIService,
                 retain_job_history=True, strict_deployment=False
             )
 

@@ -28,7 +28,7 @@ pip install -e .
 ```
 
 The package includes built-in plugins for storage and execution:
-- `simaas/plugins/builtins/dor_default` - Default Data Object Repository (SQLite-based storage)
+- `simaas/plugins/builtins/dor_fs` - Filesystem Data Object Repository (SQLite + local filesystem storage)
 - `simaas/plugins/builtins/rti_docker` - Local Docker-based job execution
 - `simaas/plugins/builtins/rti_aws` - AWS Batch-based cloud execution
 

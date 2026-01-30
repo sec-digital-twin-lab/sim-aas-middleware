@@ -1,3 +1,3 @@
-from .service import DefaultRTIService
+from .service import DockerRTIService
 
-__all__ = ['DefaultRTIService']
+__all__ = ['DockerRTIService']

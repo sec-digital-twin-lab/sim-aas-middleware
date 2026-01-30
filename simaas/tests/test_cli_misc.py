@@ -68,7 +68,7 @@ def test_cli_service(temp_dir):
             'rest-address': f'{host}:{rest_port}',
             'p2p-address': p2p_address,
             'boot-node': f'{host}:{p2p_port}',
-            'dor': 'default',
+            'dor': 'fs',
             'rti': 'docker',
             'retain-job-history': False,
             'strict-deployment': False,

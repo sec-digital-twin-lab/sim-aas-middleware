@@ -30,7 +30,7 @@ REQUIRED_ENV = [
     'SIMAAS_REPO_PATH'
 ]
 
-class DefaultRTIService(RTIServiceBase):
+class DockerRTIService(RTIServiceBase):
     def __init__(
             self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True
     ) -> None:
