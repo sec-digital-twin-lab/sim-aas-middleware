@@ -8,7 +8,7 @@ from fastapi import Request
 from simaas.rti.schemas import Task
 
 from simaas.core.identity import Identity
-from simaas.rest.exceptions import AuthorisationFailedError
+from simaas.core.errors import AuthorisationError
 
 
 def verify_authorisation_token(identity: Identity, signature: str, url: str, body: dict = None) -> bool:
@@ -29,26 +29,28 @@ class VerifyAuthorisation:
     async def __call__(self, request: Request) -> (Identity, dict):
         # check if there is the required saasauth header information
         if 'saasauth-iid' not in request.headers or 'saasauth-signature' not in request.headers:
-            raise AuthorisationFailedError({
-                'reason': 'saasauth information missing',
-                'header_keys': list(request.headers.keys())
-            })
+            raise AuthorisationError(
+                identity_id='unknown',
+                operation='authenticate',
+                hint='saasauth header information missing'
+            )
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
         try:
             identity: Identity = await self.node.db.get_identity(iid)
         except Exception as e:
-            raise AuthorisationFailedError({
-                'reason': 'failed to retrieve identity',
-                'iid': iid,
-                'error': str(e)
-            })
+            raise AuthorisationError(
+                identity_id=iid,
+                operation='retrieve_identity',
+                hint=str(e)
+            )
         if identity is None:
-            raise AuthorisationFailedError({
-                'reason': 'unknown identity',
-                'iid': iid
-            })
+            raise AuthorisationError(
+                identity_id=iid,
+                operation='authenticate',
+                hint='unknown identity'
+            )
 
         # verify the signature
         signature = request.headers['saasauth-signature']
@@ -56,11 +58,11 @@ class VerifyAuthorisation:
         body = body.decode('utf-8')
         body = json.loads(body) if body != '' else {}
         if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", body):
-            raise AuthorisationFailedError({
-                'reason': 'invalid signature',
-                'iid': iid,
-                'signature': signature
-            })
+            raise AuthorisationError(
+                identity_id=iid,
+                operation='verify_signature',
+                hint='invalid signature'
+            )
 
         # touch the identity
         await self.node.db.touch_identity(identity)

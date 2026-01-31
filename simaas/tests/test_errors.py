@@ -13,8 +13,9 @@ from simaas.core.errors import (
     OperationError,
     ValidationError,
     InternalError,
+    RemoteError,
 )
-from simaas.core.exceptions import ExceptionContent, SaaSRuntimeException
+from simaas.core.errors import ExceptionContent
 from simaas.core.logging import Logging
 
 
@@ -359,31 +360,36 @@ class TestInternalError:
         assert e.details['trace'] == 'Thread-1 waiting for Thread-2'
 
 
-class TestBackwardCompatibility:
-    """Tests for backward compatibility with existing exceptions."""
+class TestRemoteError:
+    """Tests for RemoteError."""
 
-    def test_saas_runtime_exception_still_works(self):
-        """Test that SaaSRuntimeException still functions correctly."""
-        e = SaaSRuntimeException(
-            reason='something went wrong',
-            details={'key': 'value'}
+    def test_format_reason_basic(self):
+        """Test basic reason formatting."""
+        e = RemoteError('Connection refused')
+
+        assert e.reason == 'Connection refused'
+
+    def test_format_reason_with_remote_id(self):
+        """Test reason formatting with remote exception ID."""
+        e = RemoteError(
+            'Not found',
+            remote_id='abc123',
+            remote_details={'resource': 'doc456'}
         )
 
-        assert len(e.id) == 16
-        assert e.id.isalnum()
-        assert e.reason == 'something went wrong'
-        assert e.details == {'key': 'value'}
-        assert isinstance(e.content, ExceptionContent)
+        assert e.reason == 'Not found'
+        assert e.details['remote_id'] == 'abc123'
+        assert e.details['remote_details'] == {'resource': 'doc456'}
 
-    def test_saas_runtime_exception_with_custom_id(self):
-        """Test SaaSRuntimeException with custom ID."""
-        custom_id = 'custom123456789a'
-        e = SaaSRuntimeException(
-            reason='test',
-            eid=custom_id
+    def test_format_reason_with_status_code(self):
+        """Test reason formatting with HTTP status code."""
+        e = RemoteError(
+            'Server error',
+            status_code=500
         )
 
-        assert e.id == custom_id
+        assert e.reason == 'Server error'
+        assert e.details['status_code'] == 500
 
 
 class TestExceptionRaisingAndCatching:
@@ -418,6 +424,7 @@ class TestExceptionRaisingAndCatching:
             OperationError(operation='test'),
             ValidationError(field='test'),
             InternalError(component='test'),
+            RemoteError('test'),
         ]
 
         for e in exceptions:

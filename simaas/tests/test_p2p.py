@@ -14,7 +14,7 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
-from simaas.dor.exceptions import FetchDataObjectFailedError
+from simaas.core.errors import NetworkError
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
@@ -25,7 +25,7 @@ from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PAddress
-from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.core.errors import NetworkError as PeerUnavailableError  # Alias for backwards compat in tests
 from simaas.p2p.protocol import P2PLatency, P2PThroughput
 
 Logging.initialise(level=logging.DEBUG)
@@ -211,7 +211,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
         try:
             await protocol.perform(p2p_server.info, '01234', meta_path, content_path)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'data object not found' in e.details['reason']
         except Exception:
             assert False
@@ -257,7 +257,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             fake_obj_id = 'abcdef'
             await protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'data object not found' in e.details['reason']
         except Exception:
             assert False
@@ -266,7 +266,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         try:
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'user id not found' in e.details['reason']
         except Exception:
             assert False
@@ -278,7 +278,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         try:
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'user does not have access' in e.details['reason']
         except Exception:
             assert False
@@ -296,7 +296,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
                                    user_signature=invalid_signature)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
@@ -312,7 +312,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
             assert os.path.isfile(content_path)
-        except FetchDataObjectFailedError:
+        except NetworkError:
             assert False
         except Exception:
             assert False

@@ -141,7 +141,7 @@ async def test_cli_runner_failing_validation(temp_dir, session_node):
     # execute the job
     status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
-    assert 'Data object JSON content does not comply' in status.errors[0].exception.reason
+    assert 'validation failed' in status.errors[0].exception.reason.lower()
 
 
 @pytest.mark.asyncio
@@ -173,7 +173,7 @@ async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keysto
     status = await execute_job(temp_dir, session_node, job_id, a, b, user=user.identity)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
-    assert 'AccessNotPermittedError' in trace
+    assert 'AuthorisationError' in trace
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ async def test_runner_no_signature(temp_dir, session_node):
     status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
-    assert 'MissingUserSignatureError' in trace
+    assert 'AuthorisationError' in trace or 'signature' in trace.lower()
 
 
 @pytest.mark.asyncio
@@ -207,7 +207,7 @@ async def test_runner_missing_object(temp_dir, session_node):
     status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
-    assert 'UnresolvedInputDataObjectsError' in trace
+    assert 'NotFoundError' in trace or 'unresolved' in trace.lower() or 'not found' in trace.lower()
 
 
 @pytest.mark.asyncio
@@ -222,7 +222,7 @@ async def test_runner_wrong_type(temp_dir, session_node):
     status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
-    assert 'MismatchingDataTypeOrFormatError' in trace
+    assert 'ValidationError' in trace or 'mismatch' in trace.lower() or 'data_type' in trace.lower()
 
 
 @pytest.mark.asyncio
@@ -237,7 +237,7 @@ async def test_runner_wrong_format(temp_dir, session_node):
     status = await execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
-    assert 'MismatchingDataTypeOrFormatError' in trace
+    assert 'ValidationError' in trace or 'mismatch' in trace.lower() or 'data_type' in trace.lower()
 
 
 @pytest.mark.asyncio

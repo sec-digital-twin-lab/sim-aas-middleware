@@ -17,7 +17,7 @@ from simaas.cli.cmd_network import NetworkList
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
     RTIProcShow, RTIJobList, RTIJobCancel, RTIVolumeList, RTIVolumeCreateFSRef, RTIVolumeCreateEFSRef, RTIVolumeDelete
 from simaas.cli.cmd_service import Service
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
 
 # deactivate annoying DEBUG messages by multipart
@@ -142,7 +142,7 @@ def main():
         cli.execute(sys.argv[1:])
         sys.exit(0)
 
-    except CLIRuntimeError as e:
+    except CLIError as e:
         print(e.reason)
         sys.exit(-1)
 

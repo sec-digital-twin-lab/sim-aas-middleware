@@ -9,7 +9,7 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 
 from simaas.core.logging import Logging
-from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
+from simaas.core.errors import NetworkError
 from simaas.dor.schemas import DataObject, DataObjectRecipe, TagValueType
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
@@ -112,7 +112,7 @@ class P2PFetchDataObject(P2PProtocol):
             return reply.meta
 
         else:
-            raise FetchDataObjectFailedError(details=reply.details)
+            raise NetworkError(peer_address=peer.p2p_address, operation='fetch', **reply.details)
 
     async def handle(
             self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
@@ -253,7 +253,7 @@ class P2PPushDataObject(P2PProtocol):
             return reply.meta
 
         else:
-            raise PushDataObjectFailedError(details=reply.details)
+            raise NetworkError(peer_address=p2p_address, operation='push', **reply.details)
 
     async def handle(
             self, request: PushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None

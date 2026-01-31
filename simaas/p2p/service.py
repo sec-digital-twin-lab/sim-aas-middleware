@@ -14,7 +14,7 @@ from typing import Optional, Dict, Tuple
 from zmq import Again
 from zmq.asyncio import Socket, Context
 
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import ConfigurationError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond
@@ -73,7 +73,12 @@ class P2PService:
                 self._ready_event.set()
                 logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
             except Exception as e:
-                raise SaaSRuntimeException("P2P server socket cannot be created", details={'exception': e})
+                raise ConfigurationError(
+                    path='p2p.socket',
+                    expected='socket binding',
+                    actual=str(e),
+                    hint='P2P server socket cannot be created'
+                )
 
     async def start_service(self, encrypt: bool = True, timeout: int = 5000) -> asyncio.Task:
         """Starts the P2P server and returns the connection handler task.
@@ -100,7 +105,12 @@ class P2PService:
         if not self._ready_event.wait(timeout=10.0):
             if self._bg_error is not None:
                 raise self._bg_error
-            raise SaaSRuntimeException("P2P service failed to start within timeout")
+            raise OperationError(
+                operation='p2p_start',
+                stage='initialization',
+                cause='timeout',
+                hint='P2P service failed to start within timeout'
+            )
 
     def _run_event_loop(self) -> None:
         loop = asyncio.new_event_loop()

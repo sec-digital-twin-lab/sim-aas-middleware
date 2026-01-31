@@ -16,10 +16,9 @@ from sqlalchemy_json import NestedMutableJson
 
 from simaas.core.helpers import hash_string_object, hash_json_object, hash_file_content
 from simaas.dor.api import DORProxy, DORRESTService
-from simaas.dor.exceptions import DataObjectContentNotFoundError, DataObjectNotFoundError, DORException
+from simaas.core.errors import NotFoundError, OperationError
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import Logging
-from simaas.nodedb.exceptions import IdentityNotFoundError
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
     AddDataObjectParameters, DORFilePartInfo, TagValueType
@@ -461,7 +460,7 @@ class FilesystemDORService(DORRESTService):
                 f.close()
                 if part_info:
                     self._parts.pop(part_info.id)
-            raise DORException("upload failed", details={'exception': e})
+            raise OperationError(operation='upload', stage='transfer', cause=str(e))
 
         finally:
             attachment.file.close()
@@ -540,14 +539,13 @@ class FilesystemDORService(DORRESTService):
         # get the meta information for this object (if it exists in the first place)
         meta = await self.get_meta(obj_id)
         if meta is None:
-            raise DataObjectNotFoundError(obj_id)
+            raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
         # check if we have the content
         content_path0 = self.obj_content_path(meta.c_hash)
         if not os.path.isfile(content_path0):
-            raise DataObjectContentNotFoundError({
-                'path': content_path0
-            })
+            raise NotFoundError(resource_type='data_object_content', resource_id=obj_id,
+                                searched_locations=[content_path0])
 
         # touch data object
         self.touch_data_object(obj_id)
@@ -565,14 +563,13 @@ class FilesystemDORService(DORRESTService):
         # get the meta information for this object (if it exists in the first place)
         meta = await self.get_meta(obj_id)
         if meta is None:
-            raise DataObjectNotFoundError(obj_id)
+            raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
         # check if we have the content
         content_path = self.obj_content_path(meta.c_hash)
         if not os.path.isfile(content_path):
-            raise DataObjectContentNotFoundError({
-                'path': content_path
-            })
+            raise NotFoundError(resource_type='data_object_content', resource_id=obj_id,
+                                searched_locations=[content_path])
 
         # touch data object
         self.touch_data_object(obj_id)
@@ -608,14 +605,14 @@ class FilesystemDORService(DORRESTService):
         # do we have an identity for this iid?
         user = await self._node.db.get_identity(user_iid)
         if user is None:
-            raise IdentityNotFoundError(user_iid)
+            raise NotFoundError(resource_type='identity', resource_id=user_iid)
 
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # grant access
                 if user_iid not in record.access:
@@ -635,14 +632,14 @@ class FilesystemDORService(DORRESTService):
         # do we have an identity for this iid?
         user = await self._node.db.get_identity(user_iid)
         if user is None:
-            raise IdentityNotFoundError(user_iid)
+            raise NotFoundError(resource_type='identity', resource_id=user_iid)
 
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # revoke access
                 if user_iid in record.access:
@@ -662,14 +659,14 @@ class FilesystemDORService(DORRESTService):
         # do we have an identity for this iid?
         new_owner = await self._node.db.get_identity(new_owner_iid)
         if new_owner is None:
-            raise IdentityNotFoundError(new_owner_iid)
+            raise NotFoundError(resource_type='identity', resource_id=new_owner_iid)
 
         with self._db_mutex:
             with self._Session() as session:
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # transfer ownership
                 record.owner_iid = new_owner_iid
@@ -690,7 +687,7 @@ class FilesystemDORService(DORRESTService):
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # update tags
                 for tag in tags:
@@ -711,7 +708,7 @@ class FilesystemDORService(DORRESTService):
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # remove keys
                 for key in keys:
@@ -729,7 +726,7 @@ class FilesystemDORService(DORRESTService):
                 # do we have an object with this id?
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)
                 if record is None:
-                    raise DataObjectNotFoundError(obj_id)
+                    raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
                 # update the last accessed timestamp of this data object
                 record: DataObjectRecord = session.get(DataObjectRecord, obj_id)

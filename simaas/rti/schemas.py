@@ -3,7 +3,7 @@ from typing import Literal, Optional, List, Union, Dict, Tuple
 
 from pydantic import BaseModel, Field
 from simaas.core.identity import Identity
-from simaas.core.exceptions import ExceptionContent
+from simaas.core.errors import ExceptionContent
 from simaas.dor.schemas import GitProcessorPointer, DataObject
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 

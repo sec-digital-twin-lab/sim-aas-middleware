@@ -8,13 +8,12 @@ from typing import Optional, Tuple, Any
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from pydantic import BaseModel
-from simaas.rti.exceptions import RTIException
 
-from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.core.errors import NetworkError, OperationError, AuthenticationError, ValidationError, _BaseError
 
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
+from simaas.core.errors import ExceptionContent
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
@@ -153,21 +152,22 @@ class P2PNamespaceServiceCall(P2PProtocol):
 
                 # check if there was an exception
                 if reply.exception is not None:
-                    raise SaaSRuntimeException(
-                        reason=reply.exception.reason,
-                        details=reply.exception.details,
-                        eid=reply.exception.id
+                    raise OperationError(
+                        operation='namespace_service_call',
+                        cause=reply.exception.reason,
+                        remote_details=reply.exception.details,
+                        remote_exception_id=reply.exception.id
                     )
 
                 return reply.result
 
-            except PeerUnavailableError:
+            except NetworkError:
                 delay = attempt + 1
                 logger.warning(f"Failed for perform namespace service call ({attempt+1}/{max_attempts}) -> "
                                f"Trying again in {delay} seconds...")
                 await asyncio.sleep(delay)
 
-        raise RTIException(f"Namespace service call failed after {max_attempts} attempts")
+        raise OperationError(operation='namespace_service_call', cause=f'failed after {max_attempts} attempts')
 
 
     async def handle(
@@ -179,15 +179,19 @@ class P2PNamespaceServiceCall(P2PProtocol):
             # do we know the identity that authorised the request?
             identity = await self._node.db.get_identity(request.authorisation.iid)
             if identity is None:
-                raise SaaSRuntimeException(reason="Namespace request authorisation failed: identity unknown", details={
-                    'request': request.model_dump()
-                })
+                raise AuthenticationError(
+                    identity_id=request.authorisation.iid,
+                    operation='namespace_request',
+                    hint='Identity unknown'
+                )
 
             # is the authorisation valid?
             if not verify_request_authorisation(identity, request):
-                raise SaaSRuntimeException(reason="Namespace request authorisation failed: invalid signature", details={
-                    'request': request.model_dump()
-                })
+                raise AuthenticationError(
+                    identity_id=request.authorisation.iid,
+                    operation='namespace_request',
+                    hint='Invalid signature'
+                )
 
             # get the service and check restrictions (if any)
             if request.service == 'dor':
@@ -195,7 +199,11 @@ class P2PNamespaceServiceCall(P2PProtocol):
             elif request.service == 'rti':
                 service = self._node.rti
             else:
-                raise SaaSRuntimeException(reason=f"Invalid service '{request.service}'")
+                raise ValidationError(
+                    field='service',
+                    expected='dor or rti',
+                    actual=request.service
+                )
 
             # get the method
             method = getattr(service, request.method, None)
@@ -243,7 +251,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
             # serialise the result
             return NamespaceServiceResponse(result=result, exception=None), content_path
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:

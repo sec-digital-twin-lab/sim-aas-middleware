@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 
-from simaas.core.exceptions import ExceptionContent
+from simaas.core.errors import ExceptionContent
 from simaas.core.helpers import generate_random_string
 from simaas.dor.schemas import ProcessorDescriptor
 from simaas.namespace.api import Namespace

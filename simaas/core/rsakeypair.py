@@ -12,7 +12,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import AuthenticationError, ConfigurationError
 from simaas.core.keypair import KeyPair
 from simaas.core.logging import Logging
 
@@ -73,7 +73,10 @@ class RSAKeyPair(KeyPair):
             return RSAKeyPair(private_key, public_key)
 
         except Exception:
-            raise SaaSRuntimeException("Loading key failed. Password wrong?")
+            raise AuthenticationError(
+                operation='load_private_key',
+                hint='Failed to load key - password may be wrong'
+            )
 
     @classmethod
     def from_private_key_file(cls, path: str, password: str) -> RSAKeyPair:
@@ -116,7 +119,12 @@ class RSAKeyPair(KeyPair):
 
     def private_as_bytes(self, password: str = None) -> bytes:
         if self.private_key is None:
-            raise SaaSRuntimeException('No private key found')
+            raise ConfigurationError(
+                path='keypair.private_key',
+                expected='private key',
+                actual='not found',
+                hint='The keypair has no private key loaded'
+            )
 
         # encrypt with a password?
         key_encryption_algorithm = serialization.NoEncryption()
@@ -131,7 +139,12 @@ class RSAKeyPair(KeyPair):
 
     def private_as_string(self, password: str = None, truncate: bool = True) -> str:
         if self.private_key is None:
-            raise SaaSRuntimeException('No private key found')
+            raise ConfigurationError(
+                path='keypair.private_key',
+                expected='private key',
+                actual='not found',
+                hint='The keypair has no private key loaded'
+            )
 
         result = self.private_as_bytes(password).decode('utf-8')
         if truncate:

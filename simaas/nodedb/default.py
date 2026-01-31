@@ -10,8 +10,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.nodedb.api import NodeDBService
-from simaas.nodedb.exceptions import InvalidIdentityError, IdentityNotFoundError, NamespaceNotFoundError, \
-    NodeDBException
+from simaas.core.errors import NotFoundError, ValidationError, OperationError
 from simaas.nodedb.protocol import NodeDBSnapshot, P2PCancelNamespaceReservation, P2PReserveNamespaceResources, \
     P2PUpdateNamespaceBudget
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
@@ -197,7 +196,7 @@ class DefaultNodeDBService(NodeDBService):
             record = session.query(IdentityRecord).filter_by(iid=iid).first()
 
             if raise_if_unknown and record is None:
-                raise IdentityNotFoundError(iid)
+                raise NotFoundError(resource_type='identity', resource_id=iid)
 
             return Identity(
                 id=record.iid,
@@ -237,9 +236,7 @@ class DefaultNodeDBService(NodeDBService):
         """
         # verify the integrity of the identity
         if not identity.verify_integrity():
-            raise InvalidIdentityError({
-                'identity': identity
-            })
+            raise ValidationError(field='identity', expected='valid signature', actual='invalid signature')
 
         # update the db
         with self._Session() as session:
@@ -296,7 +293,7 @@ class DefaultNodeDBService(NodeDBService):
             # do we have the identity already on record?
             record = session.get(IdentityRecord, identity.id)
             if record is None:
-                raise IdentityNotFoundError(identity.id)
+                raise NotFoundError(resource_type='identity', resource_id=identity.id)
 
             record.last_accessed = get_timestamp_now()
             session.commit()
@@ -367,7 +364,7 @@ class DefaultNodeDBService(NodeDBService):
                 else:
                     await P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
 
-            raise NodeDBException(f"Resource reservation for {name}:{job_id} failed")
+            raise OperationError(operation='reserve_namespace', stage='reservation', cause=f'{name}:{job_id} failed')
 
     async def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
         result = await self.handle_namespace_cancellation(name, job_id)
@@ -425,7 +422,7 @@ class DefaultNodeDBService(NodeDBService):
                 # does the namespace exist?
                 record: Optional[NamespaceRecord] = session.get(NamespaceRecord,name)
                 if record is None:
-                    raise NamespaceNotFoundError(name)
+                    raise NotFoundError(resource_type='namespace', resource_id=name)
 
                 # determine the total available budget for this namespace
                 budget: ResourceDescriptor = ResourceDescriptor.model_validate(record.budget)

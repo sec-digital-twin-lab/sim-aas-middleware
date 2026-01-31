@@ -16,7 +16,6 @@ from fastapi.openapi.utils import get_openapi
 from simaas.rest.auth import make_depends
 from starlette.responses import JSONResponse
 
-from simaas.core.exceptions import SaaSRuntimeException
 from simaas.core.errors import (
     _BaseError,
     AuthenticationError,
@@ -27,7 +26,6 @@ from simaas.core.errors import (
 )
 from simaas.core.logging import Logging
 from simaas.meta import __title__, __version__, __description__
-from simaas.rest.exceptions import UnsupportedRESTMethod
 from simaas.rest.schemas import EndpointDefinition
 
 logger = Logging.get('rest.service')
@@ -86,20 +84,6 @@ class RESTApp:
         async def base_error_handler(_: Request, e: _BaseError):
             return _error_response(e, status_code=500)
 
-        # Legacy exception handler (unchanged)
-        @self.api.exception_handler(SaaSRuntimeException)
-        async def saas_exception_handler(_: Request, e: SaaSRuntimeException):
-            details = dict(e.details) if e.details else {}
-            logger.error(f"Exception: {e.reason} {e.id} -> {details}", exc_info=True)
-            return JSONResponse(
-                status_code=500,
-                content={
-                    'reason': e.reason,
-                    'id': e.id,
-                    'details': details
-                }
-            )
-
         @self.api.exception_handler(Exception)
         async def generic_exception_handler(_: Request, e: Exception):
             logger.error(f"Unexpected exception: {e}", exc_info=True)
@@ -132,7 +116,12 @@ class RESTApp:
                                    dependencies=dependencies,
                                    description=endpoint.function.__doc__)
         else:
-            raise UnsupportedRESTMethod(endpoint.method, route)
+            raise ValidationError(
+                field='http_method',
+                expected='POST, GET, PUT, or DELETE',
+                actual=endpoint.method,
+                hint=f"Route: {route}"
+            )
 
     async def close(self) -> None:
         logger.info("REST app is shutting down.")

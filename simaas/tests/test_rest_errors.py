@@ -13,7 +13,6 @@ from simaas.core.errors import (
     OperationError,
     InternalError,
 )
-from simaas.core.exceptions import SaaSRuntimeException
 from simaas.rest.service import RESTApp
 
 
@@ -237,35 +236,6 @@ class TestBaseErrorCatchAll:
         assert 'details' in body
         assert body['details']['operation'] == 'deploy'
         assert body['details']['stage'] == 'validation'
-
-
-class TestLegacySaaSRuntimeExceptionHandler:
-    """Tests for existing SaaSRuntimeException handler (500)."""
-
-    def test_returns_500_status(self, app, client):
-        """Test that SaaSRuntimeException still returns 500."""
-        @app.api.get("/test-legacy")
-        async def raise_legacy():
-            raise SaaSRuntimeException(reason='something went wrong', details={'key': 'value'})
-
-        response = client.get("/test-legacy")
-
-        assert response.status_code == 500
-
-    def test_response_body_structure(self, app, client):
-        """Test that response contains id, reason, and details."""
-        @app.api.get("/test-legacy-body")
-        async def raise_legacy():
-            raise SaaSRuntimeException(reason='something went wrong', details={'key': 'value'})
-
-        response = client.get("/test-legacy-body")
-        body = response.json()
-
-        assert 'id' in body
-        assert 'reason' in body
-        assert 'details' in body
-        assert body['reason'] == 'something went wrong'
-        assert body['details'] == {'key': 'value'}
 
 
 class TestResponseIdFormat:

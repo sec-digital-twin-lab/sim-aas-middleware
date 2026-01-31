@@ -3,7 +3,7 @@ from typing import Optional, Dict
 from InquirerPy.base import Choice
 from tabulate import tabulate
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, prompt_for_selection, \
     extract_address, prompt_for_integer, Argument
 from simaas.core.logging import Logging
@@ -95,13 +95,13 @@ class NamespaceUpdate(CLICommand):
         except Exception:
             print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
                   f"-> vCPUs/memory must be positive integers.")
-            raise CLIRuntimeError('Non-integer vCPUs and/or memory specification')
+            raise CLIError('Non-integer vCPUs and/or memory specification')
 
         # check resource specifications: must be positive
         if vcpus < 0 or memory < 0:
             print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
                   f"-> vCPUs/memory must be positive integers.")
-            raise CLIRuntimeError('Negative vCPUs and/or memory specification')
+            raise CLIError('Negative vCPUs and/or memory specification')
 
 
         budget = ResourceDescriptor(vcpus=int(args['vcpus']), memory=int(args['memory']))

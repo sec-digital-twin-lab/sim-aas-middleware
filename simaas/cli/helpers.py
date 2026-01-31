@@ -14,8 +14,7 @@ from InquirerPy import inquirer
 from InquirerPy.base import Choice
 from pydantic import ValidationError
 
-from simaas.cli.exceptions import CLIRuntimeError
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import CLIError, _BaseError, RemoteError
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -25,7 +24,6 @@ from simaas.dor.schemas import DataObject
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.core.schemas import KeystoreContent
-from simaas.rest.exceptions import UnsuccessfulRequestError
 
 logger = Logging.get('cli')
 
@@ -55,8 +53,8 @@ def label_identity(identity: Identity, truncate: bool = False) -> str:
 def initialise_storage_folder(path: str, usage: str, is_verbose: bool = False) -> None:
     # check if the path is pointing at a file
     if os.path.isfile(path):
-        raise CLIRuntimeError(f"Storage path '{path}' is a file. This path cannot "
-                              f"be used as storage ({usage}) directory.")
+        raise CLIError(f"Storage path '{path}' is a file. This path cannot "
+                       f"be used as storage ({usage}) directory.")
 
     # check if it already exists as directory
     if not os.path.isdir(path):
@@ -90,11 +88,11 @@ def get_available_keystores(path: str, is_verbose: bool = False) -> List[Keystor
 
 def extract_address(address: str) -> (str, int):
     if address.count(':') != 1:
-        raise CLIRuntimeError(f"Invalid address '{address}'")
+        raise CLIError(f"Invalid address '{address}'")
 
     temp = address.split(':')
     if not temp[1].isdigit():
-        raise CLIRuntimeError(f"Invalid address '{address}'")
+        raise CLIError(f"Invalid address '{address}'")
 
     return temp[0], int(temp[1])
 
@@ -103,7 +101,7 @@ def prompt_for_keystore_selection(path: str, message: str) -> Optional[KeystoreC
     # get all available keystores
     available = get_available_keystores(path)
     if len(available) == 0:
-        raise CLIRuntimeError(f"No keystores found at '{path}'")
+        raise CLIError(f"No keystores found at '{path}'")
 
     choices = [Choice(value=item.iid, name=f"{item.profile.name}/{item.profile.email}/{item.iid}",)
                for item in available]
@@ -122,7 +120,7 @@ def prompt_for_identity_selection(address: (str, int), message: str,
 
     # prompt for selection
     if len(choices) == 0:
-        raise CLIRuntimeError(f"No identities found at '{address}'")
+        raise CLIError(f"No identities found at '{address}'")
 
     return prompt_for_selection(choices, message, allow_multiple=allow_multiple)
 
@@ -139,8 +137,8 @@ def load_keystore(args: dict, ensure_publication: bool, address_arg: str = 'addr
     try:
         keystore = Keystore.from_file(os.path.join(args['keystore'], f"{args['keystore-id']}.json"), args['password'])
 
-    except SaaSRuntimeException as e:
-        raise CLIRuntimeError(f"Could not open keystore {args['keystore-id']} because '{e.reason}'. Aborting.")
+    except _BaseError as e:
+        raise CLIError(f"Could not open keystore {args['keystore-id']} because '{e.reason}'. Aborting.")
 
     if ensure_publication:
         # prompt for the address (if missing)
@@ -156,8 +154,8 @@ def load_keystore(args: dict, ensure_publication: bool, address_arg: str = 'addr
                 db.update_identity(keystore.identity)
                 print(f"Identity {keystore.identity.id} published to node at {args[address_arg]}.")
 
-        except UnsuccessfulRequestError as e:
-            raise CLIRuntimeError(f"Could not ensure identity is known to node at {args[address_arg]}. Aborting. "
+        except RemoteError as e:
+            raise CLIError(f"Could not ensure identity is known to node at {args[address_arg]}. Aborting. "
                                   f"(Hint: {e.reason})")
 
     return keystore

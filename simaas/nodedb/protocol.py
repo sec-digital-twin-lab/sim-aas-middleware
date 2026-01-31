@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
-from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.core.errors import NetworkError
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
 logger = Logging.get('nodedb.protocol')
@@ -237,7 +237,7 @@ class P2PJoinNetwork(P2PProtocol):
 
                 logger.debug(f"Adding peer at {peer.p2p_address} to db: {peer.identity.name} | {peer.identity.id}")
 
-            except PeerUnavailableError:
+            except NetworkError:
                 logger.debug(f"Peer at {peer.p2p_address} unavailable -> Removing from NodeDB.")
                 await self._node.db.remove_node_by_address(peer.p2p_address)
 

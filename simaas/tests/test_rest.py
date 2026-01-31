@@ -8,12 +8,11 @@ import time
 import pytest
 from pydantic import BaseModel
 
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import _BaseError, RemoteError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.decorators import requires_authentication
 from simaas.node.base import Node
-from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 
@@ -42,11 +41,12 @@ class TestDeleteRequest(BaseModel):
     key: str
 
 
-class TestException(SaaSRuntimeException):
+class TestException(_BaseError):
     """Exception class for test REST service errors."""
     __test__ = False
 
-    pass
+    def __init__(self, reason: str, details: dict = None):
+        super().__init__(reason=reason, details=details)
 
 
 class TestRESTService:
@@ -239,7 +239,7 @@ def test_update_fails(rest_test_proxy):
     assert(result is not None)
     assert(result.value == 'hello world')
 
-    with pytest.raises(UnsuccessfulRequestError):
+    with pytest.raises(RemoteError):
         rest_test_proxy.update('invalid', 'hello new world')
 
 
@@ -254,7 +254,7 @@ def test_delete_ok(rest_test_proxy):
     result = rest_test_proxy.remove(key)
     assert(result is not None)
 
-    with pytest.raises(UnsuccessfulRequestError):
+    with pytest.raises(RemoteError):
         rest_test_proxy.read(key)
 
 
@@ -266,7 +266,7 @@ def test_delete_fails(rest_test_proxy):
     assert(result.value == 'hello world')
     key = result.key
 
-    with pytest.raises(UnsuccessfulRequestError):
+    with pytest.raises(RemoteError):
         rest_test_proxy.remove('invalid_key')
 
     rest_test_proxy.read(key)
@@ -284,7 +284,7 @@ def test_delete_with_body(rest_test_proxy):
     except Exception as e:
         print(e)
 
-    with pytest.raises(UnsuccessfulRequestError):
+    with pytest.raises(RemoteError):
         rest_test_proxy.read(key)
 
 
@@ -297,14 +297,14 @@ def test_delete_with_auth(test_context, rest_node, rest_test_proxy):
     good_authority = rest_node.keystore
     bad_authority = test_context.create_keystores(1)[0]
 
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         # this should fail because the 'bad' authority is not known to the node
         rest_test_proxy.remove_with_auth(key, authority=bad_authority)
-    assert e.value.details['reason'] == 'unknown identity'
+    assert e.value.details.get('remote_details', {}).get('hint') == 'unknown identity'
 
     # this should succeed because the 'good' authority is known to the node
     result = rest_test_proxy.remove_with_auth(key, authority=good_authority)
     assert (result is not None)
 
-    with pytest.raises(UnsuccessfulRequestError):
+    with pytest.raises(RemoteError):
         rest_test_proxy.read(key)

@@ -10,7 +10,7 @@ from simaas.cli.cmd_dor import DORAdd, DORMeta, DORDownload, DORRemove, DORSearc
     DORAccessGrant, DORAccessRevoke
 from simaas.cli.cmd_identity import IdentityCreate
 from simaas.cli.cmd_network import NetworkList
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.schemas import DataObject
@@ -41,7 +41,7 @@ def test_cli_network_show(session_node, temp_dir):
         assert 'network' in result
         assert len(result['network']) == 2  # session node is part of a 2-node network
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -68,7 +68,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # add a data object
@@ -100,7 +100,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert result['obj'] is not None
         obj: DataObject = result['obj']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # get data object meta information
@@ -116,7 +116,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert 'obj' in result
         assert result['obj'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # download data object content
@@ -137,7 +137,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert obj.obj_id in result
         assert os.path.isfile(result[obj.obj_id])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # tag the data object
@@ -158,7 +158,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert 'aaa' in result[obj.obj_id].tags
         assert 'bbb' in result[obj.obj_id].tags
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # search for data object
@@ -177,7 +177,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert len(result) == 1
         assert obj.obj_id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # untag the data object
@@ -200,7 +200,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert 'aaa' not in result['obj'].tags
         assert 'bbb' in result['obj'].tags
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # search for data object
@@ -218,7 +218,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert result is not None
         assert len(result) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # remove data object
@@ -239,7 +239,7 @@ def test_cli_dor_lifecycle(session_node, temp_dir):
         assert result['removed'] is not None
         assert obj.obj_id in result['removed']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -266,7 +266,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # add a data object
@@ -298,7 +298,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert result['obj'] is not None
         obj: DataObject = result['obj']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # show the access
@@ -318,7 +318,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert len(result['access']) == 1
         assert keystore.identity.id in result['access']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # revoke access
@@ -338,7 +338,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert 'revoked' in result
         assert len(result['revoked']) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # show the access
@@ -357,7 +357,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert 'access' in result
         assert len(result['access']) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # grant access
@@ -377,7 +377,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert 'granted' in result
         assert len(result['granted']) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # show the access
@@ -397,7 +397,7 @@ def test_cli_dor_grant_show_revoke(session_node, temp_dir):
         assert len(result['access']) == 1
         assert keystore.identity.id in result['access']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 

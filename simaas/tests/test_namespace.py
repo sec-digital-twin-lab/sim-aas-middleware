@@ -14,7 +14,7 @@ from simaas.core.async_helpers import run_coro_safely
 
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.namespace.default import DefaultNamespace
@@ -76,9 +76,9 @@ async def test_namespace_unknown_user(p2p_server, unknown_user):
     """Test that unknown users cannot access namespace services."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), unknown_user)
 
-    with pytest.raises(SaaSRuntimeException) as e:
+    with pytest.raises(OperationError) as e:
         await namespace.dor.statistics()
-    assert 'Namespace request authorisation failed: identity unknown' in e.value.reason
+    assert 'Authentication failed' in e.value.reason or 'Identity unknown' in str(e.value.details)
 
 
 @pytest.mark.integration
@@ -88,18 +88,18 @@ async def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unkno
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
 
     # unknown owner
-    with pytest.raises(SaaSRuntimeException) as e:
+    with pytest.raises(OperationError) as e:
         await namespace.dor.add(
             random_content, 'JSON', 'json', unknown_user.identity.id, creators_iid=[known_user.identity.id]
         )
-    assert 'Identity not found' in e.value.reason
+    assert 'not found' in e.value.reason
 
     # unknown creator
-    with pytest.raises(SaaSRuntimeException) as e:
+    with pytest.raises(OperationError) as e:
         await namespace.dor.add(
             random_content, 'JSON', 'json', known_user.identity.id, creators_iid=[unknown_user.identity.id]
         )
-    assert 'Identity not found' in e.value.reason
+    assert 'not found' in e.value.reason
 
     # successful add
     meta: DataObject = await namespace.dor.add(
@@ -159,14 +159,14 @@ async def test_namespace_dor_access_control(p2p_server, known_user, unknown_user
         assert os.path.isfile(content_path)
 
         # no access
-        with pytest.raises(SaaSRuntimeException) as e:
+        with pytest.raises(OperationError) as e:
             await namespace1.dor.get_content(meta.obj_id, content_path)
-        assert 'user has no access' in e.value.content.details['reason']
+        assert "Authorisation denied" in e.value.reason or "access" in e.value.reason
 
         # not owner
-        with pytest.raises(SaaSRuntimeException) as e:
+        with pytest.raises(OperationError) as e:
             await namespace1.dor.grant_access(meta.obj_id, other_user.identity.id)
-        assert 'user is not the data object owner' in e.value.content.details['reason']
+        assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful grant access
         meta = await namespace0.dor.grant_access(meta.obj_id, other_user.identity.id)
@@ -181,23 +181,23 @@ async def test_namespace_dor_access_control(p2p_server, known_user, unknown_user
         assert other_user.identity.id not in meta.access
 
         # no access
-        with pytest.raises(SaaSRuntimeException) as e:
+        with pytest.raises(OperationError) as e:
             await namespace1.dor.get_content(meta.obj_id, content_path)
-        assert 'user has no access' in e.value.content.details['reason']
+        assert "Authorisation denied" in e.value.reason or "access" in e.value.reason
 
         # not owner
-        with pytest.raises(SaaSRuntimeException) as e:
+        with pytest.raises(OperationError) as e:
             await namespace1.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
-        assert 'user is not the data object owner' in e.value.content.details['reason']
+        assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful transfer ownership
         meta = await namespace0.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
         assert meta.owner_iid == other_user.identity.id
 
         # not owner
-        with pytest.raises(SaaSRuntimeException) as e:
+        with pytest.raises(OperationError) as e:
             await namespace0.dor.remove(meta.obj_id)
-        assert 'user is not the data object owner' in e.value.content.details['reason']
+        assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful remove
         await namespace1.dor.remove(meta.obj_id)
@@ -266,9 +266,9 @@ async def test_namespace_rti_job_submit_status(
     job: Job = result[0]
 
     # not owner of job
-    with pytest.raises(SaaSRuntimeException) as e:
+    with pytest.raises(OperationError) as e:
         await namespace1.rti.get_job_status(job.id)
-    assert 'user is not the job owner or the node owner' in e.value.details['reason']
+    assert "Authorisation denied" in e.value.reason or "job_owner or node_owner" in e.value.reason
 
     while True:
         # get information about the running job

@@ -11,7 +11,7 @@ from InquirerPy.base import Choice
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_for_confirmation, prompt_if_missing, \
     default_if_missing, initialise_storage_folder, prompt_for_selection, load_keystore, extract_address, \
     use_env_or_prompt_if_missing
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import _BaseError
 from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
 from simaas.node.base import Node
@@ -61,7 +61,7 @@ class WaitForTermination:
             print("Shutting down the node...")
             self._node.shutdown()
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             print(f"Exception while shutting down node: {e}")
 
         except Exception as e:

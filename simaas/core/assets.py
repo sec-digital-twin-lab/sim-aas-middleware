@@ -6,7 +6,7 @@ from typing import Dict, Optional, List
 from pydantic import BaseModel
 
 from simaas.core.eckeypair import ECKeyPair
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import ValidationError
 from simaas.core.keypair import KeyPair
 from simaas.core.rsakeypair import RSAKeyPair
 from simaas.core.schemas import GithubCredentials, SSHCredentials
@@ -43,7 +43,12 @@ class MasterKeyPairAsset:
             return MasterKeyPairAsset(keypair)
 
         else:
-            raise SaaSRuntimeException(f"Unrecognised key type '{asset.info}'")
+            raise ValidationError(
+                field='asset.info',
+                expected='RSA or EC key type',
+                actual=asset.info,
+                hint='Unrecognised key type in asset'
+            )
 
     def get(self) -> KeyPair:
         return self._keypair
@@ -79,7 +84,12 @@ class KeyPairAsset:
             return KeyPairAsset(keypair)
 
         else:
-            raise SaaSRuntimeException(f"Unrecognised keypair type '{asset.info}'")
+            raise ValidationError(
+                field='asset.info',
+                expected='RSA or EC keypair type',
+                actual=asset.info,
+                hint='Unrecognised keypair type in asset'
+            )
 
     def get(self) -> KeyPair:
         return self._keypair

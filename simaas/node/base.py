@@ -5,11 +5,8 @@ import traceback
 from typing import Optional, Tuple
 
 from simaas.rti.base import RTIServiceBase
-from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError
 from simaas.dor.schemas import DataObject
-from simaas.rest.exceptions import AuthorisationFailedError
-from simaas.core.exceptions import SaaSRuntimeException
-from simaas.dor.exceptions import DataObjectNotFoundError
+from simaas.core.errors import NotFoundError, AuthorisationError, OperationError
 from simaas.dor.api import DORRESTService
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.rti.schemas import Processor, BatchStatus
@@ -111,9 +108,19 @@ class Node(abc.ABC):
         if wait_until_ready:
             logger.info("wait until node is ready...")
             if not await self.p2p.wait_until_ready(timeout=10.0):
-                raise SaaSRuntimeException("P2P service failed to become ready")
+                raise OperationError(
+                    operation='node_startup',
+                    stage='p2p_ready',
+                    cause='timeout',
+                    hint='P2P service failed to become ready'
+                )
             if self.rest and not await self.rest.wait_until_ready(timeout=10.0):
-                raise SaaSRuntimeException("REST service failed to become ready")
+                raise OperationError(
+                    operation='node_startup',
+                    stage='rest_ready',
+                    cause='timeout',
+                    hint='REST service failed to become ready'
+                )
             logger.info("node is ready.")
 
         # update our node db
@@ -242,57 +249,48 @@ class Node(abc.ABC):
         # get the meta information of the object
         meta = await self.dor.get_meta(obj_id)
         if meta is None:
-            raise DataObjectNotFoundError(obj_id)
+            raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
         # check if the identity is the owner of that data object
         if meta.owner_iid != identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'user is not the data object owner',
-                'obj_id': obj_id,
-                'user_iid': identity.id
-            })
+            raise AuthorisationError(
+                identity_id=identity.id,
+                resource_id=obj_id,
+                required_permission='owner'
+            )
 
     async def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
         meta: DataObject = await self.dor.get_meta(obj_id)
         if meta is None:
-            raise AuthorisationFailedError({
-                'reason': 'data object does not exist',
-                'obj_id': obj_id
-            })
+            raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
         # check if the identity has access to the data object content
         if meta.access_restricted and identity.id not in meta.access:
-            raise AuthorisationFailedError({
-                'reason': 'user has no access to the data object content',
-                'obj_id': obj_id,
-                'user_iid': identity.id
-            })
+            raise AuthorisationError(
+                identity_id=identity.id,
+                resource_id=obj_id,
+                required_permission='access'
+            )
 
     async def check_rti_is_deployed(self, proc_id: str) -> None:
         if not await self.rti.get_proc(proc_id):
-            raise ProcessorNotDeployedError({
-                'proc_id': proc_id
-            })
+            raise NotFoundError(resource_type='processor', resource_id=proc_id)
 
     async def check_rti_not_busy(self, proc_id: str) -> None:
         proc: Processor = await self.rti.get_proc(proc_id)
         if proc.state in [Processor.State.BUSY_DEPLOY, Processor.State.BUSY_UNDEPLOY]:
-            raise ProcessorBusyError({
-                'proc_id': proc_id
-            })
+            raise OperationError(operation='deploy', stage='check', cause='processor busy')
 
     async def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
         # get the job user (i.e., owner) and check if the caller user ids check out
         job_owner_iid = await self.rti.get_job_owner_iid(job_id)
         if job_owner_iid != identity.id and identity.id != self.identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'user is not the job owner or the node owner',
-                'job_id': job_id,
-                'job_owner_iid': job_owner_iid,
-                'request_user_iid': identity.id,
-                'node_iid': self.identity.id
-            })
+            raise AuthorisationError(
+                identity_id=identity.id,
+                resource_id=job_id,
+                required_permission='job_owner or node_owner'
+            )
 
     async def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
         # get the batch status to determine the owner iid
@@ -306,22 +304,20 @@ class Node(abc.ABC):
 
         # get the job user (i.e., owner) and check if the caller user ids check out
         if batch_owner_iid != identity.id and identity.id != self.identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'user is not the batch owner, batch member or the node owner',
-                'batch_id': batch_id,
-                'batch_owner_iid': batch_owner_iid,
-                'request_user_iid': identity.id,
-                'node_iid': self.identity.id
-            })
+            raise AuthorisationError(
+                identity_id=identity.id,
+                resource_id=batch_id,
+                required_permission='batch_owner, batch_member, or node_owner'
+            )
 
     async def check_rti_node_owner(self, identity: Identity) -> None:
         # check if the user is the owner of the node
         if self.identity.id != identity.id:
-            raise AuthorisationFailedError({
-                'reason': 'User is not the node owner',
-                'user_iid': identity.id,
-                'node_iid': self.identity.id
-            })
+            raise AuthorisationError(
+                identity_id=identity.id,
+                resource_id=self.identity.id,
+                required_permission='node_owner'
+            )
 
 
 

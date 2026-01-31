@@ -11,7 +11,7 @@ from zmq import Again
 from zmq.asyncio import Socket, Context
 
 from simaas.core.logging import Logging
-from simaas.p2p.exceptions import PeerUnavailableError, UnexpectedP2PError
+from simaas.core.errors import NetworkError
 
 logger = Logging.get('p2p')
 
@@ -75,16 +75,12 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise PeerUnavailableError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='connect', timeout_ms=timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise UnexpectedP2PError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='connect', trace=trace)
 
     # try to send the request
     try:
@@ -115,16 +111,12 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise PeerUnavailableError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='send', timeout_ms=timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise UnexpectedP2PError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='send', trace=trace)
 
     # try to receive the reply
     try:
@@ -164,16 +156,12 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise PeerUnavailableError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise UnexpectedP2PError(details={
-            'trace': trace
-        })
+        raise NetworkError(peer_address=peer.address, operation='receive', trace=trace)
 
 async def p2p_respond(
         socket: Socket, cid: bytes, rid: bytes, protocol: P2PProtocol, request: P2PMessage,
@@ -217,9 +205,7 @@ async def p2p_respond(
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         logger.error(f"Unexpected P2P error: {trace}")
-        raise UnexpectedP2PError(details={
-            'trace': trace
-        })
+        raise NetworkError(operation='respond', trace=trace)
 
     finally:
         if attachment_path:

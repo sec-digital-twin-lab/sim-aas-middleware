@@ -8,7 +8,7 @@ import paramiko
 from InquirerPy.base import Choice
 from tabulate import tabulate
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, get_available_keystores, \
     prompt_for_confirmation, prompt_for_password, prompt_if_missing, prompt_for_keystore_selection, \
     prompt_for_selection, load_keystore, extract_address
@@ -255,7 +255,7 @@ class CredentialsAddSSHCredentials(CLICommand):
 
         # read key
         if not os.path.isfile(args['key']):
-            raise CLIRuntimeError(f"SSH key not found at {args['key']}")
+            raise CLIError(f"SSH key not found at {args['key']}")
         else:
             with open(args['key'], 'r') as f:
                 key_content = f.read()
@@ -339,7 +339,7 @@ class CredentialsRemove(CLICommand):
         removed = []
         if 'credential' in args and args['credential'] is not None:
             if args['credential'] not in found:
-                raise CLIRuntimeError(f"Credential {args['credential']} not found. Aborting.")
+                raise CLIError(f"Credential {args['credential']} not found. Aborting.")
 
             # confirm removal (if applicable)
             item = found[args['credential']]
@@ -361,12 +361,12 @@ class CredentialsRemove(CLICommand):
         else:
             # prompt for selection
             if len(removable) == 0:
-                raise CLIRuntimeError("No credentials found. Aborting.")
+                raise CLIError("No credentials found. Aborting.")
 
             # any items selected for removal?
             items = prompt_for_selection(removable, 'Select the credentials to be removed:', allow_multiple=True)
             if len(items) == 0:
-                raise CLIRuntimeError("Nothing to remove. Aborting.")
+                raise CLIError("Nothing to remove. Aborting.")
 
             # confirm removal (if applicable)
             if prompt_if_missing(args, 'confirm', prompt_for_confirmation,
@@ -406,7 +406,7 @@ class CredentialsTestSSHCredentials(CLICommand):
 
         # do we have SSH credentials with this name?
         if args['name'] not in keystore.ssh_credentials.list():
-            raise CLIRuntimeError(f"SSH credentials not found: {args['name']}")
+            raise CLIError(f"SSH credentials not found: {args['name']}")
 
         # get the credentials
         ssh_credentials = keystore.ssh_credentials.get(args['name'])
@@ -446,7 +446,7 @@ class CredentialsTestGithubCredentials(CLICommand):
 
         # do we have Github credentials for this URL?
         if args['url'] not in keystore.github_credentials.list():
-            raise CLIRuntimeError(f"Github credentials not found for {args['url']}")
+            raise CLIError(f"Github credentials not found for {args['url']}")
 
         # get the credentials
         github_credentials = keystore.github_credentials.get(args['url'])

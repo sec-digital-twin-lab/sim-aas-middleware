@@ -10,7 +10,7 @@ from simaas.cli.cmd_service import Service
 
 from simaas.nodedb.schemas import NamespaceInfo
 from simaas.cli.cmd_identity import IdentityCreate
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.helpers import PortMaster
@@ -49,7 +49,7 @@ def test_cli_service(temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # start the service
@@ -78,7 +78,7 @@ def test_cli_service(temp_dir):
         cmd = Service()
         cmd.execute(args, wait_for_termination=False)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -105,7 +105,7 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
         cmd.execute(args)
         assert False
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     # create a namespace (with invalid resource specification)
@@ -120,7 +120,7 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
         cmd.execute(args)
         assert False
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     # list namespaces (should still be 0)
@@ -149,7 +149,7 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
         assert result is not None
         assert 'namespace' in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list namespaces (should be 1 now)
@@ -214,5 +214,5 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
         assert namespace.budget.vcpus == 2*vcpus
         assert namespace.budget.memory == 2*memory
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False

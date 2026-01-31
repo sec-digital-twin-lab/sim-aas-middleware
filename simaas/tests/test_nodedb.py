@@ -20,7 +20,7 @@ from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 from simaas.plugins.builtins.dor_fs import FilesystemDORService
-from simaas.nodedb.exceptions import NodeDBException
+from simaas.core.errors import OperationError
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 
 Logging.initialise(level=logging.DEBUG)
@@ -447,19 +447,19 @@ async def test_namespace_reserve_cancel(test_context):
         assert await node.db.get_namespace(namespace) is not None
 
     # make reservation with too much CPUs
-    with pytest.raises(NodeDBException) as e:
+    with pytest.raises(OperationError) as e:
         await nodes[0].db.reserve_namespace_resources(namespace, "job000", ResourceDescriptor(vcpus=4, memory=2048))
-    assert f"Resource reservation for {namespace}:job000 failed" in e.value.reason
+    assert f"{namespace}:job000 failed" in e.value.reason
 
     # make reservation with too much memory
-    with pytest.raises(NodeDBException) as e:
+    with pytest.raises(OperationError) as e:
         await nodes[0].db.reserve_namespace_resources(namespace, "job001", ResourceDescriptor(vcpus=2, memory=4096))
-    assert f"Resource reservation for {namespace}:job001 failed" in e.value.reason
+    assert f"{namespace}:job001 failed" in e.value.reason
 
     # make reservation that succeeds
     try:
         await nodes[0].db.reserve_namespace_resources(namespace, "job002", ResourceDescriptor(vcpus=2, memory=2048))
-    except NodeDBException:
+    except OperationError:
         assert False
 
     # there should be one reservation
