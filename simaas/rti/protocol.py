@@ -131,6 +131,9 @@ class BatchBarrier(P2PProtocol):
 
     def wait_for_release(self, barrier_name: str) -> Any:
         while barrier_name not in self._releases:
+            # Check if the job has been interrupted
+            if self._runner._interrupted:
+                return None
             time.sleep(0.1)
         return self._releases.pop(barrier_name)
 

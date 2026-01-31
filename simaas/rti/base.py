@@ -85,9 +85,9 @@ class RTIServiceBase(RTIRESTService):
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
 
-        # a map of active cancellation workers
-        self._cancellation_workers: Dict[str, Optional[threading.Thread]] = {}
-        self._cleanup_workers: Dict[str, Optional[threading.Thread]] = {}
+        # a map of active cancellation workers (async tasks)
+        self._cancellation_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._cleanup_workers: Dict[str, Optional[asyncio.Task]] = {}
 
     def on_cancellation_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
@@ -96,6 +96,35 @@ class RTIServiceBase(RTIRESTService):
     def on_cleanup_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
         self._cleanup_workers[job_id] = None
+
+    def mark_job_cancelled(self, job_id: str) -> None:
+        """Mark a job as cancelled in the database. Called by perform_cancel implementations
+        when the container/instance has stopped but the job may not have pushed its status.
+
+        This is a simple DB update without triggering cascade logic, since the cascade
+        was already triggered by the original failure that caused the cancellation."""
+        with self._session_maker() as session:
+            record = session.get(DBJobInfo, job_id)
+            if record is None:
+                return  # job doesn't exist, nothing to do
+
+            status = JobStatus.model_validate(record.status)
+            # only update if not already in a terminal state
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                return  # already in terminal state, nothing to do
+
+            # Update to CANCELLED directly in DB
+            status.state = JobStatus.State.CANCELLED
+            record.status = status.model_dump()
+            session.commit()
+
+            # Also update the local status file
+            try:
+                status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                with open(status_path, 'w') as f:
+                    json.dump(status.model_dump(), f, indent=2)
+            except Exception:
+                pass  # Non-critical, just for local file consistency
 
     def has_active_workers(self) -> bool:
         all_workers = list(self._cancellation_workers.values()) + list(self._cleanup_workers.values())
@@ -154,28 +183,31 @@ class RTIServiceBase(RTIRESTService):
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         ...
 
-    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Job:
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the DB record for the job (if any)
-                record = session.get(DBJobInfo, job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist")
+    async def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Job:
+        # DB operations - no lock needed, session is per-call
+        with self._session_maker() as session:
+            # get the DB record for the job (if any)
+            record = session.get(DBJobInfo, job_id)
+            if record is None:
+                raise RTIException(f"Job {job_id} does not exist")
 
-                # update the runner information
-                record.runner['identity'] = runner_identity.model_dump()
-                record.runner['address'] = runner_address
+            # update the runner information
+            record.runner['identity'] = runner_identity.model_dump()
+            record.runner['address'] = runner_address
 
-                # resolve the port mapping
-                resolved_ports = self._node.rti.resolve_port_mapping(job_id, dict(record.runner))
-                record.runner['ports'] = resolved_ports
+            # resolve the port mapping
+            resolved_ports = self._node.rti.resolve_port_mapping(job_id, dict(record.runner))
+            record.runner['ports'] = resolved_ports
 
-                session.commit()
+            session.commit()
 
-                # make the runner identity known to the node
-                self._node.db.update_identity(runner_identity)
+            # extract job before session closes
+            job = Job.model_validate(record.job)
 
-                return Job.model_validate(record.job)
+        # async operation outside session/lock
+        await self._node.db.update_identity(runner_identity)
+
+        return job
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
@@ -586,72 +618,114 @@ class RTIServiceBase(RTIRESTService):
         Updates the status of a particular job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
         """
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the record
-                record: DBJobInfo = session.get(DBJobInfo, job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+        # Collect async work to do (populated during DB operations)
+        namespace_to_cancel: Optional[Tuple[str, str]] = None  # (namespace, job_id)
+        job_to_cleanup: Optional[str] = None
+        jobs_to_cancel: List[Tuple[str, Optional[P2PAddress]]] = []  # (job_id, runner_address)
 
-                # update the status
-                record.status = job_status.model_dump()
-                session.commit()
+        # DB operations - no lock needed, session is per-call
+        with self._session_maker() as session:
+            # get the record
+            record: DBJobInfo = session.get(DBJobInfo, job_id)
+            if record is None:
+                raise RTIException(f"Job {job_id} does not exist.")
 
-                # update the local status file
-                try:
-                    status_path = os.path.join(self._jobs_path, job_id, 'job.status')
-                    with open(status_path, 'w') as f:
-                        # noinspection PyTypeChecker
-                        json.dump(job_status.model_dump(), f, indent=2)
-                except Exception:
-                    logger.warning(f"Could not write job status to {status_path}")
+            # check current state - don't allow overwriting terminal states
+            current_status = JobStatus.model_validate(record.status)
+            if current_status.state in [JobStatus.State.CANCELLED, JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL]:
+                if job_status.state != current_status.state:
+                    # trying to change a terminal state - ignore
+                    logger.warning(f"Job {job_id} already in terminal state {current_status.state}, "
+                                   f"ignoring update to {job_status.state}")
+                    return
 
-                # do we need to cancel a namespace reservation?
-                if job_status.state in [
-                    JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED
-                ]:
-                    # cancel resource reservation (if applicable)
-                    job: Job = Job.model_validate(record.job)
-                    if job.task.namespace is not None:
-                        self._node.db.cancel_namespace_reservation(job.task.namespace, job.id)
+            # update the status
+            record.status = job_status.model_dump()
+            session.commit()
 
-                    # initiate post-job clean-up
+            # update the local status file
+            try:
+                status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                with open(status_path, 'w') as f:
+                    # noinspection PyTypeChecker
+                    json.dump(job_status.model_dump(), f, indent=2)
+            except Exception:
+                logger.warning(f"Could not write job status to {status_path}")
+
+            # do we need to cancel a namespace reservation?
+            if job_status.state in [
+                JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED
+            ]:
+                # cancel resource reservation (if applicable)
+                job: Job = Job.model_validate(record.job)
+                if job.task.namespace is not None:
+                    namespace_to_cancel = (job.task.namespace, job.id)
+
+                # check if cleanup needed (short lock for dict access)
+                with self._mutex:
                     if job.id not in self._cleanup_workers:
-                        # start the cancellation worker
-                        worker = threading.Thread(target=self.perform_job_cleanup, args=(job.id,))
-                        self._cleanup_workers[record.id] = worker
-                        worker.start()
+                        job_to_cleanup = job.id
+                        self._cleanup_workers[job.id] = None  # placeholder
 
-                # is this job part of a batch?
-                batch_records: Optional[List[DBJobInfo]] = \
-                    session.query(DBJobInfo).filter_by(
-                        batch_id=record.batch_id).all() if record.batch_id else None
+            # is this job part of a batch?
+            batch_records: Optional[List[DBJobInfo]] = \
+                session.query(DBJobInfo).filter_by(
+                    batch_id=record.batch_id).all() if record.batch_id else None
 
-                # do we need to terminate related jobs?
-                if batch_records is not None and job_status.state in [
-                    JobStatus.State.FAILED, JobStatus.State.CANCELLED
-                ]:
-                    for related in batch_records:
-                        # skip if this is the record of the just updated job
-                        if related.id == job_id:
-                            continue
+            # do we need to terminate related jobs?
+            if batch_records is not None and job_status.state in [
+                JobStatus.State.FAILED, JobStatus.State.CANCELLED
+            ]:
+                for related in batch_records:
+                    # skip if this is the record of the just updated job
+                    if related.id == job_id:
+                        continue
 
-                        # is there already a cancellation worker?
-                        if related.id in self._cancellation_workers:
-                            continue
+                    # check the status and collect jobs to cancel
+                    related_status = JobStatus.model_validate(related.status)
+                    if related_status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
+                                                JobStatus.State.RUNNING]:
+                        # short lock for dict check-then-add
+                        with self._mutex:
+                            if related.id in self._cancellation_workers:
+                                continue
+                            self._cancellation_workers[related.id] = None  # placeholder
 
-                        # check the status and initiate cancellation if necessary
-                        related_status = JobStatus.model_validate(related.status)
-                        if related_status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                                    JobStatus.State.RUNNING]:
-                            logger.info(f"Job {job_id} failed/cancelled -> "
-                                        f"related job {related.id} status {related_status.state} -> cancel")
-                            self._job_cancel_internal(related)
+                        logger.info(f"Job {job_id} failed/cancelled -> "
+                                    f"related job {related.id} status {related_status.state} -> cancel")
+
+                        # extract runner info while session is open
+                        if related.runner.get('identity') is not None and related.runner.get('address') is not None:
+                            runner = Identity.model_validate(related.runner['identity'])
+                            runner_address = P2PAddress(
+                                address=related.runner['address'],
+                                curve_secret_key=self._node.keystore.curve_secret_key(),
+                                curve_public_key=self._node.keystore.curve_public_key(),
+                                curve_server_key=runner.c_public_key
+                            )
                         else:
-                            logger.info(f"Job {job_id} failed/cancelled -> "
-                                        f"related job {related.id} status {related_status.state} -> skip")
+                            runner_address = None
 
-    def get_job_owner_iid(self, job_id: str) -> str:
+                        jobs_to_cancel.append((related.id, runner_address))
+                    else:
+                        logger.info(f"Job {job_id} failed/cancelled -> "
+                                    f"related job {related.id} status {related_status.state} -> skip")
+
+        # Async operations - outside any lock
+        if namespace_to_cancel:
+            await self._node.db.cancel_namespace_reservation(namespace_to_cancel[0], namespace_to_cancel[1])
+
+        if job_to_cleanup:
+            task = asyncio.create_task(self.perform_job_cleanup(job_to_cleanup))
+            with self._mutex:
+                self._cleanup_workers[job_to_cleanup] = task
+
+        for cancel_job_id, runner_address in jobs_to_cancel:
+            task = asyncio.create_task(self.perform_cancel(cancel_job_id, runner_address))
+            with self._mutex:
+                self._cancellation_workers[cancel_job_id] = task
+
+    async def get_job_owner_iid(self, job_id: str) -> str:
         with self._mutex:
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)

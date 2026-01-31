@@ -583,44 +583,42 @@ class AWSRTIService(RTIServiceBase):
 
                 raise e
 
-    def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
-        # get the AWS job id
-        with self._session_maker() as session:
-            # get the record and status
-            record = session.query(DBJobInfo).get(job_id)
-            aws_job_id = record.runner['aws_job_id']
-
-        # attempt to cancel the job gracefully (only possible if we have the peer address
-        if peer_address is not None:
-            try:
-                # send the cancellation request
-                asyncio.run(P2PInterruptJob.perform(peer_address))
-
-                # determine deadline and wait until then to see if the job has terminated by then
-                deadline = get_timestamp_now() + grace_period * 1000
-                while get_timestamp_now() < deadline:
-                    time.sleep(1)
-
-                    # is the container still running -> if not, all good we are done
-                    if not batch_job_running(aws_job_id):
-                        self.on_cancellation_worker_done(job_id)
-                        return
-
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-
-        # if we reach here, graceful cancellation wasn't possible (deadlined reached, no peer address, exception)
-        # -> kill container
+    async def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
         try:
-            logger.warning(f"[job:{job_id}] cancellation unsuccessful -> killing AWS Batch job {aws_job_id}")
-            batch_terminate_job(aws_job_id)
+            # mark cancelled in DB first (state is correct even if we crash later)
+            self.mark_job_cancelled(job_id)
+
+            # get aws_job_id (quick read, don't hold session)
+            with self._session_maker() as session:
+                record = session.get(DBJobInfo, job_id)
+                aws_job_id = record.runner.get('aws_job_id') if record else None
+
+            if not aws_job_id:
+                return
+
+            # send P2P interrupt (best effort)
+            if peer_address:
+                try:
+                    await P2PInterruptJob.perform(peer_address)
+                except Exception:
+                    pass
+
+            # wait grace period for job to stop
+            deadline = get_timestamp_now() + grace_period * 1000
+            while get_timestamp_now() < deadline:
+                if not await asyncio.to_thread(batch_job_running, aws_job_id):
+                    break
+                await asyncio.sleep(1)
+
+            # force kill if still running
+            if await asyncio.to_thread(batch_job_running, aws_job_id):
+                await asyncio.to_thread(batch_terminate_job, aws_job_id)
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{job_id}] killing AWS Batch job {aws_job_id} failed: {trace}")
+            logger.error(f"[job:{job_id}] cancellation failed: {e}")
 
-        self.on_cancellation_worker_done(job_id)
+        finally:
+            self.on_cancellation_worker_done(job_id)
 
     async def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)

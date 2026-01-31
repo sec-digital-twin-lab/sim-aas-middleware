@@ -869,6 +869,12 @@ class JobRunner(CLICommand, ProgressListener):
             # all batch members to be initialised
             if self._batch_status is not None:
                 self._await_batch()
+                # check if interrupted during barrier wait
+                if self._interrupted:
+                    self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> INTERRUPTED (during barrier)")
+                    self._status_handler.update(state=JobStatus.State.CANCELLED)
+                    self._write_exitcode(ExitCode.INTERRUPTED)
+                    return
 
             # fetch the user identity
             self._user: Optional[Identity] = asyncio.run(

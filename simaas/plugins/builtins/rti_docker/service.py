@@ -255,49 +255,44 @@ class DockerRTIService(RTIServiceBase):
 
     async def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         try:
-            # attempt to cancel the job
-            try:
-                asyncio.run(P2PInterruptJob.perform(peer_address))
+            # mark cancelled in DB first (state is correct even if we crash later)
+            self.mark_job_cancelled(job_id)
 
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.warning(f"[job:{job_id}] attempt to cancel job {job_id} failed: {trace}")
-                grace_period = 0
-
+            # get container_id (quick read, don't hold session)
             with self._session_maker() as session:
-                # get the record and status
                 record = session.get(DBJobInfo, job_id)
-                container_id = record.runner['container_id']
+                container_id = record.runner.get('container_id') if record else None
 
-                deadline = get_timestamp_now() + grace_period * 1000
-                while get_timestamp_now() < deadline:
-                    try:
-                        # sleep for a bit and check the record
-                        time.sleep(1)
+            if not container_id:
+                return
 
-                        # is the container still running -> if not, all good we are done
-                        if not docker_container_running(container_id):
-                            self.on_cancellation_worker_done(job_id)
-                            return
-
-                    except Exception as e:
-                        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                        logger.warning(f"[job:{job_id}] checking status failed: {trace}")
-                        break
-
-                # if we get here then either the deadline has been reached or there was an exception -> kill container
+            # send P2P interrupt (best effort)
+            if peer_address:
                 try:
-                    logger.warning(f"[job:{job_id}] grace period exceeded -> "
-                                   f"killing Docker container {container_id}")
-                    docker_kill_job_container(container_id)
+                    await P2PInterruptJob.perform(peer_address)
+                except Exception:
+                    pass
 
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.warning(f"[job:{job_id}] killing Docker container {container_id} failed: {trace}")
+            # wait grace period for container to stop
+            deadline = get_timestamp_now() + grace_period * 1000
+            while get_timestamp_now() < deadline:
+                if not await asyncio.to_thread(docker_container_running, container_id):
+                    break
+                await asyncio.sleep(1)
+
+            # force kill if still running
+            if await asyncio.to_thread(docker_container_running, container_id):
+                await asyncio.to_thread(docker_kill_job_container, container_id)
+
+            # cleanup (if not retaining history)
+            if not self.retain_job_history:
+                await asyncio.to_thread(docker_delete_container, container_id)
+                if self._scratch_volume:
+                    scratch_path = os.path.join(self._scratch_volume, f"{job_id}_scratch")
+                    shutil.rmtree(scratch_path, ignore_errors=True)
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[job:{job_id}] cancellation failed: {trace}")
+            logger.error(f"[job:{job_id}] cancellation failed: {e}")
 
         finally:
             self.on_cancellation_worker_done(job_id)
