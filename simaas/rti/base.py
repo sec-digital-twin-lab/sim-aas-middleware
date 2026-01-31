@@ -370,9 +370,6 @@ class RTIServiceBase(RTIRESTService):
 
             ns_budget, ns_info = combined[task.namespace]
 
-            if ns_info is None:
-                print(ns_info)
-
             # can the budget of the task be satisfied by the namespace in principle?
             if task.budget.vcpus > ns_info.budget.vcpus or task.budget.memory > ns_info.budget.memory:
                 raise RTIException(f"Task {task.name} exceeds namespace resource capacity")
