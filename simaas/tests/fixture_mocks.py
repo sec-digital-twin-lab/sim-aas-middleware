@@ -5,7 +5,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import pytest
 
@@ -17,7 +17,7 @@ from simaas.core.helpers import get_timestamp_now, hash_json_object, generate_ra
 from simaas.core.keystore import Keystore
 from simaas.core.processor import ProcessorBase, ProgressListener
 from simaas.dor.api import DORInterface
-from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecipe, DORStatistics
+from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecipe, DORStatistics, TagValueType
 from simaas.namespace.api import Namespace
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.api import RTIInterface
@@ -82,7 +82,7 @@ class DummyNamespace(Namespace):
         def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
                 creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
                 content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
-                tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None,
+                tags: Optional[Dict[str, TagValueType]] = None,
                 recipe: Optional[DataObjectRecipe] = None) -> DataObject:
 
             obj_id = str(self._next_obj_id)

@@ -30,7 +30,7 @@ REQUIRED_ENV = [
     'SIMAAS_REPO_PATH'
 ]
 
-class DefaultRTIService(RTIServiceBase):
+class DockerRTIService(RTIServiceBase):
     def __init__(
             self, node, db_path: str, retain_job_history: bool = False, strict_deployment: bool = True
     ) -> None:
@@ -337,7 +337,10 @@ class DefaultRTIService(RTIServiceBase):
                     # create the job-specific scratch folder
                     job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
                     logger.info(f"[job:{job_id}] clean-up -> delete scratch folder at {job_scratch_path}")
-                    shutil.rmtree(job_scratch_path, ignore_errors=True)
+                    try:
+                        shutil.rmtree(job_scratch_path)
+                    except OSError as e:
+                        logger.warning(f"[job:{job_id}] Failed to delete scratch folder: {e}")
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))

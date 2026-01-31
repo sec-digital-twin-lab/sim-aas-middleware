@@ -21,7 +21,7 @@ from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
-from simaas.plugins.builtins.dor_default import DefaultDORService
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PAddress
@@ -40,7 +40,7 @@ logger = Logging.get(__name__)
 def p2p_server(test_context) -> Node:
     """Create a session-scoped P2P server node for networking tests."""
     keystore: Keystore = Keystore.new('p2p_server')
-    _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None)
+    _node: Node = test_context.get_node(keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None)
     _node.p2p.add(P2PLatency())
     _node.p2p.add(P2PThroughput())
 
@@ -226,7 +226,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         keystore = Keystore.new(f"keystore-{get_timestamp_now()}")
         client = DefaultNode(
             keystore, os.path.join(temp_dir, 'client_node'), enable_db=True,
-            dor_plugin_class=DefaultDORService, rti_plugin_class=None
+            dor_plugin_class=FilesystemDORService, rti_plugin_class=None
         )
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()

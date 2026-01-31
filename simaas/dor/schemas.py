@@ -1,8 +1,10 @@
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union, TypeAlias
 
 from pydantic import BaseModel, Field
 
 from simaas.nodedb.schemas import NodeInfo
+
+TagValueType: TypeAlias = Union[str, int, float, bool, List, Dict]
 
 
 class DORFilePartInfo(BaseModel):
@@ -117,7 +119,7 @@ class DataObject(BaseModel):
         and JSON-compatible complex types (`List` and `Dict`).
         """
         key: str = Field(..., title="Key", description="The key of the tag.", examples=["module"])
-        value: Optional[Union[str, int, float, bool, List, Dict]] = Field(title="Value", description="The value of the tag", examples=["D1.2"])
+        value: Optional[TagValueType] = Field(title="Value", description="The value of the tag", examples=["D1.2"])
 
     class License(BaseModel):
         """
@@ -138,7 +140,7 @@ class DataObject(BaseModel):
     owner_iid: str = Field(..., title="Owner IId", description="Owner IId", examples=["vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2"])
     access_restricted: bool = Field(..., title="Access Restriction", description="Indicates if this data object has restricted access to its content.", examples=[False])
     access: List[str] = Field(..., title="Access", description="A list of ids of identities that have access to the contents of the data object.", examples=["vx4a3180m97msbi3q11xtcav6v65swoi34bvqggvtj0itzsbargbuxdzzok7xjz2"])
-    tags: Dict[str, Union[str, int, float, bool, List, Dict]] = Field(..., title="Tags", description="The tags of this data object.")
+    tags: Dict[str, TagValueType] = Field(..., title="Tags", description="The tags of this data object.")
     last_accessed: int = Field(..., title="Last Accessed", description="The timestamp (in UTC milliseconds since the beginning of the epoch) when the data object has been accessed the last time.", examples=[1664849510076])
     custodian: Optional[NodeInfo] = Field(title='Custodian', description="Information about the node that hosts this data object.")
     content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of the data object is encrypted.", examples=[False])
@@ -169,4 +171,4 @@ class AddDataObjectParameters(BaseModel):
     content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content has been encrypted.")
     license: DataObject.License = Field(..., title="License", description="License information for this data object.")
     recipe: Optional[DataObjectRecipe] = Field(title="Recipe", description="Recipe for this data object (if any).")
-    tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = Field(title="Tags", description="The tags of this data object.")
+    tags: Optional[Dict[str, TagValueType]] = Field(title="Tags", description="The tags of this data object.")

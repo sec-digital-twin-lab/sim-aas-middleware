@@ -68,7 +68,7 @@ class P2PLatency(P2PProtocol):
 
             except Exception as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(trace)
+                logger.error(f"P2P operation failed: {trace}")
 
         raise RTIException(f"Latency test failed after {max_attempts} attempts.")
 
@@ -148,7 +148,7 @@ class P2PThroughput(P2PProtocol):
 
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    print(trace)
+                    logger.error(f"P2P operation failed: {trace}")
 
             raise RTIException(f"Throughput test failed after {max_attempts} attempts.")
 

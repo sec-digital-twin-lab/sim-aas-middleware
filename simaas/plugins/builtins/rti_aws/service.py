@@ -38,14 +38,13 @@ class AWSConfiguration(BaseModel):
     aws_role_arn: str
 
 
-REQUIRED_ENV = [
-    'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN',
-    'SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH'
+REQUIRED_AWS_CONFIG_ENV = [
+    'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN'
 ]
+REQUIRED_ENV = REQUIRED_AWS_CONFIG_ENV + ['SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH']
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
-    required = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN']
-    if all(var in os.environ for var in required):
+    if all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
         return AWSConfiguration(
             aws_region=os.environ['SIMAAS_AWS_REGION'],
             aws_access_key_id=os.environ['SIMAAS_AWS_ACCESS_KEY_ID'],
@@ -87,7 +86,7 @@ def get_ecr_repository(repository_name: str, config: Optional[AWSConfiguration] 
     try:
         response = client.describe_repositories(repositoryNames=[repository_name])
     except client.exceptions.RepositoryNotFoundException:
-        print(f"Repository '{repository_name}' does not exist in region '{config.aws_region}' -> creating now.")
+        logger.info(f"Repository '{repository_name}' does not exist in region '{config.aws_region}' -> creating now.")
         response = client.create_repository(repositoryName=repository_name)
 
     # extract the repository URI

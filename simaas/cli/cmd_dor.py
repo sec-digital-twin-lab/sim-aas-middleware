@@ -152,7 +152,7 @@ class DORDownload(CLICommand):
     def execute(self, args: dict) -> Optional[dict]:
         prompt_if_missing(args, 'destination', prompt_for_string,
                           message="Enter the destination folder",
-                          default=os.environ['HOME'])
+                          default=os.environ.get('HOME', os.path.expanduser('~')))
 
         dor = _require_dor(args)
         keystore = load_keystore(args, ensure_publication=True)

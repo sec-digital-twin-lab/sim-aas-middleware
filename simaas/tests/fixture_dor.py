@@ -20,8 +20,8 @@ from simaas.node.default import DefaultNode
 from simaas.nodedb.api import NodeDBProxy
 
 # Import plugin classes
-from simaas.plugins.builtins.dor_default import DefaultDORService
-from simaas.plugins.builtins.rti_docker import DefaultRTIService
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
+from simaas.plugins.builtins.rti_docker import DockerRTIService
 
 logger = Logging.get('tests.fixtures.dor')
 
@@ -42,7 +42,7 @@ def session_node(session_keystore):
         _node0 = DefaultNode.create(
             keystore=session_keystore, storage_path=datastore0,
             p2p_address=p2p_address0, rest_address=rest_address0, boot_node_address=rest_address0,
-            enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=DefaultRTIService,
+            enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=DockerRTIService,
             retain_job_history=False, strict_deployment=False
         )
 
@@ -56,7 +56,7 @@ def session_node(session_keystore):
         _node1 = DefaultNode.create(
             keystore=keystore1, storage_path=datastore1,
             p2p_address=p2p_address1, rest_address=rest_address1, boot_node_address=rest_address0,
-            enable_db=True, dor_plugin_class=DefaultDORService, rti_plugin_class=None,
+            enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None,
             retain_job_history=False, strict_deployment=False
         )
 

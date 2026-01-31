@@ -9,7 +9,7 @@ Built-in plugins are bundled inside the `simaas` package:
 ```
 simaas/plugins/builtins/
   __init__.py              # Builtins package marker
-  dor_default/             # DOR plugin using SQLite
+  dor_fs/                  # DOR plugin using SQLite + local filesystem
     __init__.py            # Exports the service class
     service.py             # Implementation
   rti_docker/              # RTI plugin for local Docker execution
@@ -24,7 +24,7 @@ simaas/plugins/builtins/
 
 | Plugin | Purpose | Dependencies |
 |--------|---------|--------------|
-| `dor_default` | Default DOR using SQLite | Core dependencies |
+| `dor_fs` | Filesystem DOR using SQLite + local storage | Core dependencies |
 | `rti_docker` | Local Docker execution | Core dependencies |
 | `rti_aws` | AWS Batch execution | `boto3` (included in requirements.txt) |
 
