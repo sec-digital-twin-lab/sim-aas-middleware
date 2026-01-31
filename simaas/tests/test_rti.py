@@ -318,11 +318,11 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
 def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
     """Test job cancellation by the job owner.
 
-    NOTE: This test is Docker-only due to SSH tunnel limitations when testing AWS.
-    The SSH tunnel only allows outbound calls from the local node to AWS Batch.
-    AWS Batch jobs cannot call back to the local node to receive cancellation
-    signals, making cancellation testing impossible in this test environment.
-    In production, where the node runs on AWS infrastructure, cancellation works normally.
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
     """
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -640,7 +640,17 @@ def test_batch_submit_and_complete(rti_context: RTIContext, test_context, extra_
 
 @pytest.mark.integration
 def test_batch_cancel_cascade(rti_context: RTIContext):
-    """Test batch cancellation cascade when one job fails."""
+    """Test batch cancellation cascade when one job fails.
+
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
+    """
+    if rti_context.backend == 'aws':
+        pytest.skip("Batch cancel cascade requires P2P connectivity to AWS jobs not available from local test environment")
+
     proc_id = rti_context.deployed_abc_processor.obj_id
     owner = rti_context.session_node.keystore
 
