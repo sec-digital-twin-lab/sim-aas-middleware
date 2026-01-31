@@ -3,7 +3,6 @@ import base64
 import json
 import os
 import subprocess
-import time
 
 import traceback
 from typing import Optional, Tuple, Dict, List
@@ -364,16 +363,15 @@ class AWSRTIService(RTIServiceBase):
     def type(self) -> str:
         return 'aws'
 
-    def perform_deploy(self, proc: Processor) -> None:
-        loop = asyncio.new_event_loop()
+    async def perform_deploy(self, proc: Processor) -> None:
         try:
             # search the network for the processor docker image data object and fetch it
             logger.info(f"[deploy][{proc.id}] searching network for PDI: image_name={proc.image_name}")
             protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj: Optional[DataObject] = None
-            for node in [node for node in self._node.db.get_network() if node.dor_service]:
-                result: Dict[str, DataObject] = loop.run_until_complete(protocol.perform(node, [proc.id]))
+            for node in [node for node in await self._node.db.get_network() if node.dor_service]:
+                result: Dict[str, DataObject] = await protocol.perform(node, [proc.id])
                 proc_obj = result.get(proc.id)
                 if proc_obj:
                     custodian = node
@@ -389,7 +387,7 @@ class AWSRTIService(RTIServiceBase):
                 raise RTIException("Malformed processor data object -> image_name not found.")
 
             # do we have the image in Docker?
-            image_found = docker_find_image(image_name)
+            image_found = await asyncio.to_thread(docker_find_image, image_name)
 
             # if not, can we load it from DOR?
             if not image_found and proc_obj.data_format == 'tar':
@@ -399,24 +397,22 @@ class AWSRTIService(RTIServiceBase):
                 image_path = os.path.join(self._procs_path, f"{proc.id}.content")
                 meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
                 protocol = P2PFetchDataObject(self._node)
-                loop.run_until_complete(
-                    protocol.perform(custodian, proc.id, meta_path, image_path)
-                )
+                await protocol.perform(custodian, proc.id, meta_path, image_path)
 
                 # load the image
-                docker_load_image(image_path, image_name)
+                await asyncio.to_thread(docker_load_image, image_path, image_name)
                 image_found = True
 
             # do we require a rebuild?
             if image_found:
                 # check if the existing image matches the required platform
-                if docker_check_image_platform(image_name, 'linux/amd64'):
+                if await asyncio.to_thread(docker_check_image_platform, image_name, 'linux/amd64'):
                     require_build = False
                     logger.info(f"[deploy][{proc.id}] image found and arch == linux/amd64 -> no build required!")
 
                 else:
                     # remove the existing image before rebuilding
-                    docker_delete_image(image_name)
+                    await asyncio.to_thread(docker_delete_image, image_name)
                     require_build = True
                     logger.info(f"[deploy][{proc.id}] image found but arch != linux/amd64 -> build required!")
 
@@ -438,7 +434,9 @@ class AWSRTIService(RTIServiceBase):
                 # clone the repository and checkout the specified commit
                 repo_path = os.path.join(self._procs_path, proc.id)
                 commit_id = proc_obj.tags['commit_id']
-                clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials)
+                await asyncio.to_thread(
+                    clone_repository, repository, repo_path, commit_id=commit_id, credentials=credentials
+                )
 
                 proc_path = proc_obj.tags['proc_path']
                 proc_path = os.path.join(repo_path, proc_path)
@@ -455,7 +453,8 @@ class AWSRTIService(RTIServiceBase):
                     json.dump(gpp.model_dump(), f, indent=2)
 
                 # build the image
-                build_processor_image(
+                await asyncio.to_thread(
+                    build_processor_image,
                     proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
                     credentials=credentials, platform='linux/amd64'
                 )
@@ -463,14 +462,14 @@ class AWSRTIService(RTIServiceBase):
                 logger.info(f"[deploy][{proc.id}] image building complete: {image_name}")
 
             # if it's not in the ECR yet -> push it now
-            if ecr_check_image_exists(self._aws_repository_name, image_name, config=self._aws_config):
+            if await asyncio.to_thread(ecr_check_image_exists, self._aws_repository_name, image_name, config=self._aws_config):
                 logger.info(f"[deploy][{proc.id}] image already exists in ECR: {image_name} -> do nothing.")
             else:
                 logger.info(f"[deploy][{proc.id}] image does not exist in ECR: {image_name} -> pushing to ECR now...")
-                ecr_push_local_image(self._aws_repository_name, image_name, config=self._aws_config)
+                await asyncio.to_thread(ecr_push_local_image, self._aws_repository_name, image_name, config=self._aws_config)
 
             # find out what ports are exposed
-            ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
+            ports: List[Tuple[int, str]] = await asyncio.to_thread(docker_get_exposed_ports, image_name)
 
             # update processor object
             proc.state = Processor.State.READY
@@ -494,34 +493,30 @@ class AWSRTIService(RTIServiceBase):
             # update the db record
             self.update_proc_db(proc)
 
-        finally:
-            loop.close()
-
-    def perform_undeploy(self, proc: Processor, keep_local_image: bool = True) -> None:
+    async def perform_undeploy(self, proc: Processor, keep_local_image: bool = True) -> None:
         try:
             # deregister job definition
-            batch_deregister_job_def(proc, config=self._aws_config)
+            await asyncio.to_thread(batch_deregister_job_def, proc, config=self._aws_config)
 
             # remove it from the ECR
-            ecr_delete_image(self._aws_repository_name, proc.image_name, config=self._aws_config)
+            await asyncio.to_thread(ecr_delete_image, self._aws_repository_name, proc.image_name, config=self._aws_config)
 
             # remove the docker image (if applicable)
             if not keep_local_image:
-                docker_delete_image(proc.image_name)
+                await asyncio.to_thread(docker_delete_image, proc.image_name)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.error(f"[undeploy:{shorten_id(proc.id)}] failed: {trace}")
 
-        # remove the record from the db
-        with self._mutex:
-            with self._session_maker() as session:
-                record = session.get(DBDeployedProcessor, proc.id)
-                if record:
-                    session.delete(record)
-                    session.commit()
-                else:
-                    logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
+        # remove the record from the db - no lock needed, session is per-call
+        with self._session_maker() as session:
+            record = session.get(DBDeployedProcessor, proc.id)
+            if record:
+                session.delete(record)
+                session.commit()
+            else:
+                logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
 
     def _perform_submit(
             self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None,
@@ -627,16 +622,16 @@ class AWSRTIService(RTIServiceBase):
 
         self.on_cancellation_worker_done(job_id)
 
-    def perform_purge(self, record: DBJobInfo) -> None:
+    async def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)
         aws_job_id = record.runner['aws_job_id']
         try:
-            batch_terminate_job(aws_job_id)
+            await asyncio.to_thread(batch_terminate_job, aws_job_id)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{record.id}] killing Docker container {aws_job_id} failed: {trace}")
+            logger.warning(f"[job:{record.id}] killing AWS Batch job {aws_job_id} failed: {trace}")
 
-    def perform_job_cleanup(self, job_id: str) -> None:
+    async def perform_job_cleanup(self, job_id: str) -> None:
         ...
 
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:

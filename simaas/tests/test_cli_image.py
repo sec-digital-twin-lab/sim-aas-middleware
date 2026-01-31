@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import socket
@@ -242,7 +243,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
+    asyncio.run(session_node.db.update_identity(keystore.identity))
 
     try:
         # define arguments

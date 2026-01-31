@@ -1,7 +1,6 @@
 import abc
 import asyncio
 import threading
-import time
 import traceback
 from typing import Optional, Tuple
 
@@ -61,10 +60,14 @@ class Node(abc.ABC):
             strict_deployment=self.rti.strict_deployment if self.rti else None
         )
 
-    def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
-                boot_node_address: (str, int) = None, bind_all_address: bool = False,
-                wait_until_ready: bool = True) -> None:
+    async def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
+                      bind_all_address: bool = False, wait_until_ready: bool = True) -> None:
+        """
+        Start the node's daemon services (P2P, REST).
 
+        This is an async method that manages thread lifecycle. To join a network after startup,
+        call `await node.join_network(boot_node_address)` separately.
+        """
         logger.info(f"Sim-aaS Middleware {__version__}")
 
         endpoints = []
@@ -96,7 +99,7 @@ class Node(abc.ABC):
         self.p2p.add(P2PUpdateNamespaceBudget(self))
         self.p2p.add(P2PReserveNamespaceResources(self))
         self.p2p.add(P2PCancelNamespaceReservation(self))
-        self.p2p.start_service()
+        self.p2p.start_service_background()
 
         if rest_address is not None:
             logger.info("starting REST service.")
@@ -107,12 +110,12 @@ class Node(abc.ABC):
         if wait_until_ready:
             logger.info("wait until node is ready...")
             while not self.p2p.is_ready() or (self.rest and not self.rest.is_ready()):
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
             logger.info("node is ready.")
 
         # update our node db
-        self.db.update_identity(self.identity)
-        self.db.update_network(NodeInfo(
+        await self.db.update_identity(self.identity)
+        await self.db.update_network(NodeInfo(
             identity=self.identity,
             last_seen=get_timestamp_now(),
             dor_service=self.dor.type() if self.dor else 'none',
@@ -123,50 +126,15 @@ class Node(abc.ABC):
             strict_deployment=self.rti.strict_deployment if self.rti else None
         ))
 
-        # join an existing network of nodes?
-        if boot_node_address:
-            self.join_network(boot_node_address)
+    def shutdown(self) -> None:
+        """
+        Stop the node's daemon services (P2P, REST).
 
-    def shutdown(self, leave_network: bool = True, timeout: int = 60) -> None:
-        # leave the network
-        if leave_network:
-            self.leave_network()
-        else:
-            logger.warning(f"[{self.identity.id}/{self.identity.name}] shutdown: leave network silently (do not inform peers)")
-
-        if self.rti is not None:
-            # if we have any procs deployed, undeploy them
-            for proc in self.rti.get_all_procs():
-                proc_id: str = proc.id
-                self.rti.undeploy(proc_id)
-
-                # wait until proc is undeployed
-                deadline = get_timestamp_now() + timeout * 1000
-                check: Optional[Processor] = self.rti.get_proc(proc_id)
-                while get_timestamp_now() < deadline and check is not None:
-                    time.sleep(1)
-                    check: Optional[Processor] = self.rti.get_proc(proc_id)
-
-                # successful?
-                if check is not None:
-                    logger.warning(
-                        f"[{self.identity.id}/{self.identity.name}] shutdown: undeploying processor {proc_id} failed."
-                    )
-
-            # wait for any active worker threads
-            for _ in range(10):
-                if not self.rti.has_active_workers():
-                    break
-                logger.info(
-                    f"[{self.identity.id}/{self.identity.name}] shutdown: waiting for active worker threads to be done..."
-                )
-                time.sleep(1)
-            else:
-                logger.warning(
-                    f"[{self.identity.id}/{self.identity.name}] shutdown: ignoring active worker threads that are still active."
-                )
-
-        # stop the services
+        This is a sync method that manages thread lifecycle. Before calling shutdown,
+        you should call async cleanup methods:
+        - `await node.leave_network()` to inform peers
+        - `await node.shutdown_rti()` to undeploy processors
+        """
         logger.info("stopping all services.")
         if self.p2p:
             self.p2p.stop_service()
@@ -174,7 +142,47 @@ class Node(abc.ABC):
         if self.rest:
             self.rest.stop_service()
 
-    def join_network(self, boot_node_address: Tuple[str, int]) -> None:
+    async def shutdown_rti(self, timeout: int = 60) -> None:
+        """
+        Async cleanup of RTI service: undeploy all processors and wait for workers.
+
+        Call this before shutdown() to cleanly undeploy processors.
+        """
+        if self.rti is None:
+            return
+
+        # if we have any procs deployed, undeploy them
+        for proc in await self.rti.get_all_procs():
+            proc_id: str = proc.id
+            await self.rti.undeploy(proc_id)
+
+            # wait until proc is undeployed
+            deadline = get_timestamp_now() + timeout * 1000
+            check: Optional[Processor] = await self.rti.get_proc(proc_id)
+            while get_timestamp_now() < deadline and check is not None:
+                await asyncio.sleep(1)
+                check = await self.rti.get_proc(proc_id)
+
+            # successful?
+            if check is not None:
+                logger.warning(
+                    f"[{self.identity.id}/{self.identity.name}] shutdown_rti: undeploying processor {proc_id} failed."
+                )
+
+        # wait for any active worker threads
+        for _ in range(10):
+            if not self.rti.has_active_workers():
+                break
+            logger.info(
+                f"[{self.identity.id}/{self.identity.name}] shutdown_rti: waiting for active worker threads to be done..."
+            )
+            await asyncio.sleep(1)
+        else:
+            logger.warning(
+                f"[{self.identity.id}/{self.identity.name}] shutdown_rti: ignoring active worker threads that are still active."
+            )
+
+    async def join_network(self, boot_node_address: Tuple[str, int]) -> None:
         logger.info(f"joining network via boot node: {boot_node_address}")
 
         try:
@@ -188,56 +196,48 @@ class Node(abc.ABC):
             logger.error(trace)
             return
 
-        loop = asyncio.new_event_loop()
         try:
             protocol = P2PJoinNetwork(self)
-            loop.run_until_complete(protocol.perform(boot_node))
+            await protocol.perform(boot_node)
+            network = await self.db.get_network()
+            found = '\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in network])
+            logger.info(f"Nodes found:\n{found}")
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             logger.error("Error during P2P network join")
             logger.error(trace)
-        finally:
-            loop.close()
 
-        found = '\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in self.db.get_network()])
-        logger.info(f"Nodes found:\n{found}")
-
-    def leave_network(self, blocking: bool = False) -> None:
-        loop = asyncio.new_event_loop()
+    async def leave_network(self, blocking: bool = False) -> None:
         try:
             protocol = P2PLeaveNetwork(self)
-            loop.run_until_complete(protocol.perform(blocking=blocking))
+            await protocol.perform(blocking=blocking)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error("Error during P2P network join")
+            logger.error("Error during P2P network leave")
             logger.error(trace)
-        finally:
-            loop.close()
 
-    def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
+    async def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
         with self._mutex:
             # perform update on the keystore and update our own node db
             identity = self._keystore.update_profile(name=name, email=email)
-            self.db.update_identity(identity)
+            await self.db.update_identity(identity)
 
             # propagate only if flag is set
             if propagate:
-                loop = asyncio.new_event_loop()
                 try:
                     protocol = P2PUpdateIdentity(self)
-                    loop.run_until_complete(protocol.broadcast(self.db.get_network()))
+                    network = await self.db.get_network()
+                    await protocol.broadcast(network)
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                     logger.error("Error during P2P identity update")
                     logger.error(trace)
-                finally:
-                    loop.close()
 
             return identity
 
-    def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
+    async def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
-        meta = self.dor.get_meta(obj_id)
+        meta = await self.dor.get_meta(obj_id)
         if meta is None:
             raise DataObjectNotFoundError(obj_id)
 
@@ -249,9 +249,9 @@ class Node(abc.ABC):
                 'user_iid': identity.id
             })
 
-    def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
+    async def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
-        meta: DataObject = self.dor.get_meta(obj_id)
+        meta: DataObject = await self.dor.get_meta(obj_id)
         if meta is None:
             raise AuthorisationFailedError({
                 'reason': 'data object does not exist',
@@ -266,22 +266,22 @@ class Node(abc.ABC):
                 'user_iid': identity.id
             })
 
-    def check_rti_is_deployed(self, proc_id: str) -> None:
-        if not self.rti.get_proc(proc_id):
+    async def check_rti_is_deployed(self, proc_id: str) -> None:
+        if not await self.rti.get_proc(proc_id):
             raise ProcessorNotDeployedError({
                 'proc_id': proc_id
             })
 
-    def check_rti_not_busy(self, proc_id: str) -> None:
-        proc: Processor = self.rti.get_proc(proc_id)
+    async def check_rti_not_busy(self, proc_id: str) -> None:
+        proc: Processor = await self.rti.get_proc(proc_id)
         if proc.state in [Processor.State.BUSY_DEPLOY, Processor.State.BUSY_UNDEPLOY]:
             raise ProcessorBusyError({
                 'proc_id': proc_id
             })
 
-    def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
+    async def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
         # get the job user (i.e., owner) and check if the caller user ids check out
-        job_owner_iid = self.rti.get_job_owner_iid(job_id)
+        job_owner_iid = await self.rti.get_job_owner_iid(job_id)
         if job_owner_iid != identity.id and identity.id != self.identity.id:
             raise AuthorisationFailedError({
                 'reason': 'user is not the job owner or the node owner',
@@ -291,9 +291,9 @@ class Node(abc.ABC):
                 'node_iid': self.identity.id
             })
 
-    def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
+    async def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
         # get the batch status to determine the owner iid
-        batch_status: BatchStatus = self.rti.get_batch_status(batch_id)
+        batch_status: BatchStatus = await self.rti.get_batch_status(batch_id)
         batch_owner_iid = batch_status.user_iid
 
         # check if the identity is part of the batch
@@ -311,7 +311,7 @@ class Node(abc.ABC):
                 'node_iid': self.identity.id
             })
 
-    def check_rti_node_owner(self, identity: Identity) -> None:
+    async def check_rti_node_owner(self, identity: Identity) -> None:
         # check if the user is the owner of the node
         if self.identity.id != identity.id:
             raise AuthorisationFailedError({

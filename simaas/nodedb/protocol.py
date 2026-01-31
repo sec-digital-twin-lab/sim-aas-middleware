@@ -78,7 +78,7 @@ class P2PUpdateIdentity(P2PProtocol):
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         logger.info(f"Received identity update from node: {request.identity.name} | {request.identity.id}")
-        self._node.db.update_identity(request.identity)
+        await self._node.db.update_identity(request.identity)
         return UpdateIdentityMessage(identity=self._node.identity), None
 
     @staticmethod
@@ -118,7 +118,7 @@ class P2PGetIdentity(P2PProtocol):
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        identity: Optional[Identity] = self._node.db.get_identity(request.iid)
+        identity: Optional[Identity] = await self._node.db.get_identity(request.iid)
         return GetIdentityResponse(identity=identity), None
 
     @staticmethod
@@ -158,7 +158,7 @@ class P2PGetNetwork(P2PProtocol):
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        network: List[NodeInfo] = self._node.db.get_network()
+        network: List[NodeInfo] = await self._node.db.get_network()
         return GetNetworkResponse(network=network), None
 
     @staticmethod
@@ -185,7 +185,7 @@ class P2PJoinNetwork(P2PProtocol):
     async def perform(self, boot_node: NodeInfo) -> NodeInfo:
         # send an update to the boot node, then proceed to send updates to all peers that discovered along the way
         remaining: List[NodeInfo] = [boot_node]
-        processed: Dict[str, NodeInfo] = {self._node.identity.id: self._node.db.get_node()}
+        processed: Dict[str, NodeInfo] = {self._node.identity.id: await self._node.db.get_node()}
         while len(remaining) > 0:
             # have we already processed that peer?
             peer: NodeInfo = remaining.pop(0)
@@ -206,8 +206,8 @@ class P2PJoinNetwork(P2PProtocol):
 
                 # create update message with a snapshot of the network, excluding nodes we already know about
                 message = PeerUpdateMessage(
-                    origin=self._node.db.get_node(),
-                    snapshot=self._node.db.get_snapshot(exclude=list(processed.keys())),
+                    origin=await self._node.db.get_node(),
+                    snapshot=await self._node.db.get_snapshot(exclude=list(processed.keys())),
                 )
 
                 # send update and wait for reply
@@ -217,13 +217,13 @@ class P2PJoinNetwork(P2PProtocol):
                 reply: PeerUpdateMessage = reply  # casing for PyCharm
 
                 # update the db information about the originator
-                self._node.db.update_identity(reply.origin.identity)
-                self._node.db.update_network(reply.origin)
+                await self._node.db.update_identity(reply.origin.identity)
+                await self._node.db.update_network(reply.origin)
 
                 # process the snapshot identities (if any)
                 if reply.snapshot.update_identity:
                     for identity in reply.snapshot.update_identity:
-                        self._node.db.update_identity(identity)
+                        await self._node.db.update_identity(identity)
 
                 # process the snapshot nodes (if any)
                 if reply.snapshot.update_network:
@@ -233,16 +233,16 @@ class P2PJoinNetwork(P2PProtocol):
                 # process the namespaces (if any)
                 if reply.snapshot.update_namespace:
                     for ns_info in reply.snapshot.update_namespace:
-                        self._node.db.handle_namespace_snapshot(ns_info)
+                        await self._node.db.handle_namespace_snapshot(ns_info)
 
                 logger.debug(f"Adding peer at {peer.p2p_address} to db: {peer.identity.name} | {peer.identity.id}")
 
             except PeerUnavailableError:
                 logger.debug(f"Peer at {peer.p2p_address} unavailable -> Removing from NodeDB.")
-                self._node.db.remove_node_by_address(peer.p2p_address)
+                await self._node.db.remove_node_by_address(peer.p2p_address)
 
             # get all nodes in the network and add any nodes that we may not have been aware of
-            for node in self._node.db.get_network():
+            for node in await self._node.db.get_network():
                 if node.identity.id not in processed:
                     remaining.append(node)
 
@@ -252,27 +252,27 @@ class P2PJoinNetwork(P2PProtocol):
             self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # update the db information about the originator
-        self._node.db.update_identity(request.origin.identity)
-        self._node.db.update_network(request.origin)
+        await self._node.db.update_identity(request.origin.identity)
+        await self._node.db.update_network(request.origin)
 
         # process the snapshot identities (if any)
         if request.snapshot.update_identity:
             for identity in request.snapshot.update_identity:
-                self._node.db.update_identity(identity)
+                await self._node.db.update_identity(identity)
 
         # process the snapshot nodes (if any)
         if request.snapshot.update_network:
             for node in request.snapshot.update_network:
-                self._node.db.update_network(node)
+                await self._node.db.update_network(node)
 
         # process the namespaces (if any)
         if request.snapshot.update_namespace:
             for ns_info in request.snapshot.update_namespace:
-                self._node.db.handle_namespace_snapshot(ns_info)
+                await self._node.db.handle_namespace_snapshot(ns_info)
 
         return PeerUpdateMessage(
-            origin=self._node.db.get_node(),
-            snapshot=self._node.db.get_snapshot(exclude=[self._node.identity.id, request.origin.identity.id])
+            origin=await self._node.db.get_node(),
+            snapshot=await self._node.db.get_snapshot(exclude=[self._node.identity.id, request.origin.identity.id])
         ), None
 
     @staticmethod
@@ -296,8 +296,8 @@ class P2PLeaveNetwork(P2PProtocol):
         self._node = node
 
     async def perform(self, blocking: bool = False) -> None:
-        message = PeerLeaveMessage(origin=self._node.db.get_node())
-        for peer in self._node.db.get_network():
+        message = PeerLeaveMessage(origin=await self._node.db.get_node())
+        for peer in await self._node.db.get_network():
             if peer.identity.id != message.origin.identity.id:
                 peer_address = P2PAddress(
                     address=peer.p2p_address,
@@ -314,8 +314,8 @@ class P2PLeaveNetwork(P2PProtocol):
     async def handle(
             self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        self._node.db.update_identity(request.origin.identity)
-        self._node.db.remove_node_by_id(request.origin.identity)
+        await self._node.db.update_identity(request.origin.identity)
+        await self._node.db.remove_node_by_id(request.origin.identity)
         return None, None
 
     @staticmethod
@@ -368,7 +368,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
-            self._node.db.handle_namespace_update(request.namespace, request.budget)
+            await self._node.db.handle_namespace_update(request.namespace, request.budget)
             return None, None
 
         except Exception as e:
@@ -436,7 +436,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
-            accepted: bool = self._node.db.handle_namespace_reservation(
+            accepted: bool = await self._node.db.handle_namespace_reservation(
                 request.namespace, request.job_id, request.resources
             )
             return ResourceReservationReply(accepted=accepted), None
@@ -495,7 +495,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
-            self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
+            await self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None

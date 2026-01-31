@@ -9,6 +9,7 @@ import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
 from simaas.namespace.default import DefaultNamespace
+from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
@@ -257,9 +258,10 @@ class StatusHandler(threading.Thread):
                 # noinspection PyTypeChecker
                 json.dump(self._job_status.model_dump(), f, indent=2)
 
-            # push the job status to the custodian
-            asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
-            self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
+            # push the job status to the custodian (unless cancelled - custodian handles that)
+            if self._job_status.state != JobStatus.State.CANCELLED:
+                asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
+                self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
 
         except SaaSRuntimeException as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
@@ -487,7 +489,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
         self._p2p.add(self._barrier)
-        self._p2p.start_service(encrypt=True)
+        self._p2p.start_service_background(encrypt=True)
         self._logger.info("P2P service interface is up.")
 
         # determine the full P2P address of the custodian
@@ -590,6 +592,9 @@ class JobRunner(CLICommand, ProgressListener):
         # wait for the barrier to be released
         self._logger.info("[barrier] waiting for barrier release 'initial_barrier'...")
         result: dict = self._barrier.wait_for_release('initial_barrier')
+        if result is None:
+            self._logger.info("[barrier] barrier wait interrupted.")
+            return
         self._logger.info("[barrier] barrier release 'initial_barrier' received.")
 
         # update batch status and extract it
@@ -890,7 +895,7 @@ class JobRunner(CLICommand, ProgressListener):
             namespace = DefaultNamespace(
                 self._job.task.namespace, self._custodian, self.custodian_address.address, self._keystore
             )
-            self._proc.run(self._wd_path, self._job, self, namespace, self._logger)
+            self._proc.run(self._wd_path, self._job, self, SyncNamespace(namespace), self._logger)
 
             # was the processor interrupted?
             if self._interrupted:

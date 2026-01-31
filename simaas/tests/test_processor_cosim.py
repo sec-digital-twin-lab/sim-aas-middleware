@@ -116,7 +116,7 @@ def test_cosim_room_thermostat_local(dummy_namespace):
         )
 
         # Manually register the batch and job status with the dummy RTI
-        rti: DummyNamespace.DummyRTI = dummy_namespace.rti
+        rti: DummyNamespace.DummyRTI = dummy_namespace.internal_rti
         rti.put_batch_status(BatchStatus(
             batch_id=batch_id,
             user_iid=user.id,

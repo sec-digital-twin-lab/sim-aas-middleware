@@ -74,7 +74,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
             # based on job id, update the job with runner information and retrieve the job
-            job: Job = self._node.rti.update_job(
+            job: Job = await self._node.rti.update_job(
                 request.job_id, request.runner_identity, request.runner_address
             )
 
@@ -85,7 +85,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
             # determine the batch status (if this job is part of one)
             batch_status: Optional[BatchStatus] = \
-                self._node.rti.get_batch_status(job.batch_id) if job.batch_id else None
+                await self._node.rti.get_batch_status(job.batch_id) if job.batch_id else None
 
             return RunnerHandshakeResponse(
                 job=job, custodian_identity=self._node.identity, secrets=secrets, join_batch=batch_status
@@ -184,7 +184,7 @@ class P2PPushJobStatus(P2PProtocol):
     async def handle(
             self, request: JobStatusRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        self._rti.update_job_status(request.job_id, request.job_status)
+        await self._rti.update_job_status(request.job_id, request.job_status)
         return None, None
 
     @staticmethod

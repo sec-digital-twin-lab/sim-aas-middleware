@@ -327,7 +327,7 @@ async def execute_job(
     timeout = 60  # seconds
     elapsed = 0
     while elapsed < timeout:
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = await rti.get_job_status(job.id)
 
         if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             return status

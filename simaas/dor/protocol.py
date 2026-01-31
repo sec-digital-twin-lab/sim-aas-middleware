@@ -53,7 +53,7 @@ class P2PLookupDataObject(P2PProtocol):
         # search for the requested data objects and see if we have any of them
         records: Dict[str, DataObject] = {}
         for obj_id in request.obj_ids:
-            meta: Optional[DataObject] = self._node.dor.get_meta(obj_id)
+            meta: Optional[DataObject] = await self._node.dor.get_meta(obj_id)
             if meta:
                 records[obj_id] = meta
 
@@ -118,7 +118,7 @@ class P2PFetchDataObject(P2PProtocol):
             self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # check if we have that data object
-        meta = self._node.dor.get_meta(request.obj_id)
+        meta = await self._node.dor.get_meta(request.obj_id)
         if not meta:
             return FetchResponse(
                 successful=False, meta=None, details={
@@ -130,7 +130,7 @@ class P2PFetchDataObject(P2PProtocol):
         # check if the data object access is restricted and (if so) if the user has the required permission
         if meta.access_restricted:
             # get the identity of the user
-            user = self._node.db.get_identity(request.user_iid)
+            user = await self._node.db.get_identity(request.user_iid)
             if user is None:
                 return FetchResponse(
                     successful=False, meta=None, details={
@@ -268,7 +268,7 @@ class P2PPushDataObject(P2PProtocol):
             ), None
 
         # add the data object
-        meta = self._node.dor.add(
+        meta = await self._node.dor.add(
             attachment_path, request.data_type, request.data_format, request.owner_iid,
             creators_iid=request.creators_iid, access_restricted=request.access_restricted,
             content_encrypted=request.content_encrypted, license=request.license,

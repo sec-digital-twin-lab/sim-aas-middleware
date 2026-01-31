@@ -32,6 +32,8 @@ def session_node(session_keystore):
 
     Creates a two-node network for testing network behavior.
     """
+    import asyncio
+
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
 
@@ -41,7 +43,7 @@ def session_node(session_keystore):
         p2p_address0 = PortMaster.generate_p2p_address(host=local_ip)
         _node0 = DefaultNode.create(
             keystore=session_keystore, storage_path=datastore0,
-            p2p_address=p2p_address0, rest_address=rest_address0, boot_node_address=rest_address0,
+            p2p_address=p2p_address0, rest_address=rest_address0,
             enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=DockerRTIService,
             retain_job_history=False, strict_deployment=False
         )
@@ -55,18 +57,21 @@ def session_node(session_keystore):
         p2p_address1 = PortMaster.generate_p2p_address(host=local_ip)
         _node1 = DefaultNode.create(
             keystore=keystore1, storage_path=datastore1,
-            p2p_address=p2p_address1, rest_address=rest_address1, boot_node_address=rest_address0,
+            p2p_address=p2p_address1, rest_address=rest_address1,
             enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None,
             retain_job_history=False, strict_deployment=False
         )
 
-        network = _node0.db.get_network()
+        # join the network
+        asyncio.run(_node1.join_network(rest_address0))
+
+        network = asyncio.run(_node0.db.get_network())
         assert len(network) == 2
 
         yield _node0
 
-        _node0.shutdown(leave_network=False)
-        _node1.shutdown(leave_network=False)
+        _node0.shutdown()
+        _node1.shutdown()
 
 
 @pytest.fixture(scope="session")

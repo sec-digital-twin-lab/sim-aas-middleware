@@ -40,68 +40,68 @@ class NodeDBService(abc.ABC):
         ]
 
     @abc.abstractmethod
-    def get_node(self) -> NodeInfo:
+    async def get_node(self) -> NodeInfo:
         """
         Retrieves information about the node.
         """
 
     @abc.abstractmethod
-    def get_network(self) -> List[NodeInfo]:
+    async def get_network(self) -> List[NodeInfo]:
         """
         Retrieves information about all peers known to the node.
         """
 
     @abc.abstractmethod
-    def update_network(self, node: NodeInfo) -> None:
+    async def update_network(self, node: NodeInfo) -> None:
         """
         Adds information about a node to the db. If there is already information about this node in the database, the
         db is updated accordingly.
         """
 
     @abc.abstractmethod
-    def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
+    async def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
         """
         Retrieves the identity given its id (if the node db knows about it).
         """
 
     @abc.abstractmethod
-    def get_identities(self) -> List[Identity]:
+    async def get_identities(self) -> List[Identity]:
         """
         Retrieves a list of all identities known to the node.
         """
 
     @abc.abstractmethod
-    def update_identity(self, identity: Identity) -> Identity:
+    async def update_identity(self, identity: Identity) -> Identity:
         """
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
         """
 
     @abc.abstractmethod
-    def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
+    async def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
         """
         Returns information of a specific namespace.
         """
 
     @abc.abstractmethod
-    def get_namespaces(self) -> List[NamespaceInfo]:
+    async def get_namespaces(self) -> List[NamespaceInfo]:
         """
         Returns a list of all namespaces.
         """
 
     @abc.abstractmethod
-    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    async def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
 
     @abc.abstractmethod
-    def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
+    async def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         """
         Attempts to reserve namespace resources for a job.
         """
 
     @abc.abstractmethod
-    def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
+    async def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
         """
         Cancels a namespace resource reservation (if it exists).
         """

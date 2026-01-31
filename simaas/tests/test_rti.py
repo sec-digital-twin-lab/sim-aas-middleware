@@ -1,5 +1,6 @@
 """RTI (Runtime Infrastructure) service integration tests."""
 
+import asyncio
 import json
 import logging
 import os
@@ -457,9 +458,9 @@ def test_job_provenance_tracking(rti_context: RTIContext, test_context):
         )
 
         # wait until the job is done
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = asyncio.run(rti.get_job_status(job.id))
         while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = asyncio.run(rti.get_job_status(job.id))
             time.sleep(0.5)
 
         obj_c = status.output['c']
@@ -518,9 +519,9 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
 
             # wait until the job is done
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = asyncio.run(rti.get_job_status(job.id))
             while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                status: JobStatus = rti.get_job_status(job.id)
+                status: JobStatus = asyncio.run(rti.get_job_status(job.id))
                 time.sleep(1.0)
 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} finished: {status.state}")
@@ -801,7 +802,7 @@ def test_namespace_resource_limits(rti_context: RTIContext):
 
     # test with namespace that has not enough resources for a single task
     namespace0 = 'namespace0'
-    rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2))
+    asyncio.run(rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2)))
 
     # get the tasks for namespace0 and try to submit jobs to namespace0 -> should fail
     tasks = get_cosim_tasks(
@@ -816,9 +817,9 @@ def test_namespace_resource_limits(rti_context: RTIContext):
     namespace1 = 'namespace1'
     namespace2 = 'namespace2'
     namespace3 = 'namespace3'
-    rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2))
+    asyncio.run(rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem)))
+    asyncio.run(rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem)))
+    asyncio.run(rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2)))
 
     # get the tasks for namespace1 and try to submit jobs to namespace1 -> should fail
     tasks = get_cosim_tasks(
