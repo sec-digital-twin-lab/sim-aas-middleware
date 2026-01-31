@@ -256,9 +256,9 @@ class DefaultNodeDBService(NodeDBService):
                 record.name = identity.name
                 record.email = identity.email
                 record.nonce = identity.nonce
-                record.s_key = identity.s_public_key
-                record.e_key = identity.e_public_key
-                record.c_key = identity.c_public_key
+                record.s_public_key = identity.s_public_key
+                record.e_public_key = identity.e_public_key
+                record.c_public_key = identity.c_public_key
                 record.signature = identity.signature
                 record.last_seen = get_timestamp_now()
                 session.commit()
