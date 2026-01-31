@@ -8,6 +8,7 @@ from simaas.rti.base import RTIServiceBase
 from simaas.rti.exceptions import ProcessorNotDeployedError, ProcessorBusyError
 from simaas.dor.schemas import DataObject
 from simaas.rest.exceptions import AuthorisationFailedError
+from simaas.core.exceptions import SaaSRuntimeException
 from simaas.dor.exceptions import DataObjectNotFoundError
 from simaas.dor.api import DORRESTService
 from simaas.namespace.protocol import P2PNamespaceServiceCall
@@ -109,8 +110,10 @@ class Node(abc.ABC):
 
         if wait_until_ready:
             logger.info("wait until node is ready...")
-            while not self.p2p.is_ready() or (self.rest and not self.rest.is_ready()):
-                await asyncio.sleep(0.5)
+            if not await self.p2p.wait_until_ready(timeout=10.0):
+                raise SaaSRuntimeException("P2P service failed to become ready")
+            if self.rest and not await self.rest.wait_until_ready(timeout=10.0):
+                raise SaaSRuntimeException("REST service failed to become ready")
             logger.info("node is ready.")
 
         # update our node db

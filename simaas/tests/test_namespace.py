@@ -6,10 +6,11 @@ import logging
 import os
 import random
 import tempfile
-import time
 from typing import Optional, List
 
 import pytest
+
+from simaas.core.async_helpers import run_coro_safely
 
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
@@ -55,7 +56,7 @@ def p2p_server(test_context) -> Node:
 def known_user(p2p_server) -> Keystore:
     """Create a keystore for a user known to the p2p_server."""
     keystore = Keystore.new('unknown')
-    asyncio.run(p2p_server.db.update_identity(keystore.identity))
+    run_coro_safely(p2p_server.db.update_identity(keystore.identity))
     return keystore
 
 

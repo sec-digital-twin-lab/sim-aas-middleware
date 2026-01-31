@@ -88,6 +88,8 @@ class RTIServiceBase(RTIRESTService):
         # a map of active cancellation workers (async tasks)
         self._cancellation_workers: Dict[str, Optional[asyncio.Task]] = {}
         self._cleanup_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._deploy_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._undeploy_workers: Dict[str, Optional[asyncio.Task]] = {}
 
     def on_cancellation_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
@@ -96,6 +98,14 @@ class RTIServiceBase(RTIRESTService):
     def on_cleanup_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
         self._cleanup_workers[job_id] = None
+
+    def on_deploy_worker_done(self, proc_id: str) -> None:
+        # we keep the dict entry but remove the task object
+        self._deploy_workers[proc_id] = None
+
+    def on_undeploy_worker_done(self, proc_id: str) -> None:
+        # we keep the dict entry but remove the task object
+        self._undeploy_workers[proc_id] = None
 
     def mark_job_cancelled(self, job_id: str) -> None:
         """Mark a job as cancelled in the database. Called by perform_cancel implementations
@@ -127,7 +137,12 @@ class RTIServiceBase(RTIRESTService):
                 pass  # Non-critical, just for local file consistency
 
     def has_active_workers(self) -> bool:
-        all_workers = list(self._cancellation_workers.values()) + list(self._cleanup_workers.values())
+        all_workers = (
+            list(self._cancellation_workers.values()) +
+            list(self._cleanup_workers.values()) +
+            list(self._deploy_workers.values()) +
+            list(self._undeploy_workers.values())
+        )
         return any(
             worker is not None for worker in all_workers
         )
@@ -264,8 +279,11 @@ class RTIServiceBase(RTIRESTService):
         # update or create db record - no lock needed, DB handles conflicts
         await asyncio.to_thread(self.update_proc_db, proc)
 
-        # start the deployment worker as async task
-        asyncio.create_task(self.perform_deploy(proc))
+        # start the deployment worker as async task with tracking
+        task = asyncio.create_task(self.perform_deploy(proc))
+        task.add_done_callback(lambda _: self.on_deploy_worker_done(proc.id))
+        with self._mutex:
+            self._deploy_workers[proc.id] = task
 
         return proc
 
@@ -312,9 +330,12 @@ class RTIServiceBase(RTIRESTService):
             elif proc.state == Processor.State.BUSY_UNDEPLOY:
                 logger.warning(f"[undeploy:{shorten_id(proc_id)}] already undeploying.")
 
-        # start the worker as async task - outside any lock
+        # start the worker as async task with tracking - outside any lock
         if start_undeploy:
-            asyncio.create_task(self.perform_undeploy(proc))
+            task = asyncio.create_task(self.perform_undeploy(proc))
+            task.add_done_callback(lambda _: self.on_undeploy_worker_done(proc.id))
+            with self._mutex:
+                self._undeploy_workers[proc.id] = task
 
         return proc
 

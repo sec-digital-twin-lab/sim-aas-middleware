@@ -9,6 +9,8 @@ import time
 
 from typing import List, Dict, Optional
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -159,17 +161,17 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         node0 = DefaultNode(
             keystores[0], os.path.join(tempdir, 'node0'), enable_db=True,
             dor_plugin_class=None, rti_plugin_class=None)
-        asyncio.run(node0.startup(p2p_address, rest_address=None))
+        run_coro_safely(node0.startup(p2p_address, rest_address=None))
         time.sleep(1)
 
         # at this point node0 should only know about itself
-        network: List[NodeInfo] = asyncio.run(node0.db.get_network())
+        network: List[NodeInfo] = run_coro_safely(node0.db.get_network())
         network: List[str] = [item.identity.id for item in network]
         assert len(network) == 1
         assert node0.identity.id in network
 
         # perform the join
-        asyncio.run(node0.join_network(module_node.rest.address()))
+        run_coro_safely(node0.join_network(module_node.rest.address()))
         time.sleep(1)
 
         # the module node should know of n+1 nodes now
@@ -196,11 +198,11 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
             keystores[1], os.path.join(tempdir, 'node1'), enable_db=True,
             dor_plugin_class=None, rti_plugin_class=None
         )
-        asyncio.run(node1.startup(p2p_address, rest_address=None))
+        run_coro_safely(node1.startup(p2p_address, rest_address=None))
         time.sleep(1)
 
         # at this point node1 should only know about itself
-        network: List[NodeInfo] = asyncio.run(node1.db.get_network())
+        network: List[NodeInfo] = run_coro_safely(node1.db.get_network())
         network: List[str] = [item.identity.id for item in network]
         assert len(network) == 1
         assert module_node.identity.id not in network
@@ -208,7 +210,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         assert node1.identity.id in network
 
         # perform the join
-        asyncio.run(node1.join_network(module_node.rest.address()))
+        run_coro_safely(node1.join_network(module_node.rest.address()))
         time.sleep(1)
 
         # the module node should now still only know of n+1 nodes now (the first node should be replaced)
@@ -219,7 +221,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         assert node0.identity.id not in network
         assert node1.identity.id in network
 
-        asyncio.run(node1.leave_network())
+        run_coro_safely(node1.leave_network())
         node1.shutdown()
         time.sleep(1)
 
@@ -371,7 +373,7 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
     last_seen = identity.last_seen
 
     # update the identity
-    asyncio.run(module_node.update_identity(name='new name'))
+    run_coro_safely(module_node.update_identity(name='new name'))
 
     # get the identity last seen
     identity: Identity = module_nodedb_proxy.get_identity(module_node.identity.id)

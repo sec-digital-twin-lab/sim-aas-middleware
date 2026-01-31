@@ -1,4 +1,7 @@
+import asyncio
 import socket
+import threading
+import time
 import traceback
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -143,6 +146,7 @@ class RESTService:
         self._app = RESTApp()
         self._thread = None
         self._bind_all_address = bind_all_address
+        self._ready_event = threading.Event()
 
     def is_ready(self) -> bool:
         try:
@@ -180,6 +184,13 @@ class RESTService:
 
             self._thread.start()
 
+            # spawn a checker thread to set ready event when service is up
+            def _check_ready():
+                while not self.is_ready():
+                    time.sleep(0.1)
+                self._ready_event.set()
+            Thread(target=_check_ready, daemon=True).start()
+
         else:
             logger.warning("REST service asked to start up but thread already exists! Ignoring...")
 
@@ -189,5 +200,18 @@ class RESTService:
 
         else:
             logger.info("REST service shutting down...")
+            self._ready_event.clear()
             # there is no way to terminate a thread...
             # self._thread.terminate()
+
+    async def wait_until_ready(self, timeout: float = 10.0) -> bool:
+        """Wait until the REST service is ready.
+
+        Returns True if service is ready, False if timeout occurred.
+        """
+        start = asyncio.get_event_loop().time()
+        while not self._ready_event.is_set():
+            if asyncio.get_event_loop().time() - start > timeout:
+                return False
+            await asyncio.sleep(0.1)
+        return True

@@ -12,6 +12,8 @@ import tempfile
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
@@ -32,8 +34,6 @@ def session_node(session_keystore):
 
     Creates a two-node network for testing network behavior.
     """
-    import asyncio
-
     with tempfile.TemporaryDirectory() as tempdir:
         local_ip = determine_local_ip()
 
@@ -63,9 +63,9 @@ def session_node(session_keystore):
         )
 
         # join the network
-        asyncio.run(_node1.join_network(rest_address0))
+        run_coro_safely(_node1.join_network(rest_address0))
 
-        network = asyncio.run(_node0.db.get_network())
+        network = run_coro_safely(_node0.db.get_network())
         assert len(network) == 2
 
         yield _node0

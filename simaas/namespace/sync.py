@@ -18,12 +18,20 @@ def _get_event_loop():
 
 
 def _run_async(coro):
-    """Run coroutine in thread-local event loop."""
+    """Run coroutine in thread-local event loop.
+
+    WARNING: Cannot be called from within an async context (running event loop).
+    Doing so raises RuntimeError. Use `await` directly in async code.
+
+    Intended for processor threads that need sync access to async APIs.
+    """
     return _get_event_loop().run_until_complete(coro)
-from simaas.dor.schemas import DataObject, DataObjectProvenance, DORStatistics, DataObjectRecipe, TagValueType
-from simaas.namespace.api import Namespace
-from simaas.rti.api import RTIInterface
-from simaas.rti.schemas import JobStatus, Task, Job, Processor, BatchStatus
+
+
+from simaas.dor.schemas import DataObject, DataObjectProvenance, DORStatistics, DataObjectRecipe, TagValueType  # noqa: E402
+from simaas.namespace.api import Namespace  # noqa: E402
+from simaas.rti.api import RTIInterface  # noqa: E402
+from simaas.rti.schemas import JobStatus, Task, Job, Processor, BatchStatus  # noqa: E402
 
 
 class SyncNamespaceDOR:

@@ -31,6 +31,7 @@ class P2PService:
         self._socket: Optional[Socket] = None
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
+        self._ready_event = threading.Event()
         self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
         self._thread: Optional[threading.Thread] = None
 
@@ -69,6 +70,7 @@ class P2PService:
                     self._socket.curve_publickey = self._keystore.curve_public_key()
                     self._socket.curve_server = True
                 self._socket.bind(self._address)
+                self._ready_event.set()
                 logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
             except Exception as e:
                 raise SaaSRuntimeException("P2P server socket cannot be created", details={'exception': e})
@@ -94,13 +96,11 @@ class P2PService:
         self._bg_error = None
         self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self._thread.start()
-        # Wait for socket to be ready or error (outside mutex to avoid deadlock)
-        while not self.is_ready() and self._bg_error is None:
-            import time
-            time.sleep(0.05)
-        # Re-raise any error from the background thread
-        if self._bg_error is not None:
-            raise self._bg_error
+        # Wait for socket to be ready or error using event (outside mutex to avoid deadlock)
+        if not self._ready_event.wait(timeout=10.0):
+            if self._bg_error is not None:
+                raise self._bg_error
+            raise SaaSRuntimeException("P2P service failed to start within timeout")
 
     def _run_event_loop(self) -> None:
         loop = asyncio.new_event_loop()
@@ -119,9 +119,22 @@ class P2PService:
         """Signals the server to stop accepting connections."""
         logger.info(f"[{self._keystore.identity.name}] initiating shutdown of P2P service.")
         self._stop_event.set()
+        self._ready_event.clear()
         # Wait for the thread to finish (with timeout to avoid hanging)
         if self._thread is not None and self._thread.is_alive():
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=5.0)
+
+    async def wait_until_ready(self, timeout: float = 10.0) -> bool:
+        """Wait until the P2P service is ready.
+
+        Returns True if service is ready, False if timeout occurred.
+        """
+        start = asyncio.get_event_loop().time()
+        while not self._ready_event.is_set():
+            if asyncio.get_event_loop().time() - start > timeout:
+                return False
+            await asyncio.sleep(0.1)
+        return True
 
     async def _handle_incoming_connections(self):
         logger.info(f"[{self._keystore.identity.name}] listening to incoming P2P connections...")

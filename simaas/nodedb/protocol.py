@@ -309,7 +309,14 @@ class P2PLeaveNetwork(P2PProtocol):
                 if blocking:
                     await p2p_request(peer_address, self.NAME, message)
                 else:
-                    asyncio.create_task(p2p_request(peer_address, self.NAME, message))
+                    def _on_leave_done(task: asyncio.Task):
+                        try:
+                            task.result()
+                        except Exception as e:
+                            logger.warning(f"Failed to notify peer of leave: {e}")
+
+                    task = asyncio.create_task(p2p_request(peer_address, self.NAME, message))
+                    task.add_done_callback(_on_leave_done)
 
     async def handle(
             self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import tempfile
@@ -6,6 +5,8 @@ import time
 from typing import List
 
 import pytest
+
+from simaas.core.async_helpers import run_coro_safely
 
 from simaas.cli.cmd_image import PDIBuildLocal, PDIImport
 
@@ -139,7 +140,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    asyncio.run(session_node.db.update_identity(keystore.identity))
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -179,7 +180,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = asyncio.run(session_node.dor.get_meta(pdi.obj_id))
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -337,7 +338,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert True
 
     # ensure the node knows about this identity
-    asyncio.run(session_node.db.update_identity(keystore.identity))
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -377,7 +378,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = asyncio.run(session_node.dor.get_meta(pdi.obj_id))
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -526,7 +527,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    asyncio.run(session_node.db.update_identity(keystore.identity))
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -566,7 +567,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = asyncio.run(session_node.dor.get_meta(pdi.obj_id))
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
@@ -787,7 +788,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    asyncio.run(session_node.db.update_identity(keystore.identity))
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -827,7 +828,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = asyncio.run(session_node.dor.get_meta(pdi.obj_id))
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'

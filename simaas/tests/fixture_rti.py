@@ -12,6 +12,8 @@ from typing import Type
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.cli.cmd_image import build_processor_image
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
@@ -449,8 +451,7 @@ def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
             )
 
             # join the network using the session_node's REST address
-            import asyncio
-            asyncio.run(_node.join_network(session_node.rest.address()))
+            run_coro_safely(_node.join_network(session_node.rest.address()))
 
             yield _node
 
