@@ -241,7 +241,6 @@ async def test_runner_wrong_format(temp_dir, session_node):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Direct P2P interrupt test conflicts with RTI cancel flow optimization - see SPECIFICATION.md")
 async def test_cli_runner_cancelled(temp_dir, session_node):
     """Test job runner cancellation handling."""
     a: int = 5
