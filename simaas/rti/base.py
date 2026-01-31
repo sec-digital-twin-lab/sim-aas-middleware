@@ -278,7 +278,7 @@ class RTIServiceBase(RTIRESTService):
                     raise RTIException("Cannot undeploy a processor that is currently deploying. Try again later.")
 
                 # is the state busy going down? -> do nothing
-                elif proc.state == Processor.State.BUSY_DEPLOY:
+                elif proc.state == Processor.State.BUSY_UNDEPLOY:
                     logger.warning(f"[undeploy:{shorten_id(proc_id)}] already undeploying.")
 
                 return proc
