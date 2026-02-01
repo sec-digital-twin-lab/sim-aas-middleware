@@ -303,9 +303,13 @@ class RTIProcDeploy(CLICommand):
                     pdi: DataObject = dor.get_meta(item.obj_id)
                     proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
 
+                    # Handle optional commit_id (may be None for local builds)
+                    commit_id = pdi.tags.get('commit_id')
+                    commit_label = commit_id[:6] if commit_id else 'local'
+
                     choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name}:{pdi.tags['content_hash'][:6]} "
                                                       f"<{shorten_id(pdi.obj_id)}> "
-                                                      f"{pdi.tags['repository']}:{pdi.tags['commit_id'][:6]}..."))
+                                                      f"{pdi.tags['repository']}:{commit_label}..."))
                     custodian[item.obj_id] = node
 
             except Exception:
