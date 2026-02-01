@@ -1,6 +1,7 @@
 """Unit tests for core simaas functionality."""
 import logging
 import os
+import socket
 
 import pytest
 
@@ -9,11 +10,12 @@ from simaas.core.schemas import GithubCredentials, SSHCredentials
 from simaas.core.keystore import Keystore
 from simaas.core.eckeypair import ECKeyPair
 from simaas.core.rsakeypair import RSAKeyPair
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise, remove_all_handlers
+from simaas.helpers import find_available_port
 
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 @pytest.fixture()
@@ -32,7 +34,7 @@ def rsa_keypair():
 def logging():
     """Fixture to clean up logging handlers after test."""
     yield
-    Logging.remove_all_handlers()
+    remove_all_handlers()
 
 
 def test_ec_serialisation(temp_directory, ec_keypair):
@@ -201,7 +203,7 @@ def test_update(temp_directory):
 
     # perform update
     identity = keystore.update_profile(name=name, email=email)
-    logger.info(f"signature={identity.signature}")
+    log.info(f"signature={identity.signature}")
     assert(identity.signature is not None)
     assert(keystore.identity.name == name)
     assert(keystore.identity.email == email)
@@ -281,11 +283,11 @@ def test_add_credentials(temp_directory):
 
 def test_defaults(logging):
     """Test default logging configuration."""
-    Logging.initialise()
-    logger = Logging.get('test')
+    initialise()
+    test_log = get_logger('test', 'test')
 
-    logger.info("you can see me!")
-    logger.debug("you should not be able to see me!")
+    test_log.info("you can see me!")
+    test_log.debug("you should not be able to see me!")
 
 
 def test_log_to_separate_file(logging, temp_directory):
@@ -293,10 +295,10 @@ def test_log_to_separate_file(logging, temp_directory):
     default_log_path = os.path.join(temp_directory, 'log.default')
     custom_log_path = os.path.join(temp_directory, 'log.custom')
 
-    Logging.initialise(log_path=default_log_path)
+    initialise(log_path=default_log_path)
 
-    default = Logging.get('default_logger')
-    custom = Logging.get('custom_logger', custom_log_path=custom_log_path)
+    default = get_logger('default_logger', 'test')
+    custom = get_logger('custom_logger', 'test', custom_log_path=custom_log_path)
 
     default.info("this should go into the default log file")
     custom.info("this should go into the default log file AND the custom log file")
@@ -324,24 +326,24 @@ def test_rollover(logging, temp_directory):
     log_path1 = os.path.join(temp_directory, 'log.1')
     log_path2 = os.path.join(temp_directory, 'log.2')
 
-    Logging.initialise(log_path=log_path0, max_bytes=80)
+    initialise(log_path=log_path0, max_bytes=80)
 
-    logger = Logging.get('logger')
+    rollover_log = get_logger('rollover_logger', 'test')
     assert(os.path.isfile(log_path0))
     assert(not os.path.isfile(log_path1))
     assert(not os.path.isfile(log_path2))
 
-    logger.info('msg')
+    rollover_log.info('msg')
     assert(os.path.isfile(log_path0))
     assert(not os.path.isfile(log_path1))
     assert(not os.path.isfile(log_path2))
 
-    logger.info('msg')
+    rollover_log.info('msg')
     assert(os.path.isfile(log_path0))
     assert(os.path.isfile(log_path1))
     assert(not os.path.isfile(log_path2))
 
-    logger.info('msg')
+    rollover_log.info('msg')
     assert(os.path.isfile(log_path0))
     assert(os.path.isfile(log_path1))
     assert(os.path.isfile(log_path2))
@@ -375,14 +377,31 @@ def test_logging_aws_cloudwatch_integration(logging):
     """Test AWS CloudWatch logging integration."""
     # Before running this test, ensure that [default] in credentials file is available in .aws directory
     # Initialize logging with AWS CloudWatch enabled
-    Logging.initialise(log_to_aws=True)
+    initialise(log_to_aws=True)
 
     # Get a logger instance
-    logger = Logging.get('test_logger')
+    aws_log = get_logger('test_logger', 'test')
 
     # Log a message
-    logger.info("This message should be logged to AWS CloudWatch")
+    aws_log.info("This message should be logged to AWS CloudWatch")
 
     # Assert that the message was logged to CloudWatch
     # You can check the CloudWatch logs in the AWS Management Console
     # to verify that the message was indeed logged.
+
+
+def test_find_open_port():
+    """Test find_available_port utility function."""
+    # block port 5995
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('localhost', 5995))
+    server_socket.listen(1)
+
+    try:
+        port = find_available_port(host='localhost', port_range=(5990, 5994))
+        assert port == 5990
+
+        port = find_available_port(host='localhost', port_range=(5995, 5999))
+        assert port == 5996
+    finally:
+        server_socket.close()

@@ -15,7 +15,7 @@ import pytest
 from examples.cosim.room.processor import Parameters as RParameters, RoomProcessor, Result as RResult
 from examples.cosim.thermostat.processor import Parameters as TParameters, ThermostatProcessor, Result as TResult
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.schemas import JobStatus, Task, BatchStatus, Job
 from simaas.tests.fixture_core import BASE_DIR
@@ -24,8 +24,8 @@ from simaas.tests.helper_waiters import wait_for_job_completion
 from simaas.tests.helper_factories import TaskBuilder
 from simaas.tests.helper_assertions import assert_job_successful
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 @pytest.mark.integration
@@ -139,12 +139,12 @@ def test_cosim_room_thermostat_local(dummy_namespace):
         # Run both processors in parallel threads
         thread0 = threading.Thread(
             target=proc0.run,
-            args=(wd_path0, job0, DummyProgressListener(wd_path0, status0, dummy_namespace.dor), dummy_namespace, None)
+            args=(wd_path0, job0, DummyProgressListener(wd_path0, status0, dummy_namespace.dor), dummy_namespace, logging.getLogger('test.room'))
         )
 
         thread1 = threading.Thread(
             target=proc1.run,
-            args=(wd_path1, job1, DummyProgressListener(wd_path1, status1, dummy_namespace.dor), dummy_namespace, None)
+            args=(wd_path1, job1, DummyProgressListener(wd_path1, status1, dummy_namespace.dor), dummy_namespace, logging.getLogger('test.thermostat'))
         )
 
         thread0.start()

@@ -12,7 +12,7 @@ import pytest
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.core.errors import NetworkError
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
@@ -28,8 +28,8 @@ from simaas.p2p.base import P2PAddress
 from simaas.core.errors import NetworkError as PeerUnavailableError  # Alias for backwards compat in tests
 from simaas.p2p.protocol import P2PLatency, P2PThroughput
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================

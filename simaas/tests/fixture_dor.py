@@ -15,7 +15,7 @@ import pytest
 from simaas.core.async_helpers import run_coro_safely
 
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_local_ip, PortMaster
 from simaas.node.default import DefaultNode
@@ -25,7 +25,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.plugins.builtins.rti_docker import DockerRTIService
 
-logger = Logging.get('tests.fixtures.dor')
+log = get_logger('tests.fixtures.dor', 'test')
 
 
 @pytest.fixture(scope="session")

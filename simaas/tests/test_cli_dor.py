@@ -12,10 +12,10 @@ from simaas.cli.cmd_identity import IdentityCreate
 from simaas.cli.cmd_network import NetworkList
 from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.schemas import DataObject
 
-logger = Logging.get(__name__)
+log = get_logger(__name__, 'test')
 
 
 @pytest.fixture(scope="session")

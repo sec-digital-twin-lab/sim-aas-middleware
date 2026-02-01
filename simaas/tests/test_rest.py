@@ -10,14 +10,14 @@ from pydantic import BaseModel
 
 from simaas.core.errors import _BaseError, RemoteError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.decorators import requires_authentication
 from simaas.node.base import Node
 from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 endpoint_prefix = "/api/v1/test"
 

@@ -16,13 +16,13 @@ from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
 from simaas.core.errors import OperationError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.namespace.default import DefaultNamespace
 from simaas.node.base import Node
 from simaas.plugins.builtins.dor_fs import FilesystemDORService
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================

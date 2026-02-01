@@ -14,7 +14,7 @@ import pytest
 
 from examples.prime.factor_search.processor import Parameters as FactorSearchParameters, ProcessorFactorSearch, Result
 from examples.prime.factorisation.processor import Parameters as FactorisationParameters, ProcessorFactorisation
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.rti.schemas import JobStatus, Task, Job
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener
@@ -22,8 +22,8 @@ from simaas.tests.helper_waiters import wait_for_job_completion
 from simaas.tests.helper_factories import TaskBuilder
 from simaas.tests.helper_assertions import assert_job_successful
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 @pytest.mark.integration
@@ -54,7 +54,7 @@ def test_processor_factor_search_local(dummy_namespace):
         )
         proc_path = os.path.join(BASE_DIR, 'examples', 'prime', 'factor_search')
         proc = ProcessorFactorSearch(proc_path)
-        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
+        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, logging.getLogger('test.factor_search'))
 
         # read and validate the result
         result_path = os.path.join(temp_dir, 'result')
@@ -96,7 +96,7 @@ def test_processor_factorisation_local(dummy_namespace):
         # create the processor and run it
         proc_path = os.path.join(BASE_DIR, 'examples', 'prime', 'factorisation')
         proc = ProcessorFactorisation(proc_path)
-        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, None)
+        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor), dummy_namespace, logging.getLogger('test.factorisation'))
 
         # read and validate the result
         result_path = os.path.join(temp_dir, 'result')

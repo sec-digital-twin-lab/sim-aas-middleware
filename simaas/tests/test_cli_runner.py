@@ -10,7 +10,7 @@ import pytest
 
 from simaas.plugins.builtins.rti_docker import DockerRTIService
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.helpers import PortMaster, determine_local_ip, find_processors
 from simaas.node.default import DefaultNode
@@ -20,7 +20,7 @@ from simaas.tests.helper_factories import (
     prepare_plain_job_folder, ProcessorRunner, execute_job, prepare_data_object
 )
 
-logger = Logging.get(__name__)
+log = get_logger(__name__, 'test')
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 examples_path = os.path.join(repo_root_path, 'examples')
 

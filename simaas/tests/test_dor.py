@@ -12,11 +12,11 @@ from simaas.core.helpers import hash_json_object, symmetric_decrypt, symmetric_e
     hash_file_content
 from simaas.dor.schemas import DataObject
 from simaas.core.helpers import get_timestamp_now, generate_random_string
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.core.errors import RemoteError
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================
@@ -481,9 +481,9 @@ def test_content_encryption(test_context, known_users, dor_proxy):
     # create content for the data object and encrypt it
     content_plain = "my little secret..."
     content_enc, content_key = symmetric_encrypt(content_plain.encode('utf-8'))
-    logger.info(f"content_plain={content_plain}")
-    logger.info(f"content_enc={content_enc}")
-    logger.info(f"content_key={content_key}")
+    log.info(f"content_plain={content_plain}")
+    log.info(f"content_enc={content_enc}")
+    log.info(f"content_key={content_key}")
     content_enc_path = test_context.create_file_with_content('content.enc', content_enc.decode('utf-8'))
 
     owner1 = known_users[0]
@@ -526,7 +526,7 @@ def test_search_by_content_hashes(test_context, known_users, dor_proxy):
 
     # search for data objects
     result = dor_proxy.search(c_hashes=[c_hash0, c_hash1])
-    logger.info(f"result={result}")
+    log.info(f"result={result}")
     assert len(result) == 2
     result = {i.obj_id: i.tags for i in result}
     assert obj_id0 in result
@@ -534,7 +534,7 @@ def test_search_by_content_hashes(test_context, known_users, dor_proxy):
 
     # search for data objects
     result = dor_proxy.search(c_hashes=[c_hash2])
-    logger.info(f"result={result}")
+    log.info(f"result={result}")
     assert len(result) == 1
     result = {i.obj_id: i.tags for i in result}
     assert obj_id2 in result

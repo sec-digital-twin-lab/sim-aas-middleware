@@ -13,7 +13,7 @@ from typing import List
 import pytest
 
 from examples.simple.abc.processor import ProcessorABC, write_value
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.rti.schemas import JobStatus
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener
@@ -21,8 +21,8 @@ from simaas.tests.helper_waiters import wait_for_job_completion
 from simaas.tests.helper_factories import create_abc_task
 from simaas.tests.helper_assertions import assert_job_successful, assert_data_object_content
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 @pytest.mark.integration
@@ -60,7 +60,7 @@ def test_processor_abc_local_no_secret(dummy_namespace):
         proc.run(
             temp_dir, None, DummyProgressListener(
                 temp_dir, status, dummy_namespace.dor, expected_messages
-            ), dummy_namespace, None
+            ), dummy_namespace, logging.getLogger('test.abc')
         )
 
         # read the result
@@ -103,7 +103,7 @@ def test_processor_abc_local_with_secret(dummy_namespace):
         )
         proc_path = os.path.join(BASE_DIR, 'examples', 'simple', 'abc')
         proc = ProcessorABC(proc_path)
-        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor, expected_messages), dummy_namespace, None)
+        proc.run(temp_dir, None, DummyProgressListener(temp_dir, status, dummy_namespace.dor, expected_messages), dummy_namespace, logging.getLogger('test.abc'))
 
         # read the result
         c_path = os.path.join(temp_dir, 'c')
