@@ -37,14 +37,7 @@ class VerifyAuthorisation:
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
-        try:
-            identity: Identity = await self.node.db.get_identity(iid)
-        except Exception as e:
-            raise AuthorisationError(
-                identity_id=iid,
-                operation='retrieve_identity',
-                hint=str(e)
-            )
+        identity: Identity = await self.node.db.get_identity(iid)
         if identity is None:
             raise AuthorisationError(
                 identity_id=iid,

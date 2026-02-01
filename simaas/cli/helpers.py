@@ -203,7 +203,7 @@ def prompt_for_integer(message: str, default: int = 0) -> int:
         try:
             return int(answer)
 
-        except Exception:
+        except ValueError:
             message = f"Not a valid integer: '{answer}'. {message}"
 
 

@@ -168,7 +168,7 @@ async def p2p_respond(
         attachment_path: Optional[str] = None, download_path: Optional[str] = None, chunk_size: int = 1024 * 1024
 ) -> None:
     try:
-        # ask the protocol to handle the request
+        # Handle the request - let application errors propagate with clear tracebacks
         request_type = protocol.request_type()
         reply_content, reply_attachment_path = await protocol.handle(
             request_type.model_validate(request.content), attachment_path, download_path
@@ -177,35 +177,36 @@ async def p2p_respond(
         # some casting for PyCharm
         reply_content: Optional[BaseModel] = reply_content
         reply_attachment_path: Optional[str] = reply_attachment_path
-        reply_attachment_size: int =os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
+        reply_attachment_size: int = os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
 
-        # prepare and send the reply message
-        reply: P2PMessage = P2PMessage(
-            protocol=protocol.name(), type='reply',
-            content=reply_content.model_dump() if reply_content else None,
-            attachment_size=reply_attachment_size
-        )
-        reply: dict = reply.model_dump()
-        reply: str = json.dumps(reply)
-        reply: bytes = reply.encode('utf-8')
-        await socket.send_multipart([cid, rid, reply])
+        # prepare and send the reply message - wrap ZMQ ops for transport debugging
+        try:
+            reply: P2PMessage = P2PMessage(
+                protocol=protocol.name(), type='reply',
+                content=reply_content.model_dump() if reply_content else None,
+                attachment_size=reply_attachment_size
+            )
+            reply: dict = reply.model_dump()
+            reply: str = json.dumps(reply)
+            reply: bytes = reply.encode('utf-8')
+            await socket.send_multipart([cid, rid, reply])
 
-        # if we have a reply attachment, send it in chunks
-        if reply_attachment_path is not None:
-            with open(reply_attachment_path, 'rb') as f:
-                total_sent = 0
-                while total_sent < reply_attachment_size:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
+            # if we have a reply attachment, send it in chunks
+            if reply_attachment_path is not None:
+                with open(reply_attachment_path, 'rb') as f:
+                    total_sent = 0
+                    while total_sent < reply_attachment_size:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
 
-                    await socket.send_multipart([cid, rid, chunk])
-                    total_sent += len(chunk)
+                        await socket.send_multipart([cid, rid, chunk])
+                        total_sent += len(chunk)
 
-    except Exception as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        logger.error(f"Unexpected P2P error: {trace}")
-        raise NetworkError(operation='respond', trace=trace)
+        except Exception as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            logger.error(f"Unexpected P2P error: {trace}")
+            raise NetworkError(operation='respond', trace=trace)
 
     finally:
         if attachment_path:

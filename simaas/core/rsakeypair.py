@@ -72,7 +72,7 @@ class RSAKeyPair(KeyPair):
             public_key = private_key.public_key()
             return RSAKeyPair(private_key, public_key)
 
-        except Exception:
+        except (ValueError, TypeError):
             raise AuthenticationError(
                 operation='load_private_key',
                 hint='Failed to load key - password may be wrong'

@@ -132,8 +132,8 @@ class RTIServiceBase(RTIRESTService):
                 status_path = os.path.join(self._jobs_path, job_id, 'job.status')
                 with open(status_path, 'w') as f:
                     json.dump(status.model_dump(), f, indent=2)
-            except Exception:
-                pass  # Non-critical, just for local file consistency
+            except Exception as e:
+                logger.debug(f"[RTI-JOB-010] failed to write local status file: job={job_id} error={e}")
 
     def has_active_workers(self) -> bool:
         all_workers = (
@@ -448,22 +448,12 @@ class RTIServiceBase(RTIRESTService):
 
     async def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         # try to make reservations for all tasks that require it
-        successful = True
-        try:
-            for checklist in checklists:
-                # does the task require a resource reservation?
-                if checklist.task.namespace is not None:
-                    await self._node.db.reserve_namespace_resources(
-                        checklist.task.namespace, checklist.job_id, checklist.task.budget
-                    )
-
-        except Exception:
-            successful = False
-
-        # if there was a problem at any point of the reservation process, cancel all reservations (if any)
-        if not successful:
-            await self.cancel_resource_reservations(checklists)
-            raise OperationError(operation='reserve_resources', stage='reservation', cause='failed')
+        for checklist in checklists:
+            # does the task require a resource reservation?
+            if checklist.task.namespace is not None:
+                await self._node.db.reserve_namespace_resources(
+                    checklist.task.namespace, checklist.job_id, checklist.task.budget
+                )
 
         # try to prepare the job for each task
         for checklist in checklists:

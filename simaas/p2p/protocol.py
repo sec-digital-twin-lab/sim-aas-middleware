@@ -2,7 +2,6 @@ import asyncio
 import os.path
 import random
 import tempfile
-import traceback
 from typing import Optional, Tuple
 
 from pydantic import BaseModel
@@ -64,10 +63,6 @@ class P2PLatency(P2PProtocol):
 
             except NetworkError:
                 await asyncio.sleep(0.5)
-
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(f"P2P operation failed: {trace}")
 
         raise OperationError(operation='latency_test', cause=f'failed after {max_attempts} attempts')
 
@@ -144,10 +139,6 @@ class P2PThroughput(P2PProtocol):
 
                 except NetworkError:
                     await asyncio.sleep(0.5)
-
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.error(f"P2P operation failed: {trace}")
 
             raise OperationError(operation='throughput_test', cause=f'failed after {max_attempts} attempts')
 

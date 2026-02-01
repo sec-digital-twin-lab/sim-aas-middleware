@@ -340,21 +340,17 @@ class DefaultNodeDBService(NodeDBService):
     async def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         # try to make a resource reservation
         successful = True
-        try:
-            for peer in await self._node.db.get_network():
-                if peer.identity.id == self._node.identity.id:
-                    successful = await self.handle_namespace_reservation(name, job_id, resources)
-                else:
-                    successful = await P2PReserveNamespaceResources.perform(
-                        self._node, peer, name, job_id, resources
-                    )
+        for peer in await self._node.db.get_network():
+            if peer.identity.id == self._node.identity.id:
+                successful = await self.handle_namespace_reservation(name, job_id, resources)
+            else:
+                successful = await P2PReserveNamespaceResources.perform(
+                    self._node, peer, name, job_id, resources
+                )
 
-                # did we encounter an issue?
-                if not successful:
-                    break
-
-        except Exception:
-            successful = False
+            # did we encounter an issue?
+            if not successful:
+                break
 
         # if there was a problem at any point of the reservation process, cancel all reservations (if any)
         if not successful:

@@ -1,5 +1,4 @@
 import asyncio
-import traceback
 from typing import Optional, List, Tuple, Dict
 
 from pydantic import BaseModel
@@ -66,10 +65,9 @@ class P2PUpdateIdentity(P2PProtocol):
                 reply: UpdateIdentityMessage = reply  # casting for PyCharm
 
                 result.append(reply.identity)
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-                logger.error(f"Failed to send identity update to: {peer.identity.name} | {peer.identity.id}")
-                logger.error(trace)
+            except NetworkError as e:
+                logger.warning(f"[P2P-NODEDB-001] peer unavailable for identity update: "
+                               f"peer={peer.identity.id} reason={e.reason}")
 
         return result
 
@@ -364,24 +362,16 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
                 peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget)
             )
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send update namespace budget request for {namespace} "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.warning(f"[P2P-NS-001] peer unavailable for namespace budget update: "
+                           f"peer={peer.identity.id} namespace={namespace} reason={e.reason}")
 
     async def handle(
             self, request: UpdateNamespaceBudgetRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            await self._node.db.handle_namespace_update(request.namespace, request.budget)
-            return None, None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(trace)
-            return None, None
+        await self._node.db.handle_namespace_update(request.namespace, request.budget)
+        return None, None
 
     @staticmethod
     def request_type():
@@ -431,28 +421,19 @@ class P2PReserveNamespaceResources(P2PProtocol):
             reply: ResourceReservationReply = reply  # casting for PyCharm
             return reply.accepted
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation request for {namespace}:{job_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.warning(f"[P2P-NS-002] peer unavailable for resource reservation: "
+                           f"peer={peer.identity.id} namespace={namespace} job={job_id} reason={e.reason}")
             return False
 
     async def handle(
             self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            accepted: bool = await self._node.db.handle_namespace_reservation(
-                request.namespace, request.job_id, request.resources
-            )
-            return ResourceReservationReply(accepted=accepted), None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to handle resource reservation request for {request.namespace}:{request.job_id}'")
-            logger.error(trace)
-            return ResourceReservationReply(accepted=False), None
+        accepted: bool = await self._node.db.handle_namespace_reservation(
+            request.namespace, request.job_id, request.resources
+        )
+        return ResourceReservationReply(accepted=accepted), None
 
     @staticmethod
     def request_type():
@@ -491,24 +472,15 @@ class P2PCancelNamespaceReservation(P2PProtocol):
                 peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id)
             )
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation cancellation for {namespace}:{job_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.warning(f"[P2P-NS-003] peer unavailable for reservation cancellation: "
+                           f"peer={peer.identity.id} namespace={namespace} job={job_id} reason={e.reason}")
 
     async def handle(
-            self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
+            self, request: ResourceReservationCancellation, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            await self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to handle resource reservation cancellation for {request.namespace}:{request.job_id}")
-            logger.error(trace)
-
+        await self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
         return None, None
 
     @staticmethod

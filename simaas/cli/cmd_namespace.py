@@ -92,7 +92,7 @@ class NamespaceUpdate(CLICommand):
         try:
             vcpus = int(args['vcpus'])
             memory = int(args['memory'])
-        except Exception:
+        except ValueError:
             print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
                   f"-> vCPUs/memory must be positive integers.")
             raise CLIError('Non-integer vCPUs and/or memory specification')

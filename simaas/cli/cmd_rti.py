@@ -777,7 +777,7 @@ class RTIJobList(CLICommand):
                 period = number * multiplier[unit]
                 print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
 
-            except Exception:
+            except (ValueError, KeyError):
                 print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
                 period = None
         else:
@@ -864,7 +864,7 @@ class RTIJobStatus(CLICommand):
                     period = number * multiplier[unit]
                     print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
 
-                except Exception:
+                except (ValueError, KeyError):
                     print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
                     period = None
 

@@ -1,12 +1,11 @@
 import abc
 import asyncio
 import threading
-import traceback
 from typing import Optional, Tuple
 
 from simaas.rti.base import RTIServiceBase
 from simaas.dor.schemas import DataObject
-from simaas.core.errors import NotFoundError, AuthorisationError, OperationError
+from simaas.core.errors import NotFoundError, AuthorisationError, OperationError, NetworkError
 from simaas.dor.api import DORRESTService
 from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.rti.schemas import Processor, BatchStatus
@@ -200,10 +199,8 @@ class Node(abc.ABC):
             proxy = NodeDBProxy(boot_node_address)
             boot_node: NodeInfo = proxy.get_node()
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error("Error while connecting to boot node REST interface")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.error(f"Error while connecting to boot node REST interface: {e.reason}")
             return
 
         try:
@@ -212,19 +209,15 @@ class Node(abc.ABC):
             network = await self.db.get_network()
             found = '\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in network])
             logger.info(f"Nodes found:\n{found}")
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error("Error during P2P network join")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.error(f"Error during P2P network join: {e.reason}")
 
     async def leave_network(self, blocking: bool = False) -> None:
         try:
             protocol = P2PLeaveNetwork(self)
             await protocol.perform(blocking=blocking)
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error("Error during P2P network leave")
-            logger.error(trace)
+        except NetworkError as e:
+            logger.error(f"Error during P2P network leave: {e.reason}")
 
     async def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
         with self._mutex:
@@ -238,10 +231,8 @@ class Node(abc.ABC):
                     protocol = P2PUpdateIdentity(self)
                     network = await self.db.get_network()
                     await protocol.broadcast(network)
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.error("Error during P2P identity update")
-                    logger.error(trace)
+                except NetworkError as e:
+                    logger.error(f"Error during P2P identity update: {e.reason}")
 
             return identity
 
