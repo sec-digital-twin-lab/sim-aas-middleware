@@ -214,8 +214,8 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
     # build the processor docker image
     if force_build or not image_existed:
         with tempfile.TemporaryDirectory() as tempdir:
-            # copy the processor to the temp location
-            context_name = os.path.basename(os.path.normpath(processor_path))
+            # copy the processor to the temp location (resolve to absolute path first to handle '.' correctly)
+            context_name = os.path.basename(os.path.abspath(processor_path))
             context_path = os.path.join(tempdir, context_name)
             shutil.copytree(processor_path, context_path)
 

@@ -79,6 +79,8 @@ class RTIVolumeList(CLICommand):
         super().__init__('list', 'show a list of volume references', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[List[dict]]:
@@ -87,7 +89,10 @@ class RTIVolumeList(CLICommand):
         # does the volume references file exist?
         vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
         if not os.path.isfile(vol_refs_path):
-            print("No volume references found.")
+            if args.get('json_output'):
+                print(json.dumps([], indent=2))
+            else:
+                print("No volume references found.")
             return []
 
         # load the volume reference file
@@ -96,22 +101,28 @@ class RTIVolumeList(CLICommand):
 
         # do we have any references?
         if len(vol_refs) == 0:
-            print("No volume references found.")
+            if args.get('json_output'):
+                print(json.dumps([], indent=2))
+            else:
+                print("No volume references found.")
             return []
 
-        # headers
-        lines = [
-            ['VOLUME NAME', 'TYPE', 'REFERENCE'],
-            ['-----------', '----', '---------']
-        ]
+        if args.get('json_output'):
+            print(json.dumps(vol_refs, indent=2))
+        else:
+            # headers
+            lines = [
+                ['VOLUME NAME', 'TYPE', 'REFERENCE'],
+                ['-----------', '----', '---------']
+            ]
 
-        # prepare lines unsorted
-        for item in vol_refs:
-            lines.append([item['name'], item['type'], item['reference']])
+            # prepare lines unsorted
+            for item in vol_refs:
+                lines.append([item['name'], item['type'], item['reference']])
 
-        print(f"Found {len(lines)-1} volume references:")
-        print(tabulate(lines, tablefmt="plain"))
-        print()
+            print(f"Found {len(vol_refs)} volume references:")
+            print(tabulate(lines, tablefmt="plain"))
+            print()
 
         return vol_refs
 
@@ -452,13 +463,32 @@ class RTIProcUndeploy(CLICommand):
 
 class RTIProcList(CLICommand):
     def __init__(self) -> None:
-        super().__init__('list', 'retrieves a list of all deployed processors', arguments=[])
+        super().__init__('list', 'retrieves a list of all deployed processors', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         rti = _require_rti(args)
         deployed = rti.get_all_procs()
-        if len(deployed) == 0:
-            print(f"No processors deployed at {args['address']}")
+
+        if args.get('json_output'):
+            output = []
+            for proc in deployed:
+                item = {
+                    'id': proc.id,
+                    'state': proc.state,
+                    'image_name': proc.image_name,
+                    'error': proc.error
+                }
+                if proc.gpp:
+                    item['name'] = proc.gpp.proc_descriptor.name
+                    item['repository'] = proc.gpp.repository
+                    item['commit_id'] = proc.gpp.commit_id
+                output.append(item)
+            print(json.dumps(output, indent=2))
+        elif len(deployed) == 0:
+            print("No processors deployed.")
         else:
             print(f"Found {len(deployed)} processor(s) deployed at {args['address']}:")
             for proc in deployed:
@@ -764,33 +794,52 @@ class RTIJobList(CLICommand):
                              Argument('--period', dest='period', action='store',
                                       help="time period to consider using format <number><unit> where unit can be one "
                                            "of these ('h': hours, 'd': days, 'w': weeks). Default is '1d', i.e., one "
-                                           "day.")
+                                           "day."),
+                             Argument('--json', dest='json_output', action='store_const', const=True,
+                                      help="output results in JSON format")
                          ])
 
     def execute(self, args: dict) -> Optional[dict]:
+        from simaas.cli.helpers.time import parse_period
+
         rti = _require_rti(args)
         keystore = load_keystore(args, ensure_publication=True)
 
-        # determine time period
-        if 'period' in args and args['period'] is not None:
-            try:
-                unit = args['period'][-1:]
-                number = int(args['period'][:-1])
-                multiplier = {'h': 1, 'd': 24, 'w': 7*24}
-                period = number * multiplier[unit]
-                print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
-
-            except (ValueError, KeyError):
-                print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
-                period = None
-        else:
+        # determine time period using the helper
+        period = None
+        if args.get('period'):
+            period = parse_period(args['period'])
+            if period is None:
+                if not args.get('json_output'):
+                    print(f"Invalid time period '{args['period']}'. Listing currently active jobs only.")
+            elif not args.get('json_output'):
+                print(f"Listing all jobs submitted within time period of {args['period']} -> {period} hours")
+        elif not args.get('json_output'):
             print("No time period provided. Listing currently active jobs only.")
-            period = None
 
         # get all jobs in that time period
         try:
             jobs = rti.get_jobs_by_user(keystore, period=period)
-            if jobs:
+
+            if args.get('json_output'):
+                # JSON output mode
+                output = []
+                deployed: dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+                for job in jobs:
+                    proc_name = deployed[job.task.proc_id].gpp.proc_descriptor.name \
+                        if job.task.proc_id in deployed else 'unknown'
+                    status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                    output.append({
+                        'id': job.id,
+                        'submitted': job.t_submitted,
+                        'owner_id': job.task.user_iid,
+                        'proc_name': proc_name,
+                        'proc_id': job.task.proc_id,
+                        'state': status.state,
+                        'description': job.task.description
+                    })
+                print(json.dumps(output, indent=2))
+            elif jobs:
                 # get all deployed procs
                 deployed: dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
 
@@ -890,6 +939,174 @@ class RTIJobStatus(CLICommand):
 
         except RemoteError:
             print(f"No status for job {args['job-id']}.")
+
+        return result
+
+
+class RTIJobInspect(CLICommand):
+    def __init__(self):
+        super().__init__('inspect', 'show detailed information about a job', arguments=[
+            Argument('job-id', metavar='job-id', type=str, nargs='?', help="the id of the job"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        rti = _require_rti(args)
+        keystore = load_keystore(args, ensure_publication=True)
+
+        # do we have a job id?
+        if not args['job-id']:
+            # get all deployed procs
+            deployed: Dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+
+            # get all jobs by this user and select
+            choices = []
+            for job in rti.get_jobs_by_user(keystore):
+                status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                choices.append(Choice(job.id, job_label(job, status, deployed)))
+
+            if not choices:
+                raise CLIError("No jobs found.")
+
+            args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
+
+        result = {}
+        try:
+            # Get all jobs to find the one we're looking for
+            jobs = rti.get_jobs_by_user(keystore, period=24*7)  # Look back a week
+            job = None
+            for j in jobs:
+                if j.id == args['job-id']:
+                    job = j
+                    break
+
+            status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
+            result['status'] = status
+
+            if args.get('json_output'):
+                output = {
+                    'job_id': args['job-id'],
+                    'state': status.state,
+                    'progress': status.progress,
+                    'output': {k: v.model_dump() if v else None for k, v in status.output.items()},
+                    'notes': status.notes,
+                    'errors': [{'message': e.message, 'exception': e.exception.model_dump()} for e in status.errors]
+                }
+                if job:
+                    output['task'] = {
+                        'name': job.task.name,
+                        'description': job.task.description,
+                        'proc_id': job.task.proc_id,
+                        'user_iid': job.task.user_iid,
+                        'input_count': len(job.task.input),
+                        'output_count': len(job.task.output)
+                    }
+                    output['submitted'] = job.t_submitted
+                    output['processor_name'] = job.proc_name
+                print(json.dumps(output, indent=2))
+            else:
+                print("Job Details")
+                print("-----------")
+                print(f"ID: {args['job-id']}")
+                print(f"Status: {status.state}")
+                print(f"Progress: {status.progress}%")
+
+                if job:
+                    print(f"Processor: {job.proc_name} ({shorten_id(job.task.proc_id)})")
+                    submitted_time = datetime.datetime.fromtimestamp(job.t_submitted / 1000.0)
+                    print(f"Submitted: {submitted_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"Task name: {job.task.name or '(none)'}")
+                    print(f"Description: {job.task.description or '(none)'}")
+                    print(f"Inputs: {len(job.task.input)} data objects")
+                    print(f"Outputs: {len(job.task.output)} data objects")
+
+                if status.output:
+                    print("Output objects:")
+                    for name, obj in status.output.items():
+                        if obj:
+                            print(f"  - {name}: {shorten_id(obj.obj_id)} ({obj.data_type}:{obj.data_format})")
+                        else:
+                            print(f"  - {name}: (pending)")
+
+                if status.errors:
+                    print(f"Errors: {len(status.errors)}")
+                    for err in status.errors:
+                        print(f"  - {err.message}")
+
+                if status.message:
+                    print(f"Message: [{status.message.severity}] {status.message.content}")
+
+        except RemoteError:
+            print(f"Job {args['job-id']} not found.")
+
+        return result
+
+
+class RTIJobLogs(CLICommand):
+    def __init__(self):
+        super().__init__('logs', 'view job notes and messages', arguments=[
+            Argument('job-id', metavar='job-id', type=str, nargs='?', help="the id of the job"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        rti = _require_rti(args)
+        keystore = load_keystore(args, ensure_publication=True)
+
+        # do we have a job id?
+        if not args['job-id']:
+            # get all deployed procs
+            deployed: Dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+
+            # get all jobs by this user and select
+            choices = []
+            for job in rti.get_jobs_by_user(keystore):
+                status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                choices.append(Choice(job.id, job_label(job, status, deployed)))
+
+            if not choices:
+                raise CLIError("No jobs found.")
+
+            args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
+
+        result = {}
+        try:
+            status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
+            result['status'] = status
+
+            if args.get('json_output'):
+                output = {
+                    'job_id': args['job-id'],
+                    'notes': status.notes,
+                    'errors': [{'message': e.message} for e in status.errors],
+                    'message': {'severity': status.message.severity, 'content': status.message.content} if status.message else None
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Job Logs: {args['job-id']}")
+                print("-" * 40)
+
+                if status.notes:
+                    print("Notes:")
+                    for key, value in status.notes.items():
+                        print(f"  {key}: {value}")
+                else:
+                    print("No notes.")
+
+                if status.errors:
+                    print(f"\nErrors ({len(status.errors)}):")
+                    for err in status.errors:
+                        print(f"  - {err.message}")
+                else:
+                    print("\nNo errors.")
+
+                if status.message:
+                    print(f"\nCurrent message: [{status.message.severity}] {status.message.content}")
+
+        except RemoteError:
+            print(f"Job {args['job-id']} not found.")
 
         return result
 

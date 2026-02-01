@@ -1,3 +1,4 @@
+import json
 from typing import Optional, Dict
 
 from InquirerPy.base import Choice
@@ -13,7 +14,10 @@ from simaas.nodedb.schemas import NamespaceInfo, ResourceDescriptor
 
 class NamespaceList(CLICommand):
     def __init__(self):
-        super().__init__('list', 'lists all known namespaces')
+        super().__init__('list', 'lists all known namespaces', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         prompt_if_missing(args, 'address', prompt_for_string, message="Enter address of node:",
@@ -21,7 +25,26 @@ class NamespaceList(CLICommand):
 
         proxy = NodeDBProxy(extract_address(args['address']))
         namespaces: Dict[str, NamespaceInfo] = proxy.get_namespaces()
-        if len(namespaces) == 0:
+
+        if args.get('json_output'):
+            # JSON output mode
+            output = []
+            for namespace in namespaces.values():
+                used_vcpus = sum(r.vcpus for r in namespace.reservations.values())
+                used_memory = sum(r.memory for r in namespace.reservations.values())
+                output.append({
+                    'name': namespace.name,
+                    'budget_vcpus': namespace.budget.vcpus,
+                    'budget_memory': namespace.budget.memory,
+                    'used_vcpus': used_vcpus,
+                    'used_memory': used_memory,
+                    'available_vcpus': namespace.budget.vcpus - used_vcpus,
+                    'available_memory': namespace.budget.memory - used_memory,
+                    'reservations': len(namespace.reservations),
+                    'jobs': len(namespace.jobs)
+                })
+            print(json.dumps(output, indent=2))
+        elif len(namespaces) == 0:
             print("No namespaces found.")
         else:
             print(f"Found {len(namespaces)} namespaces:")
