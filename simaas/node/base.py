@@ -12,7 +12,7 @@ from simaas.rti.schemas import Processor, BatchStatus
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.nodedb.api import NodeDBService, NodeDBProxy
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity, P2PGetIdentity, P2PGetNetwork, \
@@ -23,7 +23,7 @@ from simaas.rest.service import RESTService
 from simaas.meta import __version__
 from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
 
-logger = Logging.get('node.base')
+log = get_logger('simaas.node', 'node')
 
 
 class Node(abc.ABC):
@@ -65,22 +65,22 @@ class Node(abc.ABC):
         This is an async method that manages thread lifecycle. To join a network after startup,
         call `await node.join_network(boot_node_address)` separately.
         """
-        logger.info(f"Sim-aaS Middleware {__version__}")
+        log.info('startup', f'Sim-aaS Middleware {__version__}')
 
         endpoints = []
         if self.db:
-            logger.info("enabling NodeDB service.")
+            log.info('startup', 'Enabling NodeDB service')
             endpoints += self.db.endpoints()
 
         if self.dor:
-            logger.info("enabling DOR service.")
+            log.info('startup', 'Enabling DOR service')
             endpoints += self.dor.endpoints()
 
         if self.rti:
-            logger.info("enabling RTI service.")
+            log.info('startup', 'Enabling RTI service')
             endpoints += self.rti.endpoints()
 
-        logger.info("starting P2P service.")
+        log.info('startup', 'Starting P2P service')
         self.p2p = P2PService(self.keystore, p2p_address)
         self.p2p.add(P2PUpdateIdentity(self))
         self.p2p.add(P2PJoinNetwork(self))
@@ -99,13 +99,13 @@ class Node(abc.ABC):
         self.p2p.start_service_background()
 
         if rest_address is not None:
-            logger.info("starting REST service.")
+            log.info('startup', 'Starting REST service')
             self.rest = RESTService(self, rest_address[0], rest_address[1], bind_all_address)
             self.rest.start_service()
             self.rest.add(endpoints)
 
         if wait_until_ready:
-            logger.info("wait until node is ready...")
+            log.info('startup', 'Waiting until node is ready')
             if not await self.p2p.wait_until_ready(timeout=10.0):
                 raise OperationError(
                     operation='node_startup',
@@ -120,7 +120,7 @@ class Node(abc.ABC):
                     cause='timeout',
                     hint='REST service failed to become ready'
                 )
-            logger.info("node is ready.")
+            log.info('startup', 'Node is ready')
 
         # update our node db
         await self.db.update_identity(self.identity)
@@ -144,7 +144,7 @@ class Node(abc.ABC):
         - `await node.leave_network()` to inform peers
         - `await node.shutdown_rti()` to undeploy processors
         """
-        logger.info("stopping all services.")
+        log.info('shutdown', 'Stopping all services')
         if self.p2p:
             self.p2p.stop_service()
 
@@ -174,25 +174,19 @@ class Node(abc.ABC):
 
             # successful?
             if check is not None:
-                logger.warning(
-                    f"[{self.identity.id}/{self.identity.name}] shutdown_rti: undeploying processor {proc_id} failed."
-                )
+                log.warning('shutdown', 'Undeploying processor failed', proc=proc_id, identity=self.identity.id)
 
         # wait for any active worker threads
         for _ in range(10):
             if not self.rti.has_active_workers():
                 break
-            logger.info(
-                f"[{self.identity.id}/{self.identity.name}] shutdown_rti: waiting for active worker threads to be done..."
-            )
+            log.info('shutdown', 'Waiting for active worker threads', identity=self.identity.id)
             await asyncio.sleep(1)
         else:
-            logger.warning(
-                f"[{self.identity.id}/{self.identity.name}] shutdown_rti: ignoring active worker threads that are still active."
-            )
+            log.warning('shutdown', 'Ignoring active worker threads still running', identity=self.identity.id)
 
     async def join_network(self, boot_node_address: Tuple[str, int]) -> None:
-        logger.info(f"joining network via boot node: {boot_node_address}")
+        log.info('network', 'Joining network via boot node', boot_node=str(boot_node_address))
 
         try:
             # we only have an address, no node info. let's get info about the node first
@@ -200,24 +194,23 @@ class Node(abc.ABC):
             boot_node: NodeInfo = proxy.get_node()
 
         except NetworkError as e:
-            logger.error(f"Error while connecting to boot node REST interface: {e.reason}")
+            log.error('network', 'Error connecting to boot node REST interface', reason=e.reason)
             return
 
         try:
             protocol = P2PJoinNetwork(self)
             await protocol.perform(boot_node)
             network = await self.db.get_network()
-            found = '\n'.join([f"{n.identity.id}@{n.p2p_address}" for n in network])
-            logger.info(f"Nodes found:\n{found}")
+            log.info('network', 'Network joined', node_count=len(network))
         except NetworkError as e:
-            logger.error(f"Error during P2P network join: {e.reason}")
+            log.error('network', 'Error during P2P network join', reason=e.reason)
 
     async def leave_network(self, blocking: bool = False) -> None:
         try:
             protocol = P2PLeaveNetwork(self)
             await protocol.perform(blocking=blocking)
         except NetworkError as e:
-            logger.error(f"Error during P2P network leave: {e.reason}")
+            log.error('network', 'Error during P2P network leave', reason=e.reason)
 
     async def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
         with self._mutex:
@@ -232,7 +225,7 @@ class Node(abc.ABC):
                     network = await self.db.get_network()
                     await protocol.broadcast(network)
                 except NetworkError as e:
-                    logger.error(f"Error during P2P identity update: {e.reason}")
+                    log.error('identity', 'Error during P2P identity update', reason=e.reason)
 
             return identity
 

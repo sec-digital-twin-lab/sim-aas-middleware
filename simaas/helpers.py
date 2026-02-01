@@ -15,12 +15,12 @@ from typing import List, Optional, Tuple, Dict
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
 from simaas.core.processor import ProcessorBase
 from simaas.nodedb.schemas import ResourceDescriptor
 
-logger = Logging.get(__name__)
+log = get_logger('simaas.helpers', 'core')
 
 
 def determine_local_ip() -> Optional[str]:
@@ -307,7 +307,7 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
                 try:
                     spec.loader.exec_module(module)
                 except Exception as e:
-                    logger.warning(f"spec loader failed: {e}")
+                    log.warning('discover', 'Spec loader failed', exc=e)
                     continue
 
                 # module = importlib.import_module(module_name)
@@ -317,7 +317,7 @@ def find_processors(search_path: str) -> Dict[str, ProcessorBase]:
                             instance: ProcessorBase = obj(root)
                             result[instance.name] = instance
                         except Exception as e:
-                            logger.warning(f"creating instance of {obj} failed: {e}")
+                            log.warning('discover', 'Creating processor instance failed', exc=e)
 
     return result
 

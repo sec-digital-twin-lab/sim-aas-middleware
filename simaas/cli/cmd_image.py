@@ -18,14 +18,14 @@ from pydantic import BaseModel
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
     default_if_missing, use_env_or_prompt_if_missing, label_data_object, prompt_for_selection
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch, docker_client, \
     is_valid_new_file
 from simaas.nodedb.api import NodeDBProxy
 
-logger = Logging.get('cli')
+log = get_logger('simaas.cli', 'cli')
 
 
 class PDIMetaInformation(BaseModel):
@@ -163,7 +163,7 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
             try:
                 shutil.rmtree(repository_path)
             except OSError as e:
-                logger.warning(f"Failed to remove directory {repository_path}: {e}")
+                log.warning('clone', 'Failed to remove directory', path=repository_path, error=str(e))
 
             # clone the repo
             Repo.clone_from(repository_url, repository_path)

@@ -13,7 +13,7 @@ from simaas.core.errors import CLIError, RemoteError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, prompt_for_selection, \
     get_nodes_by_service, prompt_for_confirmation, load_keystore, extract_address, label_data_object, shorten_id, \
     label_identity, default_if_missing
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
@@ -22,7 +22,7 @@ from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Processor, Task, JobStatus, Job, ProcessorVolume
 from simaas.dor.schemas import ProcessorDescriptor, DataObject
 
-logger = Logging.get('cli')
+log = get_logger('simaas.cli', 'cli')
 
 
 def _require_rti(args: dict) -> RTIProxy:
@@ -309,8 +309,7 @@ class RTIProcDeploy(CLICommand):
                     custodian[item.obj_id] = node
 
             except Exception:
-                logger.warning(f"Failed to send request (dor.search) to "
-                               f"node {node.identity.id} at {node.rest_address}")
+                log.warning('search', 'Failed to send DOR search request', node=node.identity.id, address=node.rest_address)
 
         # do we have any processors to choose from?
         if len(choices) == 0:
@@ -593,11 +592,11 @@ class RTIJobSubmit(CLICommand):
                             jsonschema.validate(instance=content, schema=item.data_schema)
 
                         except jsonschema.exceptions.ValidationError as e:
-                            logger.error(e.message)
+                            log.error('validate', 'Input validation failed', error=e.message)
                             continue
 
                         except jsonschema.exceptions.SchemaError as e:
-                            logger.error(e.message)
+                            log.error('validate', 'Invalid schema', error=e.message)
                             raise CLIError("Schema used for input is not valid", details={
                                 'schema': item.data_schema
                             })

@@ -23,7 +23,9 @@ from simaas.core.errors import _BaseError, NotFoundError, ValidationError, Autho
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
+
+log = get_logger('simaas.rti', 'rti')
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
 from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus
@@ -453,7 +455,7 @@ class JobRunner(CLICommand, ProgressListener):
         # create the logger
         log_path = os.path.join(self._wd_path, 'job.log')
         print(f"Using logger with: level={log_level} path={log_path}")
-        self._logger = Logging.get('cli.job_runner', level=log_level_mapping[log_level], custom_log_path=log_path)
+        self._logger = get_logger('cli.job_runner', 'runner', level=log_level_mapping[log_level], custom_log_path=log_path)
 
     def _initialise_processor(self, proc_path: str) -> None:
         # do we have a GPP?

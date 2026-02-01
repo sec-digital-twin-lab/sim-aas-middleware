@@ -15,7 +15,7 @@ from simaas.core.eckeypair import ECKeyPair
 from simaas.core.errors import ConfigurationError, InternalError
 from simaas.core.helpers import hash_json_object, get_timestamp_now
 from simaas.core.keypair import KeyPair
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.rsakeypair import RSAKeyPair
 from simaas.core.schemas import KeystoreContent
 from simaas.core.helpers import generate_random_string, write_json_to_file
@@ -23,7 +23,7 @@ from simaas.core.assets import MasterKeyPairAsset, KeyPairAsset, ContentKeysAsse
     GithubCredentialsAsset
 from simaas.core.identity import generate_identity_token, Identity
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'ks')
 
 
 class Keystore:
@@ -118,9 +118,7 @@ class Keystore:
         keystore = Keystore(KeystoreContent.model_validate(content), path=path, password=password)
         keystore.sync()
 
-        logger.info(f"keystore created: id={keystore.identity.id} "
-                    f"s_pubkey={keystore._s_key.public_as_string()} "
-                    f"e_pubkey={keystore._e_key.public_as_string()}")
+        log.info('create', 'Keystore created', id=keystore.identity.id)
 
         return keystore
 
@@ -139,9 +137,7 @@ class Keystore:
 
         # create keystore
         keystore = Keystore(content)
-        logger.info(f"keystore loaded: iid={keystore.identity.id} "
-                    f"s_key={keystore._s_key.public_as_string()} "
-                    f"e_key={keystore._e_key.public_as_string()}")
+        log.info('load', 'Keystore loaded', id=keystore.identity.id)
 
         return keystore
 
@@ -181,9 +177,7 @@ class Keystore:
 
         # create keystore
         keystore = Keystore(content, path=keystore_path, password=password)
-        logger.info(f"keystore loaded: iid={keystore.identity.id} "
-                    f"s_key={keystore._s_key.public_as_string()} "
-                    f"e_key={keystore._e_key.public_as_string()}")
+        log.info('load', 'Keystore loaded', id=keystore.identity.id)
 
         return keystore
 

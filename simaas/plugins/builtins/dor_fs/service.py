@@ -18,12 +18,12 @@ from simaas.core.helpers import hash_string_object, hash_json_object, hash_file_
 from simaas.dor.api import DORProxy, DORRESTService
 from simaas.core.errors import NotFoundError, OperationError
 from simaas.core.helpers import get_timestamp_now, generate_random_string
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
     AddDataObjectParameters, DORFilePartInfo, TagValueType
 
-logger = Logging.get('dor.service')
+log = get_logger('simaas.dor', 'dor')
 
 Base = declarative_base()
 
@@ -162,9 +162,9 @@ class FilesystemDORService(DORRESTService):
                 if record is None:
                     session.add(DataObjectProvenanceRecord(c_hash=c_hash, p_hash=p_hash, provenance=provenance))
                     session.commit()
-                    logger.info(f"database provenance record created for c_hash={c_hash} and p_hash={p_hash}.")
+                    log.info('provenance', 'Database provenance record created', c_hash=c_hash, p_hash=p_hash)
                 else:
-                    logger.info(f"database provenance record already exists for c_hash={c_hash} and p_hash={p_hash}.")
+                    log.info('provenance', 'Database provenance record already exists', c_hash=c_hash, p_hash=p_hash)
 
     async def _search_network_for_provenance(self, c_hash: str) -> List[DataObjectProvenance]:
         # check every node in the network for provenance information
@@ -186,8 +186,7 @@ class FilesystemDORService(DORRESTService):
                         # TODO: change once proxy has been refactored
                         result.append(DataObjectProvenance.model_validate(provenance))
             except Exception:
-                logger.warning(f"Failed to send request (dor.get_provenance) to "
-                               f"node {node.identity.id} at {node.rest_address}")
+                log.warning('provenance', 'Failed to send request to node', id=node.identity.id, address=str(node.rest_address))
 
         return result
 
@@ -398,8 +397,7 @@ class FilesystemDORService(DORRESTService):
                                              },
                                              last_accessed=created_t))
                 session.commit()
-                logger.info(f"data object '{obj_id}' with content '{c_hash}' added to DOR. the content is "
-                            f"referenced by {len(records)} other data objects).")
+                log.info('add', 'Data object added to DOR', obj=obj_id, c_hash=c_hash, ref_count=len(records))
 
         # determine the provenance and add to the database
         provenance = await self._generate_provenance_information(c_hash, recipe) if recipe else \
@@ -511,12 +509,11 @@ class FilesystemDORService(DORRESTService):
 
         # only delete if we have not found any other data objects that reference this content.
         if len(referenced) == 0:
-            logger.info(f"data object content '{meta.c_hash}' not referenced by any data object -> delete.")
+            log.info('remove', 'Deleting unreferenced content', c_hash=meta.c_hash)
             content_path = self.obj_content_path(meta.c_hash)
             os.remove(content_path)
         else:
-            logger.info(f"data object content '{meta.c_hash}' referenced by data objects ({referenced}) -> "
-                        f"do not delete.")
+            log.info('remove', 'Content still referenced, not deleting', c_hash=meta.c_hash, ref_count=len(referenced))
 
         return meta
 

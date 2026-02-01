@@ -14,11 +14,8 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, get_avai
     prompt_for_selection, load_keystore, extract_address
 from simaas.core.schemas import GithubCredentials, SSHCredentials, KeystoreContent
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
-
-logger = Logging.get('cli')
 
 
 class IdentityCreate(CLICommand):

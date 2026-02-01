@@ -8,13 +8,13 @@ from simaas.core.identity import Identity
 
 from simaas.core.keystore import Keystore
 
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.errors import NetworkError
 from simaas.dor.schemas import DataObject, DataObjectRecipe, TagValueType
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
-logger = Logging.get('dor.protocol')
+log = get_logger('simaas.dor', 'dor')
 
 
 class LookupRequest(BaseModel):

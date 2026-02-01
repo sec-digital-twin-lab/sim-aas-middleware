@@ -4,11 +4,11 @@ import os
 import sys
 from typing import Dict, Type, List, Optional
 
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORRESTService
 from simaas.rti.api import RTIRESTService
 
-logger = Logging.get('plugins')
+log = get_logger('simaas.plugins', 'plugins')
 
 
 def discover_plugins(plugin_paths: List[str]) -> Dict[str, Dict[str, Type]]:
@@ -17,13 +17,13 @@ def discover_plugins(plugin_paths: List[str]) -> Dict[str, Dict[str, Type]]:
 
     for path in plugin_paths:
         if not os.path.isdir(path):
-            logger.warning(f"plugin path not found: {path}")
+            log.warning('discover', 'Plugin path not found', path=path)
             continue
 
         _scan_directory(path, registry)
 
-    logger.info(f"discovered {len(registry['dor'])} DOR plugins: {list(registry['dor'].keys())}")
-    logger.info(f"discovered {len(registry['rti'])} RTI plugins: {list(registry['rti'].keys())}")
+    log.info('discover', 'Discovered DOR plugins', count=len(registry['dor']), names=list(registry['dor'].keys()))
+    log.info('discover', 'Discovered RTI plugins', count=len(registry['rti']), names=list(registry['rti'].keys()))
 
     return registry
 
@@ -48,7 +48,7 @@ def _load_plugin_module(plugin_path: str, plugin_dir: str, registry: Dict[str, D
         module_name = f"_plugin_{plugin_dir}"
         spec = importlib.util.spec_from_file_location(module_name, os.path.join(plugin_path, '__init__.py'))
         if spec is None or spec.loader is None:
-            logger.warning(f"failed to load plugin from {plugin_path}")
+            log.warning('load', 'Failed to load plugin', path=plugin_path)
             return
 
         module = importlib.util.module_from_spec(spec)
@@ -58,7 +58,7 @@ def _load_plugin_module(plugin_path: str, plugin_dir: str, registry: Dict[str, D
         _extract_plugin_classes(module, registry)
 
     except Exception as e:
-        logger.warning(f"error loading plugin from {plugin_path}: {e}")
+        log.warning('load', 'Error loading plugin', path=plugin_path, exc=e)
 
 
 def _extract_plugin_classes(module, registry: Dict[str, Dict[str, Type]]) -> None:
@@ -69,14 +69,14 @@ def _extract_plugin_classes(module, registry: Dict[str, Dict[str, Type]]) -> Non
                 if hasattr(obj, 'plugin_name'):
                     plugin_name = obj.plugin_name()
                     if plugin_name in registry['dor']:
-                        logger.warning(f"DOR plugin '{plugin_name}' already registered, overwriting")
+                        log.warning('extract', 'DOR plugin already registered, overwriting', plugin=plugin_name)
                     registry['dor'][plugin_name] = obj
 
             elif issubclass(obj, RTIRESTService) and obj is not RTIRESTService:
                 if hasattr(obj, 'plugin_name'):
                     plugin_name = obj.plugin_name()
                     if plugin_name in registry['rti']:
-                        logger.warning(f"RTI plugin '{plugin_name}' already registered, overwriting")
+                        log.warning('extract', 'RTI plugin already registered, overwriting', plugin=plugin_name)
                     registry['rti'][plugin_name] = obj
 
         except TypeError:

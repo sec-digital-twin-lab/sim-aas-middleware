@@ -12,9 +12,9 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from simaas.core.helpers import generate_random_string
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'core')
 
 __all__ = [
     'ExceptionContent',
@@ -75,10 +75,7 @@ class _BaseError(Exception):
         try:
             json.dumps(self._details)
         except TypeError:
-            logger.warning(
-                f"Encountered JSON incompatible exception details: "
-                f"class={self.__class__.__name__} id={self._id} details: {self._details}"
-            )
+            log.warning('error', 'Encountered JSON incompatible exception details', error_class=self.__class__.__name__, id=self._id)
             # Convert non-serializable values to strings
             self._details = {k: self._make_json_safe(v) for k, v in self._details.items()}
 

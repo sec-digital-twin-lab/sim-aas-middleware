@@ -8,14 +8,14 @@ from sqlalchemy_json import NestedMutableJson
 
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.nodedb.api import NodeDBService
 from simaas.core.errors import NotFoundError, ValidationError, OperationError
 from simaas.nodedb.protocol import NodeDBSnapshot, P2PCancelNamespaceReservation, P2PReserveNamespaceResources, \
     P2PUpdateNamespaceBudget
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
-logger = Logging.get('nodedb.service')
+log = get_logger('simaas.nodedb', 'nodedb')
 
 Base = declarative_base()
 
@@ -120,18 +120,9 @@ class DefaultNodeDBService(NodeDBService):
 
             for record in conflicting_records:
                 if record.last_seen >= node.last_seen:
-                    logger.debug(f"ignoring network node update -> record with conflicting address but more recent "
-                                 f"timestamp found: "
-                                 f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                                 f"\nrecord.last_seen={record.last_seen} >= {node.last_seen}"
-                                 f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                                 f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                    log.debug(f"Ignoring network node update, conflicting address but more recent timestamp found", record_iid=record.iid, node_iid=node.identity.id)
                 else:
-                    logger.debug(f"deleting record with outdated and conflicting address: "
-                                 f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                                 f"\nrecord.last_seen={record.last_seen} < {node.last_seen}"
-                                 f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                                 f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                    log.debug(f"Deleting record with outdated and conflicting address", record_iid=record.iid, node_iid=node.identity.id)
 
                     session.query(NodeRecord).filter_by(iid=record.iid).delete()
                     session.commit()
@@ -158,11 +149,7 @@ class DefaultNodeDBService(NodeDBService):
                 session.commit()
 
             else:
-                logger.debug(f"ignoring network node update -> more recent record found: "
-                             f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                             f"\nrecord.last_seen={record.last_seen} >= {node.last_seen}"
-                             f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                             f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                log.debug(f"Ignoring network node update, more recent record found", record_iid=record.iid, node_iid=node.identity.id)
 
     async def remove_node_by_id(self, identity: Identity) -> None:
         """
@@ -263,7 +250,7 @@ class DefaultNodeDBService(NodeDBService):
                 session.commit()
 
             else:
-                logger.debug("Ignore identity update as nonce on record is more recent.")
+                log.debug("Ignoring identity update, nonce on record is more recent")
 
         return await self.get_identity(identity.id, raise_if_unknown=True)
 

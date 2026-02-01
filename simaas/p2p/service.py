@@ -16,10 +16,10 @@ from zmq.asyncio import Socket, Context
 
 from simaas.core.errors import ConfigurationError, OperationError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond
 
-logger = Logging.get('p2p')
+log = get_logger('simaas.p2p', 'p2p')
 
 
 class P2PService:
@@ -32,6 +32,7 @@ class P2PService:
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
+        self._stopped_event = threading.Event()  # Signals handler has fully stopped
         self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
         self._thread: Optional[threading.Thread] = None
 
@@ -40,7 +41,7 @@ class P2PService:
 
     def add(self, protocol: P2PProtocol) -> None:
         """Adds a protocol to the P2P service."""
-        logger.info(f"add P2P protocol: {protocol.name()}")
+        log.info('protocol', 'Adding P2P protocol', name=protocol.name())
         self._protocols[protocol.name()] = protocol
 
     def address(self) -> str:
@@ -71,7 +72,7 @@ class P2PService:
                     self._socket.curve_server = True
                 self._socket.bind(self._address)
                 self._ready_event.set()
-                logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
+                log.info('server', 'P2P server initialised', address=self._address)
             except Exception as e:
                 raise ConfigurationError(
                     path='p2p.socket',
@@ -85,6 +86,9 @@ class P2PService:
 
         Use this in async contexts where the event loop will keep running.
         """
+        # Clear events for clean start
+        self._stop_event.clear()
+        self._stopped_event.clear()
         with self._mutex:
             self._init_socket(encrypt, timeout)
         return asyncio.create_task(self._handle_incoming_connections())
@@ -99,6 +103,9 @@ class P2PService:
         self._bg_encrypt = encrypt
         self._bg_timeout = timeout
         self._bg_error = None
+        # Clear events for clean start
+        self._stop_event.clear()
+        self._stopped_event.clear()
         self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self._thread.start()
         # Wait for socket to be ready or error using event (outside mutex to avoid deadlock)
@@ -126,8 +133,8 @@ class P2PService:
             loop.close()
 
     def stop_service(self) -> None:
-        """Signals the server to stop accepting connections."""
-        logger.info(f"[{self._keystore.identity.name}] initiating shutdown of P2P service.")
+        """Signals the server to stop accepting connections and waits for cleanup."""
+        log.info('server', 'Initiating P2P service shutdown')
         self._stop_event.set()
         self._ready_event.clear()
         # Wait for the thread to finish (with timeout to avoid hanging)

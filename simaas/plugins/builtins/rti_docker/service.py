@@ -9,9 +9,8 @@ import traceback
 from typing import Optional, Tuple, Dict, List
 
 from simaas.cli.cmd_image import clone_repository, build_processor_image
-from simaas.cli.cmd_rti import shorten_id
 from simaas.core.helpers import get_timestamp_now
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.schemas import GithubCredentials
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.helpers import docker_find_image, docker_load_image, docker_delete_image, docker_run_job_container, \
@@ -23,7 +22,7 @@ from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Processor, Job, JobStatus, ProcessorVolume
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
 
-logger = Logging.get('rti.service')
+log = get_logger('simaas.rti', 'rti')
 
 
 REQUIRED_ENV = [
@@ -51,9 +50,9 @@ class DockerRTIService(RTIServiceBase):
         # determine the scratch path (if any)
         if self._scratch_volume:
             if os.path.isdir(self._scratch_volume):
-                logger.info(f"Docker RTI scratch path at '{self._scratch_volume}' found.")
+                log.info('init', 'Docker RTI scratch path found', path=self._scratch_volume)
             else:
-                logger.warning(f"Docker RTI scratch path at '{self._scratch_volume}' not found -> skipping")
+                log.warning('init', 'Docker RTI scratch path not found, skipping', path=self._scratch_volume)
                 self._scratch_volume = None
 
     @classmethod
@@ -150,8 +149,7 @@ class DockerRTIService(RTIServiceBase):
             self.update_proc_db(proc)
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[deploy:{shorten_id(proc.id)}] failed: {trace}")
+            log.error('deploy', 'Deployment failed', exc=e, proc=proc.id)
 
             proc.state = Processor.State.FAILED
             proc.error = str(e)
@@ -166,10 +164,7 @@ class DockerRTIService(RTIServiceBase):
                 await asyncio.to_thread(docker_delete_image, proc.image_name)
 
             except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(
-                    f"[undeploy:{shorten_id(proc.id)}] failed to delete docker image {proc.image_name}: {trace}"
-                )
+                log.error('undeploy', 'Failed to delete docker image', exc=e, proc=proc.id, image=proc.image_name)
 
         # remove the record from the db - no lock needed, session is per-call
         with self._session_maker() as session:
@@ -178,7 +173,7 @@ class DockerRTIService(RTIServiceBase):
                 session.delete(record)
                 session.commit()
             else:
-                logger.warning(f"[undeploy:{shorten_id(proc.id)}] db record not found for removal.")
+                log.warning('undeploy', 'DB record not found for removal', proc=proc.id)
 
     def _perform_submit(
             self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None
@@ -225,13 +220,14 @@ class DockerRTIService(RTIServiceBase):
         container_id = None
         try:
             container_id = self._perform_submit(job, proc)
-            logger.info(f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] successful -> container {container_id}")
+            log.info('submit', 'Single job submitted', proc=proc.id, job=job.id, container=container_id)
 
         except Exception as e:
-            msg = f"[submit:single:{shorten_id(proc.id)}] [job:{job.id}] failed -> "
-            logger.error(msg + (f"terminating {container_id}" if container_id else "no container to terminate"))
             if container_id:
+                log.error('submit', 'Submission failed, terminating container', proc=proc.id, job=job.id, container=container_id)
                 docker_kill_job_container(container_id)
+            else:
+                log.error('submit', 'Submission failed', proc=proc.id, job=job.id)
 
             raise e
 
@@ -240,15 +236,14 @@ class DockerRTIService(RTIServiceBase):
         for job, status, proc in batch:
             try:
                 container_id = self._perform_submit(job, proc, submitted=submitted)
-                logger.info(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] successful"
-                            f" -> container {container_id}")
+                log.info('submit', 'Batch job submitted', batch=batch_id, proc=proc.id, job=job.id, container=container_id)
 
             except Exception as e:
-                logger.error(f"[submit:batch:{batch_id}] [proc:{proc.id}:job:{job.id}] failed")
+                log.error('submit', 'Batch job submission failed', batch=batch_id, proc=proc.id, job=job.id)
 
                 # Something went wrong, kill already existing containers so there are no zombies from this batch.
                 for job, container_id in submitted:
-                    logger.info(f"[submit:batch:{batch_id}] [job:{job.id}] kill zombie container {container_id}")
+                    log.info('submit', 'Killing zombie container', batch=batch_id, job=job.id, container=container_id)
                     docker_kill_job_container(container_id)
 
                 raise e
@@ -292,7 +287,7 @@ class DockerRTIService(RTIServiceBase):
                     shutil.rmtree(scratch_path, ignore_errors=True)
 
         except Exception as e:
-            logger.error(f"[job:{job_id}] cancellation failed: {e}")
+            log.error('cancel', 'Job cancellation failed', exc=e, job=job_id)
 
         finally:
             self.on_cancellation_worker_done(job_id)
@@ -303,8 +298,7 @@ class DockerRTIService(RTIServiceBase):
             container_id = record.runner['container_id']
             await asyncio.to_thread(docker_kill_job_container, container_id)
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.warning(f"[job:{record.id}] killing Docker container {record.runner.get('container_id')} failed: {trace}")
+            log.warning('purge', 'Killing Docker container failed', job=record.id, container=record.runner.get('container_id'))
 
     async def perform_job_cleanup(self, job_id: str) -> None:
         try:
@@ -316,27 +310,26 @@ class DockerRTIService(RTIServiceBase):
 
                     # wait for docker container to be shutdown
                     container_id: str = record.runner['container_id']
-                    logger.info(f"[job:{job_id}] clean-up -> waiting for container {container_id} to be stopped")
+                    log.info('cleanup', 'Waiting for container to stop', job=job_id, container=container_id)
                     while await asyncio.to_thread(docker_container_running, container_id):
                         await asyncio.sleep(1)
 
                     # delete the container
-                    logger.info(f"[job:{job_id}] clean-up -> delete container {container_id}")
+                    log.info('cleanup', 'Deleting container', job=job_id, container=container_id)
                     await asyncio.to_thread(docker_delete_container, container_id)
 
                 # delete the scratch folder (if any)
                 if self._scratch_volume is not None:
                     # create the job-specific scratch folder
                     job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
-                    logger.info(f"[job:{job_id}] clean-up -> delete scratch folder at {job_scratch_path}")
+                    log.info('cleanup', 'Deleting scratch folder', job=job_id, path=job_scratch_path)
                     try:
                         await asyncio.to_thread(shutil.rmtree, job_scratch_path)
                     except OSError as e:
-                        logger.warning(f"[job:{job_id}] Failed to delete scratch folder: {e}")
+                        log.warning('cleanup', 'Failed to delete scratch folder', job=job_id, error=str(e))
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[job:{job_id}] clean-up failed: {trace}")
+            log.error('cleanup', 'Job cleanup failed', exc=e, job=job_id)
 
         finally:
             # notify base class that we are done

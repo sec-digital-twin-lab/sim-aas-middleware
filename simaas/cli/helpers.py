@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from simaas.core.errors import CLIError, _BaseError, RemoteError
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise as logging_initialise
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.dor.schemas import DataObject
@@ -25,7 +25,7 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo
 from simaas.core.schemas import KeystoreContent
 
-logger = Logging.get('cli')
+log = get_logger('simaas.cli', 'cli')
 
 
 def shorten_id(long_id: str) -> str:
@@ -58,7 +58,7 @@ def initialise_storage_folder(path: str, usage: str, is_verbose: bool = False) -
 
     # check if it already exists as directory
     if not os.path.isdir(path):
-        logger.info(f"creating storage ({usage}) directory '{path}'")
+        log.info('storage', 'Creating storage directory', path=path, usage=usage)
         os.makedirs(path)
         if is_verbose:
             print(f"Storage directory ({usage}) created at '{path}'.")
@@ -78,7 +78,7 @@ def get_available_keystores(path: str, is_verbose: bool = False) -> List[Keystor
                 content = KeystoreContent.model_validate(json.load(f))
             available.append(content)
         except ValidationError:
-            logger.info(f"error while parsing {filename}")
+            log.info('keystore', 'Error while parsing keystore file', filename=filename)
             if is_verbose:
                 print(f"Error while parsing {filename} -> Ignoring.")
             continue
@@ -442,7 +442,7 @@ class CLIParser(CLICommandGroup):
 
             console_enabled = args['log-console'] is not None
             log_path = args['log-path']
-            Logging.initialise(level=level, log_path=log_path, console_log_enabled=console_enabled)
+            logging_initialise(level=level, log_path=log_path, console_log_enabled=console_enabled)
             super().execute(args)
 
         except argparse.ArgumentError:
