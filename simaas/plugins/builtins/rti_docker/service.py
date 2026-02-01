@@ -249,14 +249,17 @@ class DockerRTIService(RTIServiceBase):
                 raise e
 
     async def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
+        runner_iid: str = None
         try:
             # mark cancelled in DB first (state is correct even if we crash later)
             self.mark_job_cancelled(job_id)
 
-            # get container_id (quick read, don't hold session)
+            # get container_id and runner identity (quick read, don't hold session)
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
                 container_id = record.runner.get('container_id') if record else None
+                if record and record.runner.get('identity'):
+                    runner_iid = record.runner['identity'].get('id')
 
             if not container_id:
                 return
@@ -279,12 +282,17 @@ class DockerRTIService(RTIServiceBase):
             if await asyncio.to_thread(docker_container_running, container_id):
                 await asyncio.to_thread(docker_kill_job_container, container_id)
 
-            # cleanup (if not retaining history)
+            # cleanup container/scratch (if not retaining history)
             if not self.retain_job_history:
                 await asyncio.to_thread(docker_delete_container, container_id)
                 if self._scratch_volume:
                     scratch_path = os.path.join(self._scratch_volume, f"{job_id}_scratch")
                     shutil.rmtree(scratch_path, ignore_errors=True)
+
+            # delete the runner identity (always, regardless of retain_job_history)
+            if runner_iid:
+                log.info('cancel', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
+                await self._node.db.delete_identity(runner_iid)
 
         except Exception as e:
             log.error('cancel', 'Job cancellation failed', exc=e, job=job_id)
@@ -301,13 +309,17 @@ class DockerRTIService(RTIServiceBase):
             log.warning('purge', 'Killing Docker container failed', job=record.id, container=record.runner.get('container_id'))
 
     async def perform_job_cleanup(self, job_id: str) -> None:
+        runner_iid: str = None
         try:
-            # only clean up if we are not supposed to keep the job history
-            if not self.retain_job_history:
-                # delete the container
-                with self._session_maker() as session:
-                    record: DBJobInfo = session.get(DBJobInfo, job_id)
+            with self._session_maker() as session:
+                record: DBJobInfo = session.get(DBJobInfo, job_id)
 
+                # extract runner identity ID for later deletion
+                if record.runner.get('identity'):
+                    runner_iid = record.runner['identity'].get('id')
+
+                # only clean up container/scratch if we are not supposed to keep the job history
+                if not self.retain_job_history:
                     # wait for docker container to be shutdown
                     container_id: str = record.runner['container_id']
                     log.info('cleanup', 'Waiting for container to stop', job=job_id, container=container_id)
@@ -318,15 +330,19 @@ class DockerRTIService(RTIServiceBase):
                     log.info('cleanup', 'Deleting container', job=job_id, container=container_id)
                     await asyncio.to_thread(docker_delete_container, container_id)
 
-                # delete the scratch folder (if any)
-                if self._scratch_volume is not None:
-                    # create the job-specific scratch folder
-                    job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
-                    log.info('cleanup', 'Deleting scratch folder', job=job_id, path=job_scratch_path)
-                    try:
-                        await asyncio.to_thread(shutil.rmtree, job_scratch_path)
-                    except OSError as e:
-                        log.warning('cleanup', 'Failed to delete scratch folder', job=job_id, error=str(e))
+            # delete the scratch folder (if any and not retaining history)
+            if not self.retain_job_history and self._scratch_volume is not None:
+                job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
+                log.info('cleanup', 'Deleting scratch folder', job=job_id, path=job_scratch_path)
+                try:
+                    await asyncio.to_thread(shutil.rmtree, job_scratch_path)
+                except OSError as e:
+                    log.warning('cleanup', 'Failed to delete scratch folder', job=job_id, error=str(e))
+
+            # delete the runner identity (always, regardless of retain_job_history)
+            if runner_iid:
+                log.info('cleanup', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
+                await self._node.db.delete_identity(runner_iid)
 
         except Exception as e:
             log.error('cleanup', 'Job cleanup failed', exc=e, job=job_id)

@@ -42,6 +42,8 @@ from simaas.tests.helper_assertions import (
     assert_job_failed,
     assert_job_cancelled,
     assert_data_object_content,
+    count_runner_identities,
+    assert_runner_identities_cleaned_up,
 )
 
 initialise(level=logging.DEBUG)
@@ -273,6 +275,9 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
     wrong_user = rti_context.get_known_user(extra_keystores)
     owner = rti_context.session_node.keystore
 
+    # Count runner identities before job submission
+    runner_count_before = count_runner_identities(rti_context.node_db_proxy)
+
     # Create task using factory
     task = create_abc_task(proc_id, owner, a=1, b=1, memory=rti_context.default_memory)
 
@@ -314,10 +319,13 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
         expected={'v': 2}, temp_dir=test_context.testing_dir
     )
 
+    # Verify runner identity was cleaned up after job completion
+    assert_runner_identities_cleaned_up(rti_context.node_db_proxy, runner_count_before)
+
 
 @pytest.mark.integration
 @pytest.mark.docker_only
-def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
+def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user, node_db_proxy):
     """Test job cancellation by the job owner.
 
     NOTE: This test is Docker-only due to network limitations when testing AWS.
@@ -332,6 +340,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
+
+    # Count runner identities before job submission
+    runner_count_before = count_runner_identities(node_db_proxy)
 
     # Create task with large input values for longer execution
     task = create_abc_task(proc_id, owner, a=100, b=100)
@@ -360,6 +371,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     # Wait for cancellation to complete
     status = wait_for_job_completion(rti_proxy, job_id, owner)
     assert_job_cancelled(status)
+
+    # Verify runner identity was cleaned up after job cancellation
+    assert_runner_identities_cleaned_up(node_db_proxy, runner_count_before)
 
 
 @pytest.mark.integration
