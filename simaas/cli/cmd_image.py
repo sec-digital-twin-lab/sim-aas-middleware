@@ -21,8 +21,7 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_i
 from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch, docker_client, \
-    is_valid_new_file
+from simaas.helpers import docker_export_image, determine_default_rest_address, docker_client, is_valid_new_file
 from simaas.nodedb.api import NodeDBProxy
 
 log = get_logger('simaas.cli', 'cli')
@@ -331,7 +330,7 @@ def build_pdi_file(args: dict) -> dict:
 class PDIBuildLocal(CLICommand):
     default_force_build = False
     default_keep_image = True
-    default_arch = docker_local_arch()
+    default_arch = 'linux/amd64'
 
     def __init__(self):
         super().__init__('build-local', 'build a PDI file from local source', arguments=[
@@ -392,7 +391,7 @@ class PDIBuildLocal(CLICommand):
 class PDIBuildGithub(CLICommand):
     default_force_build = False
     default_keep_image = True
-    default_arch = docker_local_arch()
+    default_arch = 'linux/amd64'
 
     def __init__(self):
         super().__init__('build-github', 'build a PDI file from Github source', arguments=[

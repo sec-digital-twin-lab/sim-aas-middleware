@@ -22,10 +22,10 @@ def get_nodes_by_service(address: tuple[str, int]) -> tuple[List[NodeInfo], List
     rti_nodes = []
     db = NodeDBProxy(address)
     for node in db.get_network():
-        if node.dor_service:
+        if node.dor_service and node.dor_service.lower() != 'none':
             dor_nodes.append(node)
 
-        if node.rti_service:
+        if node.rti_service and node.rti_service.lower() != 'none':
             rti_nodes.append(node)
 
     return dor_nodes, rti_nodes

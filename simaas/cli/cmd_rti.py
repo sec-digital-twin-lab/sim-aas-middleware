@@ -547,7 +547,7 @@ class RTIProcShow(CLICommand):
 class RTIJobSubmit(CLICommand):
     def __init__(self) -> None:
         super().__init__('submit', 'submit a new job', arguments=[
-            Argument('task', metavar='task', type=str, nargs='?', help="path to a task descriptor")
+            Argument('task', metavar='task', type=str, nargs='*', help="path to a task descriptor")
         ])
 
     def _prepare(self, args: dict) -> None:
