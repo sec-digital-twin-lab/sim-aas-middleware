@@ -133,13 +133,14 @@ def create_abc_task(
     a: int = 1,
     b: int = 1,
     memory: int = 1024,
-    namespace: Optional[str] = None
+    namespace: Optional[str] = None,
+    target_node_iid: Optional[str] = None
 ) -> Task:
     """Factory function for creating ABC processor tasks."""
     builder = (TaskBuilder(proc_id, owner.identity.id)
                .with_input_value('a', {'v': a})
                .with_input_value('b', {'v': b})
-               .with_output('c', owner.identity.id)
+               .with_output('c', owner.identity.id, target_node_iid=target_node_iid)
                .with_budget(memory=memory))
 
     if namespace:

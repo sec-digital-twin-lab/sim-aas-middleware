@@ -88,6 +88,25 @@ from simaas.tests.fixture_rti import (  # noqa: E402, F401
     PROC_FACTOR_SEARCH_PATH,
 )
 
+# RTI 2-Node fixtures: separated storage and execution nodes for P2P testing
+from simaas.tests.fixture_rti_2node import (  # noqa: E402, F401
+    RTI2NodeContext,
+    ProcessorDeployment2Node,
+    session_keystore_storage,
+    session_keystore_execution,
+    storage_node,
+    execution_node,
+    storage_dor_proxy,
+    storage_nodedb_proxy,
+    execution_rti_proxy,
+    execution_nodedb_proxy,
+    session_data_dir_2node,
+    deployed_abc_processor_2node,
+    deployed_room_processor_2node,
+    deployed_thermostat_processor_2node,
+    rti_2node_context,
+)
+
 
 def pytest_configure(config):
     """Register custom pytest markers."""
