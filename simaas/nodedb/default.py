@@ -1,5 +1,5 @@
 import threading
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from sqlalchemy import Column, String, BigInteger, Integer, Boolean
 from sqlalchemy import create_engine
@@ -16,6 +16,13 @@ from simaas.nodedb.protocol import NodeDBSnapshot, P2PCancelNamespaceReservation
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
 log = get_logger('simaas.nodedb', 'nodedb')
+
+
+def _parse_rest_address(addr_str: str) -> Tuple[str, int]:
+    """Parse a REST address string 'host:port' into a tuple (host, port)."""
+    host, port = addr_str.split(':')
+    return (host, int(port))
+
 
 Base = declarative_base()
 
@@ -76,7 +83,7 @@ class DefaultNodeDBService(NodeDBService):
                 dor_service=record.dor_service,
                 rti_service=record.rti_service,
                 p2p_address=record.p2p_address,
-                rest_address=record.rest_address.split(':') if record.rest_address else None,
+                rest_address=_parse_rest_address(record.rest_address) if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
                 strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
             )
@@ -94,7 +101,7 @@ class DefaultNodeDBService(NodeDBService):
                     dor_service=record.dor_service,
                     rti_service=record.rti_service,
                     p2p_address=record.p2p_address,
-                    rest_address=record.rest_address.split(':') if record.rest_address else None,
+                    rest_address=_parse_rest_address(record.rest_address) if record.rest_address else None,
                     retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
                     strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
                 ))

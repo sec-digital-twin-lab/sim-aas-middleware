@@ -136,6 +136,8 @@ class RESTService:
         self._thread = None
         self._bind_all_address = bind_all_address
         self._ready_event = threading.Event()
+        self._server: Optional[uvicorn.Server] = None
+        self._shutdown_event = threading.Event()
 
     def is_ready(self) -> bool:
         try:
@@ -166,11 +168,23 @@ class RESTService:
     def start_service(self) -> None:
         if self._thread is None:
             log.info('startup', 'REST service starting up')
-            self._thread = Thread(target=uvicorn.run, args=(self._app.api,),
-                                  kwargs={"host": self._host if not self._bind_all_address else "0.0.0.0",
-                                          "port": self._port, "log_level": "info"},
-                                  daemon=True)
 
+            # Reset shutdown event for clean start
+            self._shutdown_event.clear()
+
+            config = uvicorn.Config(
+                self._app.api,
+                host=self._host if not self._bind_all_address else "0.0.0.0",
+                port=self._port,
+                log_level="info"
+            )
+            self._server = uvicorn.Server(config)
+
+            def _run_server():
+                asyncio.run(self._server.serve())
+                self._shutdown_event.set()
+
+            self._thread = Thread(target=_run_server, daemon=True)
             self._thread.start()
 
             # spawn a checker thread to set ready event when service is up
@@ -190,8 +204,16 @@ class RESTService:
         else:
             log.info('shutdown', 'REST service shutting down')
             self._ready_event.clear()
-            # there is no way to terminate a thread...
-            # self._thread.terminate()
+
+            # signal uvicorn server to shutdown
+            if self._server is not None:
+                self._server.should_exit = True
+
+                # wait for server to actually stop (with timeout)
+                self._shutdown_event.wait(timeout=5.0)
+
+            self._thread = None
+            self._server = None
 
     async def wait_until_ready(self, timeout: float = 10.0) -> bool:
         """Wait until the REST service is ready.

@@ -62,13 +62,31 @@ class PortMaster:
     _next_ws = {}
 
     @classmethod
+    def _is_port_available(cls, host: str, port: int) -> bool:
+        """Check if a port is available for binding."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+            return True
+        except OSError:
+            return False
+        finally:
+            sock.close()
+
+    @classmethod
     def generate_p2p_address(cls, host: str = '127.0.0.1', protocol: str = 'tcp') -> str:
         with cls._mutex:
             if host not in cls._next_p2p:
                 cls._next_p2p[host] = 4100
 
-            address = f"{protocol}://{host}:{cls._next_p2p[host]}"
-            cls._next_p2p[host] += 1
+            # Find an available port
+            port = cls._next_p2p[host]
+            while not cls._is_port_available(host, port):
+                port += 1
+
+            address = f"{protocol}://{host}:{port}"
+            cls._next_p2p[host] = port + 1
 
             return address
 
@@ -78,8 +96,13 @@ class PortMaster:
             if host not in cls._next_rest:
                 cls._next_rest[host] = 5100
 
-            address = (host, cls._next_rest[host])
-            cls._next_rest[host] += 1
+            # Find an available port
+            port = cls._next_rest[host]
+            while not cls._is_port_available(host, port):
+                port += 1
+
+            address = (host, port)
+            cls._next_rest[host] = port + 1
             return address
 
     @classmethod
@@ -88,8 +111,13 @@ class PortMaster:
             if host not in cls._next_ws:
                 cls._next_ws[host] = 6100
 
-            address = (host, cls._next_rest[host])
-            cls._next_ws[host] += 1
+            # Find an available port
+            port = cls._next_ws[host]
+            while not cls._is_port_available(host, port):
+                port += 1
+
+            address = (host, port)
+            cls._next_ws[host] = port + 1
             return address
 
 
