@@ -77,6 +77,12 @@ class NodeDBService(abc.ABC):
         """
 
     @abc.abstractmethod
+    async def delete_identity(self, iid: str) -> None:
+        """
+        Deletes an identity from the database if it exists.
+        """
+
+    @abc.abstractmethod
     async def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
         """
         Returns information of a specific namespace.

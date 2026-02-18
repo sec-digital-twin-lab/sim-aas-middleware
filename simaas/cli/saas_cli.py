@@ -13,9 +13,11 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityRemove, IdentityShow
     IdentityDiscover, IdentityPublish, CredentialsRemove, CredentialsList, CredentialsAddSSHCredentials, \
     CredentialsAddGithubCredentials, CredentialsTestSSHCredentials, CredentialsTestGithubCredentials
 from simaas.cli.cmd_job_runner import JobRunner
-from simaas.cli.cmd_network import NetworkList
+from simaas.cli.cmd_network import NetworkList, NetworkPing, NetworkStatus
+from simaas.cli.cmd_node import NodeStatus, NodeInfo
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
-    RTIProcShow, RTIJobList, RTIJobCancel, RTIVolumeList, RTIVolumeCreateFSRef, RTIVolumeCreateEFSRef, RTIVolumeDelete
+    RTIProcShow, RTIJobList, RTIJobCancel, RTIJobInspect, RTIJobLogs, RTIVolumeList, RTIVolumeCreateFSRef, \
+    RTIVolumeCreateEFSRef, RTIVolumeDelete
 from simaas.cli.cmd_service import Service
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
@@ -120,6 +122,8 @@ def main():
                     RTIJobList(),
                     RTIJobSubmit(),
                     RTIJobStatus(),
+                    RTIJobInspect(),
+                    RTIJobLogs(),
                     RTIJobCancel()
                 ])
             ]),
@@ -135,7 +139,16 @@ def main():
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
             ], commands=[
-                NetworkList()
+                NetworkList(),
+                NetworkPing(),
+                NetworkStatus()
+            ]),
+            CLICommandGroup('node', 'node diagnostics and information', arguments=[
+                Argument('--address', dest='address', action='store',
+                         help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
+            ], commands=[
+                NodeStatus(),
+                NodeInfo()
             ])
         ])
 

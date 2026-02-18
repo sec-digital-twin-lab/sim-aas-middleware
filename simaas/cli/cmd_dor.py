@@ -265,11 +265,16 @@ class DORSearch(CLICommand):
             Argument('--data-format', dest='data-format', action='store',
                      help="only search for data objects with this data format"),
 
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
+
             Argument('pattern', metavar='pattern', type=str, nargs="*",
                      help="limits the search to data objects whose tag (key or value) contains the pattern(s)")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
+        import json as json_module
+
         prompt_if_missing(args, 'address', prompt_for_string,
                           message="Enter the target node's REST address",
                           default=determine_default_rest_address())
@@ -283,6 +288,7 @@ class DORSearch(CLICommand):
 
         # get a list of nodes in the network
         result = {}
+        json_output = []
         dor_nodes, _ = get_nodes_by_service(extract_address(args['address']))
         for node in dor_nodes:
             # create proxies
@@ -293,8 +299,19 @@ class DORSearch(CLICommand):
             search_result = node_dor.search(patterns=args.get('pattern'), data_type=args.get('data-type'),
                                             data_format=args.get('data-format'), owner_iid=owner_iid)
 
-            # print search results
-            if search_result:
+            if args.get('json_output'):
+                # JSON output mode - collect results
+                for item in search_result:
+                    json_output.append({
+                        'obj_id': item.obj_id,
+                        'owner_iid': item.owner_iid,
+                        'data_type': item.data_type,
+                        'data_format': item.data_format,
+                        'tags': item.tags,
+                        'node_address': f"{node.rest_address[0]}:{node.rest_address[1]}"
+                    })
+                    result[item.obj_id] = item
+            elif search_result:
                 print(f"Found {len(search_result)} data objects at {node.identity.id}/"
                       f"{node.rest_address[0]}:{node.rest_address[1]} that match the criteria:")
 
@@ -325,6 +342,9 @@ class DORSearch(CLICommand):
                 print(
                     f"No data objects found at {shorten_id(node.identity.id)}/"
                     f"{node.rest_address[0]}:{node.rest_address[1]} that match the criteria.")
+
+        if args.get('json_output'):
+            print(json_module.dumps(json_output, indent=2))
 
         return result
 

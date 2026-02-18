@@ -254,6 +254,14 @@ class DefaultNodeDBService(NodeDBService):
 
         return await self.get_identity(identity.id, raise_if_unknown=True)
 
+    async def delete_identity(self, iid: str) -> None:
+        """
+        Deletes an identity from the database if it exists.
+        """
+        with self._Session() as session:
+            session.query(IdentityRecord).filter_by(iid=iid).delete()
+            session.commit()
+
     async def get_snapshot(self, exclude: List[str] = None) -> NodeDBSnapshot:
         """
         Retrieves a snapshot of the contents stored in the db.

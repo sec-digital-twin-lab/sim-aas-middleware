@@ -368,7 +368,7 @@ class AWSRTIService(RTIServiceBase):
             protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj: Optional[DataObject] = None
-            for node in [node for node in await self._node.db.get_network() if node.dor_service]:
+            for node in [node for node in await self._node.db.get_network() if node.dor_service and node.dor_service.lower() != 'none']:
                 result: Dict[str, DataObject] = await protocol.perform(node, [proc.id])
                 proc_obj = result.get(proc.id)
                 if proc_obj:
@@ -578,14 +578,17 @@ class AWSRTIService(RTIServiceBase):
                 raise e
 
     async def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
+        runner_iid: str = None
         try:
             # mark cancelled in DB first (state is correct even if we crash later)
             self.mark_job_cancelled(job_id)
 
-            # get aws_job_id (quick read, don't hold session)
+            # get aws_job_id and runner identity (quick read, don't hold session)
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
                 aws_job_id = record.runner.get('aws_job_id') if record else None
+                if record and record.runner.get('identity'):
+                    runner_iid = record.runner['identity'].get('id')
 
             if not aws_job_id:
                 return
@@ -608,6 +611,11 @@ class AWSRTIService(RTIServiceBase):
             if await asyncio.to_thread(batch_job_running, aws_job_id):
                 await asyncio.to_thread(batch_terminate_job, aws_job_id)
 
+            # delete the runner identity (always, regardless of retain_job_history)
+            if runner_iid:
+                log.info('cancel', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
+                await self._node.db.delete_identity(runner_iid)
+
         except Exception as e:
             log.error('cancel', 'Job cancellation failed', exc=e, job=job_id)
 
@@ -623,7 +631,21 @@ class AWSRTIService(RTIServiceBase):
             log.warning('purge', 'Killing AWS Batch job failed', job=record.id, aws_job=aws_job_id)
 
     async def perform_job_cleanup(self, job_id: str) -> None:
-        ...
+        try:
+            # delete the runner identity (always, regardless of retain_job_history)
+            with self._session_maker() as session:
+                record: DBJobInfo = session.get(DBJobInfo, job_id)
+                if record and record.runner.get('identity'):
+                    runner_iid = record.runner['identity'].get('id')
+                    if runner_iid:
+                        log.info('cleanup', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
+                        await self._node.db.delete_identity(runner_iid)
+
+        except Exception as e:
+            log.error('cleanup', 'Job cleanup failed', exc=e, job=job_id)
+
+        finally:
+            self.on_cleanup_worker_done(job_id)
 
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         # update missing port mappings by using the same host as the runner address. this makes some assumptions

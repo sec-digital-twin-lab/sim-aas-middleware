@@ -17,8 +17,8 @@ class Task(BaseModel):
         name: str = Field(..., title="Name", description="The name of the input (needs to exactly match the input as defined by the processor).")
         type: Literal["reference"] = Field(..., title="Type", description="Must be 'reference' for by-reference inputs.", examples=["reference"])
         obj_id: str = Field(..., title="Object Id", description="The id of the object to be used for this input.")
-        user_signature: Optional[str] = Field(title="User Signature", description="A valid signature by the identity who owns the task. The RTI will use this signature to verify the user has access to the data object. User signature is only relevant and needed in case the referenced data object has restricted access.")
-        c_hash: Optional[str] = Field(title="Content Hash", description="The content hash of this input.")
+        user_signature: Optional[str] = Field(default=None, title="User Signature", description="A valid signature by the identity who owns the task. The RTI will use this signature to verify the user has access to the data object. User signature is only relevant and needed in case the referenced data object has restricted access.")
+        c_hash: Optional[str] = Field(default=None, title="Content Hash", description="The content hash of this input.")
 
     class InputValue(BaseModel):
         name: str = Field(..., title="Name", description="The name of the input (needs to exactly match the input as defined by the processor).")
@@ -30,16 +30,16 @@ class Task(BaseModel):
         owner_iid: str = Field(..., title="Owner IId", description="The id of the identity who will be the owner of this output data object once it has been created as part of this task.")
         restricted_access: bool = Field(..., title="Access Restricted", description="Indicates if access to the data object content should be restricted.", examples=[False])
         content_encrypted: bool = Field(..., title="Content Encrypted", description="Indicates if the content of this data object should be encrypted using the owner's public encryption key.", examples=[False])
-        target_node_iid: Optional[str] = Field(title="Target Node IId", description="The id of the target node's identity for storing the output data objects")
+        target_node_iid: Optional[str] = Field(default=None, title="Target Node IId", description="The id of the target node's identity for storing the output data objects")
 
     proc_id: str = Field(..., title="Processor Id", description="The id of the processor to be used for this task.")
     user_iid: str = Field(..., title="User IId", description="The id of the user's identity who owns this task.")
     input: List[Union[InputReference, InputValue]] = Field(..., title="Input", description="Information needed for every input defined by the processor.")
     output: List[Output] = Field(..., title="Output", description="Information needed for every output defined by the processor.")
-    budget: Optional[ResourceDescriptor] = Field(title="Budget", description="The optional resource budget for this task.")
-    namespace: Optional[str] = Field(title="namespace", description="The optional name of the namespace this tasks belongs to.")
-    name: Optional[str] = Field(title="Name", description="The optional name of this task.")
-    description: Optional[str] = Field(title="Description", description="The optional description of this task.")
+    budget: Optional[ResourceDescriptor] = Field(default=None, title="Budget", description="The optional resource budget for this task.")
+    namespace: Optional[str] = Field(default=None, title="namespace", description="The optional name of the namespace this tasks belongs to.")
+    name: Optional[str] = Field(default=None, title="Name", description="The optional name of this task.")
+    description: Optional[str] = Field(default=None, title="Description", description="The optional description of this task.")
 
 
 class Job(BaseModel):

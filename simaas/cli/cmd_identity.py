@@ -60,10 +60,10 @@ class IdentityRemove(CLICommand):
             # delete the keystore
             keystore_path = os.path.join(args['keystore'], f"{args['keystore-id']}.json")
             os.remove(keystore_path)
-            print(f"Keystore {args['keystore-id']} deleted.")
+            print(f"Keystore deleted.")
 
         else:
-            print("Aborting.")
+            print("Operation cancelled.")
 
         return None
 
@@ -107,11 +107,20 @@ class IdentityShow(CLICommand):
 
 class IdentityList(CLICommand):
     def __init__(self):
-        super().__init__('list', 'lists all identities found in the keystore directory')
+        super().__init__('list', 'lists all identities found in the keystore directory', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         available = get_available_keystores(args['keystore'])
-        if len(available) > 0:
+
+        if args.get('json_output'):
+            # JSON output mode
+            output = [{'name': item.profile.name, 'email': item.profile.email, 'id': item.iid}
+                      for item in available]
+            print(json.dumps(output, indent=2))
+        elif len(available) > 0:
             print(f"Found {len(available)} keystores in '{args['keystore']}':")
 
             # headers
@@ -127,7 +136,7 @@ class IdentityList(CLICommand):
 
             print(tabulate(lines, tablefmt="plain"))
         else:
-            print(f"No keystores found in '{args['keystore']}'.")
+            print("No keystores found.")
 
         return {
             'available': available
@@ -151,7 +160,7 @@ class IdentityPublish(CLICommand):
 
         proxy = NodeDBProxy(extract_address(args['address']))
         proxy.update_identity(keystore.identity)
-        print(f"Published identity of keystore {args['keystore-id']}")
+        print("Identity published.")
 
         return None
 
@@ -160,7 +169,9 @@ class IdentityDiscover(CLICommand):
     def __init__(self):
         super().__init__('discover', 'retrieves a list of all identities known to a node', arguments=[
             Argument('--address', dest='address', action='store', required=False,
-                     help="the address (host:port) of the node")
+                     help="the address (host:port) of the node"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args) -> Optional[dict]:
@@ -170,8 +181,14 @@ class IdentityDiscover(CLICommand):
 
         proxy = NodeDBProxy(extract_address(args['address']))
         identities = proxy.get_identities()
-        if len(identities) == 0:
-            print("No identities discovered.")
+
+        if args.get('json_output'):
+            # JSON output mode
+            output = [{'name': item.name, 'email': item.email, 'id': item.id}
+                      for item in identities.values()]
+            print(json.dumps(output, indent=2))
+        elif len(identities) == 0:
+            print("No identities found.")
         else:
             print(f"Discovered {len(identities)} identities:")
 
@@ -262,7 +279,7 @@ class CredentialsAddSSHCredentials(CLICommand):
         credentials = SSHCredentials(host=args['host'], login=args['login'], key=key_content, passphrase=passphrase)
         keystore.ssh_credentials.update(args['name'], credentials)
         keystore.sync()
-        print("Credential successfully created.")
+        print("Credentials created.")
 
         return {
             'credentials': credentials
@@ -290,7 +307,7 @@ class CredentialsAddGithubCredentials(CLICommand):
         credentials = GithubCredentials(login=args['login'], personal_access_token=args['personal_access_token'])
         keystore.github_credentials.update(args['url'], credentials)
         keystore.sync()
-        print("Credential successfully created.")
+        print("Credentials created.")
 
         return {
             'credentials': credentials
@@ -353,7 +370,7 @@ class CredentialsRemove(CLICommand):
                     print("Done")
                 keystore.sync()
             else:
-                print("Aborting.")
+                print("Operation cancelled.")
 
         else:
             # prompt for selection
@@ -380,7 +397,7 @@ class CredentialsRemove(CLICommand):
                         print("Done")
                 keystore.sync()
             else:
-                print("Aborting.")
+                print("Operation cancelled.")
 
         return {
             'removed': removed
@@ -472,32 +489,46 @@ class CredentialsTestGithubCredentials(CLICommand):
 
 class CredentialsList(CLICommand):
     def __init__(self):
-        super().__init__('list', 'lists credentials of the keystore', arguments=[])
+        super().__init__('list', 'lists credentials of the keystore', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         keystore = load_keystore(args, ensure_publication=False)
 
-        # headers
-        lines = [
-            ['TYPE', 'CREDENTIAL NAME', 'DETAILS'],
-            ['----', '---------------', '-------']
-        ]
-
         credentials = []
+        ssh_creds = []
+        github_creds = []
+
         for name in keystore.ssh_credentials.list():
             c = keystore.ssh_credentials.get(name)
+            ssh_creds.append({'type': 'ssh', 'name': name, 'login': c.login, 'host': c.host})
             credentials.append(c)
-            lines.append(['SSH', name, f"{c.login}@{c.host}"])
 
         for name in keystore.github_credentials.list():
             c = keystore.github_credentials.get(name)
+            github_creds.append({'type': 'github', 'name': name, 'login': c.login})
             credentials.append(c)
-            lines.append(['Github', name, c.login])
 
-        if len(credentials) == 0:
+        if args.get('json_output'):
+            # JSON output mode
+            print(json.dumps(ssh_creds + github_creds, indent=2))
+        elif len(credentials) == 0:
             print("No credentials found.")
-
         else:
+            # headers
+            lines = [
+                ['TYPE', 'CREDENTIAL NAME', 'DETAILS'],
+                ['----', '---------------', '-------']
+            ]
+
+            for item in ssh_creds:
+                lines.append(['SSH', item['name'], f"{item['login']}@{item['host']}"])
+
+            for item in github_creds:
+                lines.append(['Github', item['name'], item['login']])
+
             print(f"Found {len(lines)-2} credentials:")
             print(tabulate(lines, tablefmt="plain"))
 
