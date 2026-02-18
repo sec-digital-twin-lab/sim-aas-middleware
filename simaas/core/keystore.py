@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from zmq.utils import z85
 
 from simaas.core.eckeypair import ECKeyPair
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import ConfigurationError, InternalError
 from simaas.core.helpers import hash_json_object, get_timestamp_now
 from simaas.core.keypair import KeyPair
 from simaas.core.logging import Logging
@@ -67,8 +67,12 @@ class Keystore:
         # check if signature is valid
         content_hash = hash_json_object(content.model_dump(), exclusions=['signature'])
         if not self._s_key.verify(content_hash, content.signature):
-            raise SaaSRuntimeException(f"Invalid keystore content signature: "
-                                       f"content_hash={content_hash}, signature={content.signature}.")
+            raise ConfigurationError(
+                path='keystore',
+                expected='valid signature',
+                actual='invalid signature',
+                hint='The keystore file may be corrupted or tampered with'
+            )
 
         self._update_identity()
 
@@ -126,7 +130,12 @@ class Keystore:
         for required in ['master-key', 'signing-key', 'encryption-key', 'content-keys', 'ssh-credentials',
                          'github-credentials']:
             if required not in content.assets:
-                raise SaaSRuntimeException(f"Keystore invalid: {required} found.")
+                raise ConfigurationError(
+                    path='keystore.assets',
+                    expected=f"'{required}' asset",
+                    actual='missing',
+                    hint='Keystore is missing required assets'
+                )
 
         # create keystore
         keystore = Keystore(content)
@@ -140,20 +149,35 @@ class Keystore:
     def from_file(cls, keystore_path: str, password: str) -> Keystore:
         # check if keystore file exists
         if not os.path.isfile(keystore_path):
-            raise SaaSRuntimeException(f"Keystore content not found at {keystore_path}")
+            raise ConfigurationError(
+                path=keystore_path,
+                expected='keystore file',
+                actual='not found',
+                hint='Check if the keystore path is correct'
+            )
 
         # load content and validate
         try:
             with open(keystore_path, 'r') as f:
                 content = KeystoreContent.model_validate(json.load(f))
         except ValidationError:
-            raise SaaSRuntimeException("Keystore content not compliant with json schema.")
+            raise ConfigurationError(
+                path=keystore_path,
+                expected='valid JSON schema',
+                actual='invalid schema',
+                hint='Keystore content is not compliant with expected schema'
+            )
 
         # check if we have required assets
         for required in ['master-key', 'signing-key', 'encryption-key', 'content-keys', 'ssh-credentials',
                          'github-credentials']:
             if required not in content.assets:
-                raise SaaSRuntimeException(f"Keystore invalid: {required} found.")
+                raise ConfigurationError(
+                    path='keystore.assets',
+                    expected=f"'{required}' asset",
+                    actual='missing',
+                    hint='Keystore is missing required assets'
+                )
 
         # create keystore
         keystore = Keystore(content, path=keystore_path, password=password)
@@ -260,9 +284,11 @@ class Keystore:
 
         # verify the identity's integrity
         if not self._identity.verify_integrity():
-            raise SaaSRuntimeException("Keystore produced invalid identity", details={
-                'identity': self._identity
-            })
+            raise InternalError(
+                component='keystore',
+                state='identity verification failed',
+                hint='The generated identity failed integrity verification'
+            )
 
     def sync(self) -> None:
         with self._mutex:

@@ -18,7 +18,7 @@ from simaas.helpers import docker_find_image, docker_load_image, docker_delete_i
     docker_kill_job_container, docker_container_running, docker_get_exposed_ports, docker_delete_container
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBDeployedProcessor, DBJobInfo
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import ConfigurationError, ValidationError, OperationError, NotFoundError
 from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Processor, Job, JobStatus, ProcessorVolume
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
@@ -40,7 +40,7 @@ class DockerRTIService(RTIServiceBase):
 
         # check if all required env variables are available
         if not all(var in os.environ for var in REQUIRED_ENV):
-            raise RTIException(f"The following environment variables need to be defined: {REQUIRED_ENV}.")
+            raise ConfigurationError(setting=str(REQUIRED_ENV), hint='environment variables required')
 
         # initialise properties
         self._port_range = (6000, 9000)
@@ -78,12 +78,12 @@ class DockerRTIService(RTIServiceBase):
 
             # not found?
             if proc_obj is None:
-                raise RTIException(f"Processor {proc.id} not found in DOR(s).")
+                raise NotFoundError(resource_type='processor', resource_id=proc.id, hint='not found in DOR(s)')
 
             # determine the image name
             image_name = proc_obj.tags.get('image_name')
             if image_name is None:
-                raise RTIException("Malformed processor data object -> image_name not found.")
+                raise ValidationError(field='tags.image_name', hint='missing from processor data object')
 
             # do we already have this docker image deployed? if not fetch and load from DOR
             if not await asyncio.to_thread(docker_find_image, image_name):
@@ -98,7 +98,7 @@ class DockerRTIService(RTIServiceBase):
                     # load the image
                     image = await asyncio.to_thread(docker_load_image, content_path, image_name)
                     if image is None:
-                        raise RTIException(f"Image loaded but {image_name} not found.")
+                        raise OperationError(operation='docker_load', stage='verify', cause=f'image {image_name} not found after load')
 
                 else:
                     # do we have credentials for this repo?
@@ -392,7 +392,7 @@ class DockerRTIService(RTIServiceBase):
 
         # do we have a runner P2P address?
         if runner_p2p_address is None:
-            raise RTIException("Processor docker image invalid: runner P2P port not exposed")
+            raise ValidationError(field='exposed_ports', hint='runner P2P port 6000/tcp not exposed')
 
         # create the ports mapping information
         ports: Dict[str, str] = {

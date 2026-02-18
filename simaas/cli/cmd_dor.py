@@ -5,7 +5,7 @@ from typing import Optional, Dict, List
 from InquirerPy.base import Choice
 from tabulate import tabulate
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError, RemoteError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, \
     prompt_for_keystore_selection, prompt_for_confirmation, prompt_for_selection, prompt_for_tags, load_keystore, \
     get_nodes_by_service, extract_address, prompt_for_identity_selection, prompt_for_data_objects, \
@@ -17,7 +17,6 @@ from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.dor.schemas import DataObject
 from simaas.nodedb.api import NodeDBProxy
-from simaas.rest.exceptions import UnsuccessfulRequestError
 
 logger = Logging.get('cli')
 
@@ -29,7 +28,7 @@ def _require_dor(args: dict) -> DORProxy:
 
     db = NodeDBProxy(extract_address(args['address']))
     if db.get_node().dor_service.lower() == 'none':
-        raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
+        raise CLIError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a DOR service. Aborting.")
 
     return DORProxy(extract_address(args['address']))
@@ -62,7 +61,7 @@ class DORAdd(CLICommand):
 
         # check if the file exists
         if not os.path.isfile(args['file'][0]):
-            raise CLIRuntimeError(f"No file found at '{args['file']}'. Aborting.")
+            raise CLIError(f"No file found at '{args['file']}'. Aborting.")
 
         # set some access/content parameters
         restrict_access = args['restrict_access'] is True
@@ -130,7 +129,7 @@ class DORMeta(CLICommand):
         # get the meta information
         meta = dor.get_meta(args['obj-id'])
         if not meta:
-            raise CLIRuntimeError(f"No data object with id={args['obj-id']}")
+            raise CLIError(f"No data object with id={args['obj-id']}")
 
         print(json.dumps(meta.model_dump(), indent=4))
 
@@ -186,7 +185,7 @@ class DORDownload(CLICommand):
 
         # do we have removable data objects?
         if len(downloadable) == 0:
-            raise CLIRuntimeError("No data objects available for download. Aborting.")
+            raise CLIError("No data objects available for download. Aborting.")
 
         # download the data objects
         dor = DORProxy(extract_address(args['address']))
@@ -199,7 +198,7 @@ class DORDownload(CLICommand):
                 result[obj.obj_id] = download_path
                 print("Done")
 
-            except UnsuccessfulRequestError as e:
+            except RemoteError as e:
                 print(f"{e.reason} details: {e.details}")
 
         return result
@@ -240,7 +239,7 @@ class DORRemove(CLICommand):
 
         # do we have removable data objects?
         if len(args['obj-ids']) == 0:
-            raise CLIRuntimeError("No removable data objects. Aborting.")
+            raise CLIError("No removable data objects. Aborting.")
 
         # remove data objects
         dor = DORProxy(extract_address(args['address']))
@@ -369,7 +368,7 @@ class DORTag(CLICommand):
 
         # do we have any data objects?
         if len(found) == 0:
-            raise CLIRuntimeError("No data objects found. Aborting.")
+            raise CLIError("No data objects found. Aborting.")
 
         # do we have valid tags?
         if args['tags']:
@@ -389,7 +388,7 @@ class DORTag(CLICommand):
 
         # do we have valid tags?
         if len(valid_tags) == 0:
-            raise CLIRuntimeError("No valid tags found. Aborting.")
+            raise CLIError("No valid tags found. Aborting.")
 
         # update the tags
         result: Dict[str, DataObject] = {}
@@ -427,7 +426,7 @@ class DORUntag(CLICommand):
             result = dor.search(owner_iid=keystore.identity.id)
             result = {item.obj_id: item for item in result}
             if args['obj-id'] not in result:
-                raise CLIRuntimeError(f"Data object '{args['obj-id']}' does not exist or is not owned by "
+                raise CLIError(f"Data object '{args['obj-id']}' does not exist or is not owned by "
                                       f"'{label_identity(keystore.identity)}'. Aborting.")
 
         # do we have tags?
@@ -454,7 +453,7 @@ class DORUntag(CLICommand):
 
         # do we have valid tags?
         if len(valid_keys) == 0:
-            raise CLIRuntimeError("No valid keys found. Aborting.")
+            raise CLIError("No valid keys found. Aborting.")
 
         # update the tags
         print(f"Removing tags for data object {shorten_id(args['obj-id'])}...", end='')
@@ -480,7 +479,7 @@ class DORAccessShow(CLICommand):
         # get all data objects by this user
         result = dor.search(owner_iid=keystore.identity.id)
         if not result:
-            raise CLIRuntimeError("No data objects found. Aborting.")
+            raise CLIError("No data objects found. Aborting.")
 
         # do we have object id?
         if not args['obj-id']:
@@ -490,7 +489,7 @@ class DORAccessShow(CLICommand):
         # check if the object id exists
         result = {item.obj_id: item for item in result}
         if args['obj-id'] not in result:
-            raise CLIRuntimeError(f"Data object '{args['obj-id']}' does not exist or is not owned by '"
+            raise CLIError(f"Data object '{args['obj-id']}' does not exist or is not owned by '"
                                   f"{keystore.identity.name}/"
                                   f"{keystore.identity.email}/"
                                   f"{keystore.identity.id}"
@@ -551,7 +550,7 @@ class DORAccessGrant(CLICommand):
             for obj_id in args['obj-ids']:
                 meta = dor.get_meta(obj_id)
                 if not meta or meta.owner_iid != keystore.identity.id:
-                    raise CLIRuntimeError(f"Ignoring data object '{obj_id}': does not exist or is not owned by '"
+                    raise CLIError(f"Ignoring data object '{obj_id}': does not exist or is not owned by '"
                                           f"{label_identity(keystore.identity)}'")
                 else:
                     removable.append(obj_id)
@@ -559,7 +558,7 @@ class DORAccessGrant(CLICommand):
 
         # do we have data objects?
         if len(args['obj-ids']) == 0:
-            raise CLIRuntimeError("No data objects. Aborting.")
+            raise CLIError("No data objects. Aborting.")
 
         # get the identities known to the node
         db = NodeDBProxy(extract_address(args['address']))
@@ -573,7 +572,7 @@ class DORAccessGrant(CLICommand):
 
         # is the identity known to the node?
         if args['iid'] not in identities:
-            raise CLIRuntimeError(f"Target node does not know identity {shorten_id(args['iid'])}. Aborting.")
+            raise CLIError(f"Target node does not know identity {shorten_id(args['iid'])}. Aborting.")
 
         # grant access
         granted = []
@@ -614,13 +613,13 @@ class DORAccessRevoke(CLICommand):
                                                      allow_multiple=False)
 
             if args['obj-id'] is None:
-                raise CLIRuntimeError("No data objects found. Aborting.")
+                raise CLIError("No data objects found. Aborting.")
 
         else:
             # check if the object id exists/owned by this entity
             meta = dor.get_meta(args['obj-id'])
             if not meta or meta.owner_iid != keystore.identity.id:
-                raise CLIRuntimeError(f"Ignoring data object '{args['obj-id']}': does not exist or is not owned by '"
+                raise CLIError(f"Ignoring data object '{args['obj-id']}': does not exist or is not owned by '"
                                       f"{label_identity(keystore.identity)}'")
 
         # collect the identity information of all those that have access
@@ -638,7 +637,7 @@ class DORAccessRevoke(CLICommand):
         if not args.get('iids'):
             # do we have any choices?
             if not choices:
-                raise CLIRuntimeError("No identities whose access could be revoked.")
+                raise CLIError("No identities whose access could be revoked.")
 
             # select the identities to be removed
             args['iids'] = prompt_for_selection(

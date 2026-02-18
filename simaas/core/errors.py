@@ -2,21 +2,23 @@
 Simplified exception hierarchy for Sim-aaS middleware.
 
 This module provides a clean, structured set of exceptions with automatic
-ID generation, JSON-serializable details, and compatibility with the
-existing ExceptionContent model.
+ID generation, JSON-serializable details, and the ExceptionContent model
+for API response serialization.
 """
 
 import json
 from typing import Any, Optional
 
-from simaas.core.exceptions import ExceptionContent
+from pydantic import BaseModel, Field
+
 from simaas.core.helpers import generate_random_string
 from simaas.core.logging import Logging
 
 logger = Logging.get('simaas.core')
 
 __all__ = [
-    '_BaseError',  # Exported for REST handler catch-all
+    'ExceptionContent',
+    '_BaseError',
     'ConfigurationError',
     'AuthenticationError',
     'AuthorisationError',
@@ -25,7 +27,16 @@ __all__ = [
     'OperationError',
     'ValidationError',
     'InternalError',
+    'CLIError',
+    'RemoteError',
 ]
+
+
+class ExceptionContent(BaseModel):
+    """Exception content for API response serialization."""
+    id: str = Field(..., title="Id", description="The unique identifier of this exception.")
+    reason: str = Field(..., title="Reason", description="The reason that caused this exception.")
+    details: Optional[dict] = Field(title="Details", description="Supporting information about this exception.")
 
 
 class _BaseError(Exception):
@@ -258,3 +269,34 @@ class InternalError(_BaseError):
             reason += f": {state}"
 
         return reason
+
+
+class CLIError(_BaseError):
+    """CLI operation failed. Args: reason, details, hint."""
+
+    def __init__(self, reason: str, details: dict = None, **kwargs: Any) -> None:
+        # Store reason for format_reason
+        kwargs['reason'] = reason
+        if details:
+            kwargs['details'] = details
+        super().__init__(**kwargs)
+
+    @classmethod
+    def _format_reason(cls, **kwargs: Any) -> str:
+        return kwargs.get('reason', 'CLI error')
+
+
+class RemoteError(_BaseError):
+    """Remote request failed. Args: reason, remote_id, remote_details, url, status_code."""
+
+    def __init__(self, reason: str, remote_id: str = None, remote_details: dict = None, **kwargs: Any) -> None:
+        kwargs['reason'] = reason
+        if remote_id is not None:
+            kwargs['remote_id'] = remote_id
+        if remote_details is not None:
+            kwargs['remote_details'] = remote_details
+        super().__init__(**kwargs)
+
+    @classmethod
+    def _format_reason(cls, **kwargs: Any) -> str:
+        return kwargs.get('reason', 'Remote request failed')

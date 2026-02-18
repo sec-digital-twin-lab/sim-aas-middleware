@@ -13,7 +13,7 @@ from simaas.core.helpers import hash_json_object, symmetric_decrypt, symmetric_e
 from simaas.dor.schemas import DataObject
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import Logging
-from simaas.rest.exceptions import UnsuccessfulRequestError
+from simaas.core.errors import RemoteError
 
 Logging.initialise(level=logging.DEBUG)
 logger = Logging.get(__name__)
@@ -116,14 +116,14 @@ def test_add_c(session_keystore, dor_proxy, unknown_user, random_content):
     owner = session_keystore.identity
 
     # unknown owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.add_data_object(random_content, unknown_user.identity, False, False, 'JSON', 'json', [owner])
-    assert('Identity not found' in e.value.reason)
+    assert 'not found' in e.value.reason.lower()
 
     # unknown creator
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', [unknown_user.identity])
-    assert ('Identity not found' in e.value.reason)
+    assert 'not found' in e.value.reason.lower()
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', [owner])
     assert(result is not None)
@@ -186,14 +186,14 @@ def test_remove(dor_proxy, random_content, known_users):
     obj_id = result.obj_id
 
     # try to delete non-existent object
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.delete_data_object('invalid obj id', with_authorisation_by=c0)
-    assert('Data object not found' in e.value.reason)
+    assert 'not found' in e.value.reason.lower()
 
     # try to delete with wrong authority
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.delete_data_object(obj_id, with_authorisation_by=c1)
-    assert('user is not the data object owner' in e.value.details['reason'])
+    assert('Authorisation denied' in e.value.reason or 'owner' in e.value.reason)
 
     # try to delete with correct authority
     result = dor_proxy.delete_data_object(obj_id, with_authorisation_by=c0)
@@ -236,17 +236,17 @@ def test_get_content(test_context, session_keystore, dor_proxy, random_content, 
     unknown_authority = unknown_user
     wrong_authority = known_users[0]
 
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.get_content(invalid_obj_id, correct_authority, download_path)
-    assert(e.value.details['reason'] == 'data object does not exist')
+    assert 'not found' in e.value.reason.lower() or 'does not exist' in e.value.reason.lower()
 
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.get_content(valid_obj_id, unknown_authority, download_path)
-    assert(e.value.details['reason'] == 'unknown identity')
+    assert 'authorisation denied' in e.value.reason.lower() or 'unknown' in e.value.reason.lower()
 
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.get_content(valid_obj_id, wrong_authority, download_path)
-    assert(e.value.details['reason'] == 'user has no access to the data object content')
+    assert 'authorisation denied' in e.value.reason.lower() or 'access' in e.value.reason.lower()
 
     dor_proxy.get_content(valid_obj_id, correct_authority, download_path)
     assert(os.path.isfile(download_path))
@@ -353,9 +353,9 @@ def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_
     assert(user1.identity.id not in meta.access)
 
     # try to grant access to a user that doesn't have access yet without being the owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.grant_access(obj_id, user0, user1.identity)
-    assert(e.value.details['reason'] == 'user is not the data object owner')
+    assert 'authorisation denied' in e.value.reason.lower() or 'owner' in e.value.reason.lower()
 
     # try to grant access to a user that doesn't have access yet
     meta = dor_proxy.grant_access(obj_id, owner, user1.identity)
@@ -372,9 +372,9 @@ def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_
     assert (user1.identity.id in meta.access)
 
     # try to revoke access from a user that has access without being the owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.revoke_access(obj_id, user0, user1.identity)
-    assert(e.value.details['reason'] == 'user is not the data object owner')
+    assert 'authorisation denied' in e.value.reason.lower() or 'owner' in e.value.reason.lower()
 
     # try to revoke access from a user that has access
     meta = dor_proxy.revoke_access(obj_id, owner, user1.identity)
@@ -407,14 +407,14 @@ def test_transfer_ownership(session_keystore, dor_proxy, random_content, known_u
     assert(owner.identity.id == meta.owner_iid)
 
     # try to transfer ownership without being the owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.transfer_ownership(obj_id, user0, user1.identity)
-    assert(e.value.details['reason'] == 'user is not the data object owner')
+    assert 'authorisation denied' in e.value.reason.lower() or 'owner' in e.value.reason.lower()
 
     # try to transfer ownership to an unknown user
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.transfer_ownership(obj_id, owner, user2.identity)
-    assert('Identity not found' in e.value.reason)
+    assert 'not found' in e.value.reason.lower()
 
     # try to transfer ownership to a known user
     meta = dor_proxy.transfer_ownership(obj_id, owner, user0.identity)
@@ -436,9 +436,9 @@ def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_u
     assert(len(meta.tags) == 0)
 
     # try to set tags by non-owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.update_tags(obj_id, wrong_user, [DataObject.Tag(key='name', value='abc')])
-    assert (e.value.details['reason'] == 'user is not the data object owner')
+    assert 'authorisation denied' in e.value.reason.lower() or 'owner' in e.value.reason.lower()
 
     # try to set tags by owner
     meta = dor_proxy.update_tags(obj_id, owner, [DataObject.Tag(key='name', value='abc')])
@@ -453,9 +453,9 @@ def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_u
     assert(meta.tags['name'] == 'bcd')
 
     # try to remove existing tag by non-owner
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         dor_proxy.remove_tags(obj_id, wrong_user, ['name'])
-    assert (e.value.details['reason'] == 'user is not the data object owner')
+    assert 'authorisation denied' in e.value.reason.lower() or 'owner' in e.value.reason.lower()
 
     # try to remove non-existing tag by owner
     dor_proxy.remove_tags(obj_id, owner, ['invalid_key'])

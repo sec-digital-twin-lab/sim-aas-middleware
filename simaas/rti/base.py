@@ -10,12 +10,11 @@ from typing import Optional, List, Tuple, Dict, Set
 from fastapi.requests import Request
 
 from simaas.nodedb.schemas import NamespaceInfo, NodeInfo, ResourceDescriptor
-from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import ExceptionContent, NotFoundError, ValidationError, OperationError
 from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus, ProcessorVolume
 from simaas.core.logging import Logging
 from simaas.p2p.base import P2PAddress
@@ -133,8 +132,8 @@ class RTIServiceBase(RTIRESTService):
                 status_path = os.path.join(self._jobs_path, job_id, 'job.status')
                 with open(status_path, 'w') as f:
                     json.dump(status.model_dump(), f, indent=2)
-            except Exception:
-                pass  # Non-critical, just for local file consistency
+            except Exception as e:
+                logger.debug(f"[RTI-JOB-010] failed to write local status file: job={job_id} error={e}")
 
     def has_active_workers(self) -> bool:
         all_workers = (
@@ -204,7 +203,7 @@ class RTIServiceBase(RTIRESTService):
             # get the DB record for the job (if any)
             record = session.get(DBJobInfo, job_id)
             if record is None:
-                raise RTIException(f"Job {job_id} does not exist")
+                raise NotFoundError(resource_type='job', resource_id=job_id)
 
             # update the runner information
             record.runner['identity'] = runner_identity.model_dump()
@@ -324,7 +323,7 @@ class RTIServiceBase(RTIRESTService):
 
             # is the state busy going up? -> throw error
             elif proc.state == Processor.State.BUSY_DEPLOY:
-                raise RTIException("Cannot undeploy a processor that is currently deploying. Try again later.")
+                raise OperationError(operation='undeploy', stage='check', cause='processor is currently deploying')
 
             # is the state busy going down? -> do nothing
             elif proc.state == Processor.State.BUSY_UNDEPLOY:
@@ -350,10 +349,10 @@ class RTIServiceBase(RTIRESTService):
         iid = request.headers['saasauth-iid']
         for task in tasks:
             if iid != task.user_iid:
-                raise RTIException("Mismatch between user indicated in task and user making request", details={
-                    'iid': iid,
-                    'task': task
-                })
+                raise ValidationError(
+                    field='user_iid', expected=iid, actual=task.user_iid,
+                    hint='mismatch between task user and request user'
+                )
 
         return await self.submit(tasks)
 
@@ -384,26 +383,26 @@ class RTIServiceBase(RTIRESTService):
 
             # task names are mandatory for easier distinction in a batch
             if len(checklists) > 1 and checklist.task.name is None:
-                raise RTIException("Missing name for task which is member of batch")
+                raise ValidationError(field='task.name', hint='required for batch member')
 
             # check if the task name is unique
             if checklist.task.name in unique_task_names:
-                raise RTIException(f"Duplicate task name '{checklist.task.name}' (task names must be unique)")
+                raise ValidationError(field='task.name', hint=f"duplicate name '{checklist.task.name}'")
             else:
                 unique_task_names.add(checklist.task.name)
 
             # check if the required processor is deployed for each task
             if checklist.proc is None:
-                raise RTIException(f"Processor {checklist.task.proc_id} required by task but not deployed")
+                raise NotFoundError(resource_type='processor', resource_id=checklist.task.proc_id, hint='not deployed')
 
         # there should be only one user iid
         if len(unique_user_iids) > 1:
-            raise RTIException(f"Multiple users for batch job submission: {', '.join(unique_user_iids)}")
+            raise ValidationError(field='user_iid', hint=f"multiple users in batch: {', '.join(unique_user_iids)}")
 
         # check if the node knows about the user identities
         user: Optional[Identity] = await self._node.db.get_identity(tasks[0].user_iid)
         if user is None:
-            raise RTIException(f"User identity {tasks[0].user_iid} unknown")
+            raise NotFoundError(resource_type='identity', resource_id=tasks[0].user_iid)
 
         # check if any of the tasks require resource reservations
         combined: Dict[str, Tuple[ResourceDescriptor, NamespaceInfo]] = {}
@@ -416,7 +415,7 @@ class RTIServiceBase(RTIRESTService):
 
             # if namespace is given a budget must be given as well, if not -> error
             if task.budget is None:
-                raise RTIException(f"Task {task.name} missing resource budget")
+                raise ValidationError(field='task.budget', hint=f"required for task '{task.name}'")
 
             # make sure we have a tuple in combined for this namespace
             if task.namespace not in combined:
@@ -428,7 +427,7 @@ class RTIServiceBase(RTIRESTService):
 
             # can the budget of the task be satisfied by the namespace in principle?
             if task.budget.vcpus > ns_info.budget.vcpus or task.budget.memory > ns_info.budget.memory:
-                raise RTIException(f"Task {task.name} exceeds namespace resource capacity")
+                raise ValidationError(field='task.budget', hint=f"task '{task.name}' exceeds namespace capacity")
 
             # add to the combined resource budget
             ns_budget.vcpus += task.budget.vcpus
@@ -438,32 +437,23 @@ class RTIServiceBase(RTIRESTService):
         for namespace in combined.keys():
             ns_budget, ns_info = combined[namespace]
             if ns_budget.vcpus > ns_info.budget.vcpus or ns_budget.memory > ns_info.budget.memory:
-                raise RTIException(
-                    f"Combined resource budget for namespace '{namespace}' exceeds namespace capacity: "
-                    f"{ns_budget.vcpus} vCPUs + {ns_budget.memory} MB mem > "
-                    f"{ns_info.budget.vcpus} vCPUs + {ns_info.budget.memory} MB mem"
+                raise ValidationError(
+                    field='combined_budget',
+                    hint=f"combined resource budget for namespace '{namespace}' exceeds capacity: "
+                         f"{ns_budget.vcpus} vCPUs + {ns_budget.memory} MB > "
+                         f"{ns_info.budget.vcpus} vCPUs + {ns_info.budget.memory} MB"
                 )
 
         return checklists
 
     async def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         # try to make reservations for all tasks that require it
-        successful = True
-        try:
-            for checklist in checklists:
-                # does the task require a resource reservation?
-                if checklist.task.namespace is not None:
-                    await self._node.db.reserve_namespace_resources(
-                        checklist.task.namespace, checklist.job_id, checklist.task.budget
-                    )
-
-        except Exception:
-            successful = False
-
-        # if there was a problem at any point of the reservation process, cancel all reservations (if any)
-        if not successful:
-            await self.cancel_resource_reservations(checklists)
-            raise RTIException("Failed to reserve resources for tasks")
+        for checklist in checklists:
+            # does the task require a resource reservation?
+            if checklist.task.namespace is not None:
+                await self._node.db.reserve_namespace_resources(
+                    checklist.task.namespace, checklist.job_id, checklist.task.budget
+                )
 
         # try to prepare the job for each task
         for checklist in checklists:
@@ -556,7 +546,7 @@ class RTIServiceBase(RTIRESTService):
             # cancel resource reservations (if any left for whatever reason)
             await self.cancel_resource_reservations(checklists)
 
-            raise RTIException(f"Error while submitting jobs for Batch {batch_id}")
+            raise OperationError(operation='batch_submit', stage='submission', cause=f'batch {batch_id} failed')
 
     async def submit(self, tasks: List[Task]) -> List[Job]:
         """
@@ -649,7 +639,7 @@ class RTIServiceBase(RTIRESTService):
             # get the record
             record: DBJobInfo = session.get(DBJobInfo, job_id)
             if record is None:
-                raise RTIException(f"Job {job_id} does not exist.")
+                raise NotFoundError(resource_type='job', resource_id=job_id)
 
             # check current state - don't allow overwriting terminal states
             current_status = JobStatus.model_validate(record.status)
@@ -751,7 +741,7 @@ class RTIServiceBase(RTIRESTService):
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
                 return record.user_iid
 
     async def get_job_status(self, job_id: str) -> JobStatus:
@@ -764,7 +754,7 @@ class RTIServiceBase(RTIRESTService):
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
         return JobStatus.model_validate(record.status)
 
@@ -779,7 +769,7 @@ class RTIServiceBase(RTIRESTService):
                 # get the records
                 records = session.query(DBJobInfo).filter_by(batch_id=batch_id).all()
                 if records is None:
-                    raise RTIException(f"Batch {batch_id} does not exist.")
+                    raise NotFoundError(resource_type='batch', resource_id=batch_id)
 
                 # determine the batch user iid (all jobs have the same user iid)
                 user_iid = records[0].user_iid
@@ -809,7 +799,7 @@ class RTIServiceBase(RTIRESTService):
         # check the status
         status = JobStatus.model_validate(record.status)
         if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
-            raise RTIException(f"Job {record.id} is not active -> job cannot be cancelled.")
+            raise OperationError(operation='cancel', stage='check', cause=f'job {record.id} not active')
 
         # if possible, determine the runner P2P address
         if record.runner.get('identity') is not None and record.runner.get('address') is not None:
@@ -840,7 +830,7 @@ class RTIServiceBase(RTIRESTService):
             with self._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
         return self._job_cancel_internal(record)
 
@@ -854,7 +844,7 @@ class RTIServiceBase(RTIRESTService):
                 # get the record
                 record: Optional[DBJobInfo] = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
                 # perform the purge
                 await self.perform_purge(record)

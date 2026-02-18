@@ -15,7 +15,7 @@ from simaas.cli.cmd_image import clone_repository, build_processor_image, PDIBui
 
 from simaas.core.helpers import get_timestamp_now
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.dor.schemas import DataObject
@@ -72,20 +72,20 @@ def test_helper_image_clone_build_export(docker_available, session_node, temp_di
         clone_repository(REPOSITORY_URL+"_doesnt_exist", os.path.join(temp_dir, 'repository_doesnt_exist'),
                          credentials=(os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN']))
         assert False
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
         clone_repository(REPOSITORY_URL, repo_path, commit_id="doesntexist", simulate_only=True)
         assert False
-    except CLIRuntimeError:
+    except CLIError:
         assert os.path.isdir(repo_path)
         assert True
 
     try:
         clone_repository(REPOSITORY_URL, repo_path, commit_id=commit_id, simulate_only=True)
         assert True
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # -----
@@ -98,7 +98,7 @@ def test_helper_image_clone_build_export(docker_available, session_node, temp_di
             os.path.join(repo_path+"_wrong", PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name
         )
         assert False
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
@@ -107,14 +107,14 @@ def test_helper_image_clone_build_export(docker_available, session_node, temp_di
             os.path.join(repo_path, proc_path_wrong), os.environ['SIMAAS_REPO_PATH'], image_name
         )
         assert False
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
         build_processor_image(
             os.path.join(repo_path, PROC_ABC_PATH), os.environ['SIMAAS_REPO_PATH'], image_name
         )
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # -----
@@ -165,7 +165,7 @@ def test_cli_image_build_local(docker_available, temp_dir):
         assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
         assert os.path.isfile(result['pdi_path'])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # build the second time
@@ -190,7 +190,7 @@ def test_cli_image_build_local(docker_available, temp_dir):
         assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
         assert os.path.isfile(result['pdi_path'])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     t2 = get_timestamp_now()
@@ -229,7 +229,7 @@ def test_cli_image_build_github(docker_available, temp_dir):
         assert result['pdi_path'].endswith(f"{meta.proc_descriptor.name}_{meta.content_hash}.pdi")
         assert os.path.isfile(result['pdi_path'])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -260,7 +260,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
         result = cmd.execute(args)
         assert result is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # -------
@@ -282,7 +282,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
         cmd.execute(args)
         assert False
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
@@ -302,7 +302,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
         cmd.execute(args)
         assert False
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
@@ -319,7 +319,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
         assert 'pdi' in result
         pdi0: DataObject = result['pdi']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # -------
@@ -340,7 +340,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
         cmd.execute(args)
         assert False
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
@@ -360,7 +360,7 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
             os.path.join(temp_dir, f"{pdi_meta.proc_descriptor.name}_{pdi_meta.content_hash}.pdi")
         )
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 

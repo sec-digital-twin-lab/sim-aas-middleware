@@ -6,8 +6,7 @@ from typing import Optional, Tuple, Dict, Any
 
 from pydantic import BaseModel
 
-from simaas.p2p.exceptions import PeerUnavailableError
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import NetworkError, OperationError
 from simaas.rti.schemas import Job, JobStatus, BatchStatus
 from simaas.core.identity import Identity
 from simaas.core.logging import Logging
@@ -60,13 +59,13 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
                 return response.job, response.custodian_identity, response.join_batch
 
-            except PeerUnavailableError:
+            except NetworkError:
                 delay = attempt + 1
                 logger.warning(f"Failed for perform handshake with custodian ({attempt+1}/{max_attempts}) -> "
                                f"Trying again in {delay} seconds...")
                 await asyncio.sleep(delay)
 
-        raise RTIException(f"Handshake with custodian failed after {max_attempts} attempts")
+        raise OperationError(operation='handshake', cause=f'failed after {max_attempts} attempts')
 
     async def handle(
             self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
@@ -179,10 +178,10 @@ class P2PPushJobStatus(P2PProtocol):
                 )
                 return None
 
-            except PeerUnavailableError:
+            except NetworkError:
                 await asyncio.sleep(0.5)
 
-        raise RTIException(f"Pushing job status failed after {max_attempts} attempts.")
+        raise OperationError(operation='push_job_status', cause=f'failed after {max_attempts} attempts')
 
     async def handle(
             self, request: JobStatusRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
@@ -219,10 +218,10 @@ class P2PInterruptJob(P2PProtocol):
                 )
                 return None
 
-            except PeerUnavailableError:
+            except NetworkError:
                 await asyncio.sleep(0.5)
 
-        raise RTIException(f"Interrupting job input failed after {max_attempts} attempts.")
+        raise OperationError(operation='interrupt_job', cause=f'failed after {max_attempts} attempts')
 
     async def handle(
             self, request: InterruptJobRequest, attachment_path: Optional[str] = None,

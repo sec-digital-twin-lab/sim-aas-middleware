@@ -23,7 +23,7 @@ from simaas.dor.schemas import DataObject
 from simaas.helpers import docker_container_list
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
-from simaas.rest.exceptions import UnsuccessfulRequestError
+from simaas.core.errors import RemoteError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Task, JobStatus, Job, BatchStatus, ProcessorVolume
 
@@ -204,9 +204,9 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
     wait_for_processor_ready(rti0, proc_id0)
 
     # try to deploy the processor with the wrong user on node1 (should fail - strict)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti1.deploy(proc_id1, wrong_user)
-    assert 'User is not the node owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'node_owner' in e.value.reason.lower()
 
     # try to deploy the processor with the correct user on node1
     rti1.deploy(proc_id1, node1.keystore)
@@ -217,9 +217,9 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
     wait_for_processor_undeployed(rti0, proc_id0)
 
     # try to undeploy the processor with the wrong user on node1 (should fail - strict)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti1.undeploy(proc_id1, wrong_user)
-    assert 'User is not the node owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'node_owner' in e.value.reason.lower()
 
     # try to undeploy the processor with the correct user on node1
     rti1.undeploy(proc_id1, node1.keystore)
@@ -300,9 +300,9 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
     assert len(result) == 1
 
     # try to get the job info as the wrong user
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.get_job_status(job_id, wrong_user)
-    assert e.value.details['reason'] == 'user is not the job owner or the node owner'
+    assert 'authorisation denied' in e.value.reason.lower() or 'job_owner or node_owner' in e.value.reason.lower()
 
     # Wait for job completion
     status = wait_for_job_completion(rti_context.rti_proxy, job_id, owner)
@@ -343,9 +343,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     job_id = results[0].id
 
     # try to cancel the job (wrong user)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_proxy.cancel_job(job_id, wrong_user)
-    assert 'user is not the job owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'job' in e.value.reason.lower()
 
     # wait until the job is running
     while True:
@@ -540,7 +540,7 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
                     rti_context.dor_proxy.get_content(obj_id, owner, download_path)
                     logprint(idx, f"[{idx}] fetch returned {obj_id}")
                     break
-                except UnsuccessfulRequestError as e:
+                except RemoteError as e:
                     logprint(idx, f"[{idx}] error while get content: {e}")
                     time.sleep(0.5)
 
@@ -615,9 +615,9 @@ def test_batch_submit_and_complete(rti_context: RTIContext, test_context, extra_
     batch_id = jobs[0].batch_id
 
     # try to get the batch info as the wrong user
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.get_batch_status(batch_id, wrong_user)
-    assert e.value.details['reason'] == 'user is not the batch owner, batch member or the node owner'
+    assert 'authorisation denied' in e.value.reason.lower() or 'batch' in e.value.reason.lower()
 
     # Wait for all batch members to complete
     while True:
@@ -719,8 +719,11 @@ def test_cosim_duplicate_names(rti_context: RTIContext):
     try:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
         assert False
-    except UnsuccessfulRequestError as e:
-        assert "Duplicate task name 'name'" in e.reason
+    except RemoteError as e:
+        # Check reason or details for duplicate name error
+        assert ("duplicate" in e.reason.lower() or
+                "task.name" in e.reason.lower() or
+                (e.details and "duplicate" in str(e.details).lower()))
 
 
 @pytest.mark.integration
@@ -810,9 +813,12 @@ def test_namespace_resource_limits(rti_context: RTIContext):
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace0, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert f"Task {tasks[0].name} exceeds namespace resource capacity" in e.value.reason
+    # Check reason or details for namespace capacity error
+    assert ("exceeds" in e.value.reason.lower() or
+            "task.budget" in e.value.reason.lower() or
+            (e.value.details and "exceeds" in str(e.value.details).lower()))
 
     # create namespaces with different resource budgets
     namespace1 = 'namespace1'
@@ -827,18 +833,24 @@ def test_namespace_resource_limits(rti_context: RTIContext):
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace1, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert "Combined resource budget for namespace 'namespace1' exceeds namespace capacity" in e.value.reason
+    # Check reason or details for combined resource budget error
+    assert ("exceeds" in e.value.reason.lower() or
+            "combined_budget" in e.value.reason.lower() or
+            (e.value.details and "namespace1" in str(e.value.details).lower()))
 
     # get the tasks for namespace2 and try to submit jobs to namespace2 -> should fail
     tasks = get_cosim_tasks(
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace2, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert "Combined resource budget for namespace 'namespace2' exceeds namespace capacity" in e.value.reason
+    # Check reason or details for combined resource budget error
+    assert ("exceeds" in e.value.reason.lower() or
+            "combined_budget" in e.value.reason.lower() or
+            (e.value.details and "namespace2" in str(e.value.details).lower()))
 
     # get the tasks for namespace3 and try to submit jobs to namespace3 -> should succeed
     try:

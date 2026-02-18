@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import InternalError
 from simaas.core.schemas import GithubCredentials, SSHCredentials
 from simaas.core.keystore import Keystore
 from simaas.core.eckeypair import ECKeyPair
@@ -356,18 +356,19 @@ def test_json_incompatible_exception():
 
     # create an exception with details that cannot be JSON encoded. it should still work but everything in details
     # is turned into a string.
-    e = SaaSRuntimeException('something happened...', details={
-        'a': 34,
-        'b': 4.5,
-        'c': 'sdfs',
-        'd': {
-            'd1': 'sd'
-        },
-        'e': instance
-    })
+    e = InternalError(
+        component='test',
+        state='something happened',
+        a=34,
+        b=4.5,
+        c='sdfs',
+        d={'d1': 'sd'},
+        non_serializable=instance
+    )
 
-    for k, v in e.details.items():
-        assert isinstance(v, str)
+    # The InternalError should have converted non-serializable values to strings
+    assert 'non_serializable' in e.details
+    assert isinstance(e.details['non_serializable'], str)
 
 
 def test_logging_aws_cloudwatch_integration(logging):

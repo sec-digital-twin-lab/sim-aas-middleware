@@ -7,7 +7,7 @@ import pytest
 
 from simaas.cli.cmd_identity import IdentityCreate, IdentityList, IdentityRemove, IdentityShow, IdentityDiscover, \
     IdentityPublish, IdentityUpdate, CredentialsList, CredentialsAddGithubCredentials, CredentialsRemove
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -38,7 +38,7 @@ def test_cli_identity_crud(temp_dir):
         assert 'available' in result
         assert len(result['available']) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # create an identity
@@ -59,7 +59,7 @@ def test_cli_identity_crud(temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list all identities
@@ -74,7 +74,7 @@ def test_cli_identity_crud(temp_dir):
         assert 'available' in result
         assert len(result['available']) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # show identity
@@ -90,7 +90,7 @@ def test_cli_identity_crud(temp_dir):
         assert 'content' in result
         assert result['content'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # remove the identity
@@ -106,7 +106,7 @@ def test_cli_identity_crud(temp_dir):
         result = cmd.execute(args)
         assert result is None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list all identities
@@ -121,7 +121,7 @@ def test_cli_identity_crud(temp_dir):
         assert 'available' in result
         assert len(result['available']) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -148,7 +148,7 @@ def test_cli_identity_network(session_node, temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # discover all identities known to the node
@@ -162,7 +162,7 @@ def test_cli_identity_network(session_node, temp_dir):
         assert result is not None
         assert keystore.identity.id not in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # publish identity
@@ -178,7 +178,7 @@ def test_cli_identity_network(session_node, temp_dir):
         result = cmd.execute(args)
         assert result is None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # discover all identities known to the node
@@ -192,7 +192,7 @@ def test_cli_identity_network(session_node, temp_dir):
         assert result is not None
         assert keystore.identity.id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # update identity
@@ -212,7 +212,7 @@ def test_cli_identity_network(session_node, temp_dir):
         keystore: Keystore = result['keystore']
         assert keystore.identity.name == 'updated_name'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # publish identity
@@ -228,7 +228,7 @@ def test_cli_identity_network(session_node, temp_dir):
         result = cmd.execute(args)
         assert result is None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # discover all identities known to the node
@@ -245,7 +245,7 @@ def test_cli_identity_network(session_node, temp_dir):
         identity: Identity = result[keystore.identity.id]
         assert identity.name == 'updated_name'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -270,7 +270,7 @@ def test_cli_credentials(temp_dir):
         keystore_path = os.path.join(temp_dir, f'{keystore.identity.id}.json')
         assert os.path.isfile(keystore_path)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list all credentials
@@ -287,7 +287,7 @@ def test_cli_credentials(temp_dir):
         assert 'credentials' in result
         assert len(result['credentials']) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # add credentials
@@ -307,7 +307,7 @@ def test_cli_credentials(temp_dir):
         assert 'credentials' in result
         assert result['credentials'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list all credentials
@@ -324,7 +324,7 @@ def test_cli_credentials(temp_dir):
         assert 'credentials' in result
         assert len(result['credentials']) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # remove credentials
@@ -343,7 +343,7 @@ def test_cli_credentials(temp_dir):
         assert 'removed' in result
         assert len(result['removed']) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # list all credentials
@@ -360,7 +360,7 @@ def test_cli_credentials(temp_dir):
         assert 'credentials' in result
         assert len(result['credentials']) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 

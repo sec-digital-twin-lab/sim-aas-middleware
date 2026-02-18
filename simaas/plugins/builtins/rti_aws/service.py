@@ -22,7 +22,7 @@ from simaas.helpers import docker_load_image, docker_delete_image, docker_find_i
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.p2p.base import P2PAddress
 from simaas.rti.base import RTIServiceBase, DBJobInfo, DBDeployedProcessor
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import ConfigurationError, ValidationError, OperationError, NetworkError, NotFoundError
 from simaas.rti.protocol import P2PInterruptJob
 from simaas.rti.schemas import Processor, Job, JobStatus
 from simaas.dor.schemas import GitProcessorPointer, DataObject, ProcessorDescriptor
@@ -69,7 +69,7 @@ def get_ecr_client(config: Optional[AWSConfiguration] = None) -> Tuple[boto3.cli
     # check if there is a config
     config = config if config else get_default_aws_config()
     if config is None:
-        raise RTIException("No AWS configuration found")
+        raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
     return boto3.client(
         "ecr", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
@@ -115,7 +115,7 @@ def ecr_check_image_exists(repository_name: str, image_name: str, config: Option
 def ecr_push_local_image(repository_name: str, image_name: str, config: Optional[AWSConfiguration] = None) -> str:
     # check if the image is 'linux/amd64'
     if not docker_check_image_platform(image_name, 'linux/amd64'):
-        raise RTIException(f"Image {image_name} platform not 'linux/amd64'")
+        raise ValidationError(field='image.platform', expected='linux/amd64', hint=f'image {image_name}')
 
     # get the client
     client, config = get_ecr_client(config)
@@ -133,29 +133,29 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     login_cmd = f"echo {password} | docker login --username AWS --password-stdin {ecr_url}"
     result = subprocess.run(login_cmd, shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException("Failed to log into ECR", details={
-            'stdout': result.stdout.decode('utf-8'),
-            'stderr': result.stderr.decode('utf-8')
-        })
+        raise OperationError(
+            operation='ecr_login', stage='authentication', cause='login failed',
+            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+        )
 
     # Tag the local image for ECR
     # docker tag <local-image> <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     ecr_image = get_ecr_image_name(repository_uri, get_ecr_tag(image_name))
     result = subprocess.run(f"docker tag {image_name} {ecr_image}", shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException("Failed to tag image", details={
-            'stdout': result.stdout.decode('utf-8'),
-            'stderr': result.stderr.decode('utf-8')
-        })
+        raise OperationError(
+            operation='tag_image', stage='tagging', cause='failed',
+            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+        )
 
     # Push the image to ECR
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     result = subprocess.run(f"docker push --platform linux/amd64 {ecr_image}", shell=True, capture_output=True)
     if result.returncode != 0:
-        raise RTIException("Failed to push to ECR", details={
-            'stdout': result.stdout.decode('utf-8'),
-            'stderr': result.stderr.decode('utf-8')
-        })
+        raise NetworkError(
+            operation='ecr_push',
+            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+        )
 
     return ecr_image
 
@@ -188,7 +188,7 @@ def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
     # check if there is a config
     config = config if config else get_default_aws_config()
     if config is None:
-        raise RTIException("No AWS configuration found")
+        raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
     return boto3.client(
         "batch", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
@@ -339,14 +339,13 @@ class AWSRTIService(RTIServiceBase):
 
         # check if all required env variables are available
         if not all(var in os.environ for var in REQUIRED_ENV):
-            raise RTIException(f"Missing/incomplete AWS configuration. The following environment variables "
-                               f"need to be defined: {REQUIRED_ENV}.")
+            raise ConfigurationError(setting=str(REQUIRED_ENV), hint='environment variables required')
 
         # determine AWS parameters
         self._aws_repository_name = 'simaas-processors'
         self._aws_config = aws_config if aws_config else get_default_aws_config()
         if self._aws_config is None:
-            raise RTIException("No AWS configuration found.")
+            raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
         # initialise directories
         self._jobs_path = os.path.join(self._node.datastore, 'jobs')
@@ -379,12 +378,12 @@ class AWSRTIService(RTIServiceBase):
 
             # not found?
             if proc_obj is None:
-                raise RTIException(f"Processor {proc.id} not found in DOR(s).")
+                raise NotFoundError(resource_type='processor', resource_id=proc.id, hint='not found in DOR(s)')
 
             # determine the image name
             image_name = proc_obj.tags.get('image_name')
             if image_name is None:
-                raise RTIException("Malformed processor data object -> image_name not found.")
+                raise ValidationError(field='tags.image_name', hint='missing from processor data object')
 
             # do we have the image in Docker?
             image_found = await asyncio.to_thread(docker_find_image, image_name)
