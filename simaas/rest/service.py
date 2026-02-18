@@ -14,6 +14,14 @@ from simaas.rest.auth import make_depends
 from starlette.responses import JSONResponse
 
 from simaas.core.exceptions import SaaSRuntimeException
+from simaas.core.errors import (
+    _BaseError,
+    AuthenticationError,
+    AuthorisationError,
+    NotFoundError,
+    ValidationError,
+    NetworkError,
+)
 from simaas.core.logging import Logging
 from simaas.meta import __title__, __version__, __description__
 from simaas.rest.exceptions import UnsupportedRESTMethod
@@ -22,6 +30,19 @@ from simaas.rest.schemas import EndpointDefinition
 logger = Logging.get('rest.service')
 
 DOCS_ENDPOINT_PREFIX = "/api/v1"
+
+
+def _error_response(e: _BaseError, status_code: int) -> JSONResponse:
+    """Create a JSON error response from a _BaseError exception."""
+    logger.error(f"Exception: {e.reason} {e.id} -> {e.details}", exc_info=True)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            'reason': e.reason,
+            'id': e.id,
+            'details': e.details,
+        }
+    )
 
 
 class RESTApp:
@@ -37,6 +58,32 @@ class RESTApp:
             lifespan=lifespan
         )
 
+        # New error hierarchy handlers (specific exceptions first)
+        @self.api.exception_handler(AuthenticationError)
+        async def auth_error_handler(_: Request, e: AuthenticationError):
+            return _error_response(e, status_code=401)
+
+        @self.api.exception_handler(AuthorisationError)
+        async def authz_error_handler(_: Request, e: AuthorisationError):
+            return _error_response(e, status_code=403)
+
+        @self.api.exception_handler(NotFoundError)
+        async def not_found_handler(_: Request, e: NotFoundError):
+            return _error_response(e, status_code=404)
+
+        @self.api.exception_handler(ValidationError)
+        async def validation_handler(_: Request, e: ValidationError):
+            return _error_response(e, status_code=422)
+
+        @self.api.exception_handler(NetworkError)
+        async def network_handler(_: Request, e: NetworkError):
+            return _error_response(e, status_code=502)
+
+        @self.api.exception_handler(_BaseError)
+        async def base_error_handler(_: Request, e: _BaseError):
+            return _error_response(e, status_code=500)
+
+        # Legacy exception handler (unchanged)
         @self.api.exception_handler(SaaSRuntimeException)
         async def saas_exception_handler(_: Request, e: SaaSRuntimeException):
             details = dict(e.details) if e.details else {}
