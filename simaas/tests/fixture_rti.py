@@ -1,5 +1,6 @@
 """RTI (Runtime Infrastructure) test fixtures."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -258,6 +259,9 @@ def add_test_processor(
             image_path = os.path.join(tempdir, 'pdi.tar')
             docker_export_image(image_name, image_path)
 
+            # compute content hash from image name for consistency
+            content_hash = hashlib.sha256(image_name.encode()).hexdigest()
+
             # upload to DOR
             meta = dor.add_data_object(image_path, keystore.identity, False, False, 'ProcessorDockerImage', 'tar',
                                        tags=[
@@ -266,7 +270,8 @@ def add_test_processor(
                                            DataObject.Tag(key='commit_timestamp', value=get_timestamp_now()),
                                            DataObject.Tag(key='proc_path', value=gpp.proc_path),
                                            DataObject.Tag(key='proc_descriptor', value=gpp.proc_descriptor.model_dump()),
-                                           DataObject.Tag(key='image_name', value=image_name)
+                                           DataObject.Tag(key='image_name', value=image_name),
+                                           DataObject.Tag(key='content_hash', value=content_hash)
                                        ])
 
             existing.append(meta)

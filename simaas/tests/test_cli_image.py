@@ -251,12 +251,15 @@ def test_cli_image_build_github(docker_available, temp_dir):
     if not docker_available:
         pytest.skip("Docker is not available")
 
+    # Get actual commit ID - required for clone_repository to checkout
+    repo = Repo(os.environ['SIMAAS_REPO_PATH'])
+    commit_id = repo.head.commit.hexsha[:12]
 
     try:
         # define arguments
         args = {
             'repository': REPOSITORY_URL,
-            'commit_id': CURRENT_COMMIT_ID,
+            'commit_id': commit_id,
             'proc_path': PROC_ABC_PATH,
             'pdi_path': temp_dir,
             'force_build': False,

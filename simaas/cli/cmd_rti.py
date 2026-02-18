@@ -318,7 +318,11 @@ class RTIProcDeploy(CLICommand):
                     commit_id = pdi.tags.get('commit_id')
                     commit_label = commit_id[:6] if commit_id else 'local'
 
-                    choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name}:{pdi.tags['content_hash'][:6]} "
+                    # Handle optional content_hash (may be missing for test fixtures)
+                    content_hash = pdi.tags.get('content_hash')
+                    content_hash_label = content_hash[:6] if content_hash else pdi.obj_id[:6]
+
+                    choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name}:{content_hash_label} "
                                                       f"<{shorten_id(pdi.obj_id)}> "
                                                       f"{pdi.tags['repository']}:{commit_label}..."))
                     custodian[item.obj_id] = node
