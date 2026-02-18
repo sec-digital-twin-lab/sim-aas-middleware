@@ -14,7 +14,7 @@ from examples.simple.abc.processor import write_value
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, Namespace
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
@@ -359,7 +359,7 @@ class ProcessorRunner(threading.Thread, ProgressListener):
         self._interrupted = False
 
         log_path = os.path.join(wd_path, 'job.log')
-        self._logger = Logging.get('cli.job_runner', level=log_level, custom_log_path=log_path)
+        self._logger = get_logger('cli.job_runner', 'runner', level=log_level, custom_log_path=log_path)
 
         self._job_status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
                                      errors=[], message=None)

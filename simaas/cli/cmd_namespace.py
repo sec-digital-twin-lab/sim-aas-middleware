@@ -6,12 +6,9 @@ from tabulate import tabulate
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, prompt_for_selection, \
     extract_address, prompt_for_integer, Argument
-from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NamespaceInfo, ResourceDescriptor
-
-logger = Logging.get('cli')
 
 
 class NamespaceList(CLICommand):

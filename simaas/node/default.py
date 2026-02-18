@@ -5,11 +5,11 @@ from typing import Optional, Type
 
 from simaas.core.async_helpers import run_coro_safely
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.node.base import Node
 from simaas.nodedb.default import DefaultNodeDBService
 
-logger = Logging.get('node.default')
+log = get_logger('simaas.node', 'node')
 
 
 class DefaultNode(Node):
@@ -24,19 +24,19 @@ class DefaultNode(Node):
 
         if enable_db:
             db_path = f"sqlite:///{os.path.join(self._datastore_path, 'node.db')}"
-            logger.info(f"creating default NodeDB service using {db_path}.")
+            log.info('init', 'Creating default NodeDB service', path=db_path)
             self.db = DefaultNodeDBService(self, db_path)
 
         if dor_plugin_class is not None:
             db_path = f"sqlite:///{os.path.join(self._datastore_path, 'dor.db')}"
             plugin_name = dor_plugin_class.plugin_name()
-            logger.info(f"creating DOR service '{plugin_name}' using {db_path}.")
+            log.info('init', 'Creating DOR service', plugin=plugin_name, path=db_path)
             self.dor = dor_plugin_class(self, db_path)
 
         if rti_plugin_class is not None:
             db_path = f"sqlite:///{os.path.join(self._datastore_path, 'rti.db')}"
             plugin_name = rti_plugin_class.plugin_name()
-            logger.info(f"creating RTI service '{plugin_name}' using {db_path}.")
+            log.info('init', 'Creating RTI service', plugin=plugin_name, path=db_path)
             self.rti = rti_plugin_class(self, db_path,
                                         retain_job_history=retain_job_history,
                                         strict_deployment=strict_deployment)

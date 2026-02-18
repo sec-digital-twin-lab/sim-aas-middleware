@@ -12,13 +12,10 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_f
     deserialise_tag_value, label_data_object, shorten_id, label_identity
 from simaas.core.helpers import encrypt_file
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.dor.schemas import DataObject
 from simaas.nodedb.api import NodeDBProxy
-
-logger = Logging.get('cli')
 
 
 def _require_dor(args: dict) -> DORProxy:

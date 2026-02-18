@@ -16,10 +16,10 @@ from simaas.core.errors import (
     RemoteError,
 )
 from simaas.core.errors import ExceptionContent
-from simaas.core.logging import Logging
+from simaas.core.logging import initialise
 
 
-Logging.initialise(level=logging.DEBUG)
+initialise(level=logging.DEBUG)
 
 
 class TestBaseErrorBehavior:

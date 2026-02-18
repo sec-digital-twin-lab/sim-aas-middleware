@@ -4,12 +4,12 @@ from typing import Optional, List, Tuple, Dict
 from pydantic import BaseModel
 
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 from simaas.core.errors import NetworkError
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
-logger = Logging.get('nodedb.protocol')
+log = get_logger('simaas.nodedb', 'nodedb')
 
 
 class NodeDBSnapshot(BaseModel):
@@ -66,8 +66,7 @@ class P2PUpdateIdentity(P2PProtocol):
 
                 result.append(reply.identity)
             except NetworkError as e:
-                logger.warning(f"[P2P-NODEDB-001] peer unavailable for identity update: "
-                               f"peer={peer.identity.id} reason={e.reason}")
+                log.warning('broadcast', 'Peer unavailable for identity update', peer=peer.identity.id, reason=e.reason)
 
         return result
 
@@ -75,7 +74,7 @@ class P2PUpdateIdentity(P2PProtocol):
             self, request: UpdateIdentityMessage, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        logger.info(f"Received identity update from node: {request.identity.name} | {request.identity.id}")
+        log.info('identity', 'Received identity update from node', name=request.identity.name, id=request.identity.id)
         await self._node.db.update_identity(request.identity)
         return UpdateIdentityMessage(identity=self._node.identity), None
 
@@ -233,10 +232,10 @@ class P2PJoinNetwork(P2PProtocol):
                     for ns_info in reply.snapshot.update_namespace:
                         await self._node.db.handle_namespace_snapshot(ns_info)
 
-                logger.debug(f"Adding peer at {peer.p2p_address} to db: {peer.identity.name} | {peer.identity.id}")
+                log.debug(f"Adding peer at {peer.p2p_address} to db", name=peer.identity.name, id=peer.identity.id)
 
             except NetworkError:
-                logger.debug(f"Peer at {peer.p2p_address} unavailable -> Removing from NodeDB.")
+                log.debug(f"Peer at {peer.p2p_address} unavailable, removing from NodeDB")
                 await self._node.db.remove_node_by_address(peer.p2p_address)
 
             # get all nodes in the network and add any nodes that we may not have been aware of
@@ -311,7 +310,7 @@ class P2PLeaveNetwork(P2PProtocol):
                         try:
                             task.result()
                         except Exception as e:
-                            logger.warning(f"Failed to notify peer of leave: {e}")
+                            log.warning('leave', 'Failed to notify peer of leave', exc=e)
 
                     task = asyncio.create_task(p2p_request(peer_address, self.NAME, message))
                     task.add_done_callback(_on_leave_done)
@@ -363,8 +362,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
             )
 
         except NetworkError as e:
-            logger.warning(f"[P2P-NS-001] peer unavailable for namespace budget update: "
-                           f"peer={peer.identity.id} namespace={namespace} reason={e.reason}")
+            log.warning('namespace', 'Peer unavailable for namespace budget update', peer=peer.identity.id, namespace=namespace, reason=e.reason)
 
     async def handle(
             self, request: UpdateNamespaceBudgetRequest, attachment_path: Optional[str] = None,
@@ -422,8 +420,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
             return reply.accepted
 
         except NetworkError as e:
-            logger.warning(f"[P2P-NS-002] peer unavailable for resource reservation: "
-                           f"peer={peer.identity.id} namespace={namespace} job={job_id} reason={e.reason}")
+            log.warning('namespace', 'Peer unavailable for resource reservation', peer=peer.identity.id, namespace=namespace, job=job_id, reason=e.reason)
             return False
 
     async def handle(
@@ -473,8 +470,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
             )
 
         except NetworkError as e:
-            logger.warning(f"[P2P-NS-003] peer unavailable for reservation cancellation: "
-                           f"peer={peer.identity.id} namespace={namespace} job={job_id} reason={e.reason}")
+            log.warning('namespace', 'Peer unavailable for reservation cancellation', peer=peer.identity.id, namespace=namespace, job=job_id, reason=e.reason)
 
     async def handle(
             self, request: ResourceReservationCancellation, attachment_path: Optional[str] = None,

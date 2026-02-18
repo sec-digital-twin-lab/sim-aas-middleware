@@ -17,7 +17,7 @@ from simaas.core.async_helpers import run_coro_safely
 from simaas.core.identity import Identity
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
 from simaas.helpers import docker_container_list
@@ -44,8 +44,8 @@ from simaas.tests.helper_assertions import (
     assert_data_object_content,
 )
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================
@@ -570,16 +570,14 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
 
     for i in range(n):
         print(f"### {i} ###")
-        log = logs[i]
-        for msg in log:
+        job_log = logs[i]
+        for msg in job_log:
             print(msg)
         print("###")
 
     for i, e in failed.items():
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         print(f"[{i}] failed: {trace}")
-
-    logger.info(failed)
     assert len(failed) == 0
     assert len(results) == n
 

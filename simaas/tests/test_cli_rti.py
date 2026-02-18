@@ -16,11 +16,11 @@ from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcU
     RTIJobList, RTIJobCancel, RTIVolumeCreateFSRef, RTIVolumeList, RTIVolumeDelete, RTIVolumeCreateEFSRef
 from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.schemas import DataObject
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 
-logger = Logging.get(__name__)
+log = get_logger(__name__, 'test')
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 examples_path = os.path.join(repo_root_path, 'examples')
 

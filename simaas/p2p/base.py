@@ -10,10 +10,10 @@ from pydantic import BaseModel
 from zmq import Again
 from zmq.asyncio import Socket, Context
 
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.errors import NetworkError
 
-logger = Logging.get('p2p')
+log = get_logger('simaas.p2p', 'p2p')
 
 
 class P2PMessage(BaseModel):
@@ -205,7 +205,7 @@ async def p2p_respond(
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"Unexpected P2P error: {trace}")
+            log.error('respond', 'Unexpected P2P error', exc=e)
             raise NetworkError(operation='respond', trace=trace)
 
     finally:

@@ -11,12 +11,11 @@ from fastapi.requests import Request
 
 from simaas.nodedb.schemas import NamespaceInfo, NodeInfo, ResourceDescriptor
 from simaas.core.helpers import generate_random_string, get_timestamp_now
-from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
 from simaas.core.errors import ExceptionContent, NotFoundError, ValidationError, OperationError
 from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus, ProcessorVolume
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
 
@@ -24,7 +23,7 @@ from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy_json import NestedMutableJson
 
-logger = Logging.get('rti.service')
+log = get_logger('simaas.rti', 'rti')
 
 
 Base = declarative_base()
@@ -73,13 +72,13 @@ class RTIServiceBase(RTIRESTService):
         # initialise directories
         self._jobs_path = os.path.join(self._node.datastore, 'jobs')
         self._procs_path = os.path.join(self._node.datastore, 'procs')
-        logger.info(f"[init] using jobs path at {self._jobs_path}")
-        logger.info(f"[init] using procs path at {self._procs_path}")
+        log.info('init', 'Using jobs path', path=self._jobs_path)
+        log.info('init', 'Using procs path', path=self._procs_path)
         os.makedirs(self._jobs_path, exist_ok=True)
         os.makedirs(self._procs_path, exist_ok=True)
 
         # initialise database things
-        logger.info(f"[init] using database at {db_path}")
+        log.info('init', 'Using database', path=db_path)
         self._engine = create_engine(db_path)
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
@@ -133,7 +132,7 @@ class RTIServiceBase(RTIRESTService):
                 with open(status_path, 'w') as f:
                     json.dump(status.model_dump(), f, indent=2)
             except Exception as e:
-                logger.debug(f"[RTI-JOB-010] failed to write local status file: job={job_id} error={e}")
+                log.debug(f"Failed to write local status file", job=job_id, error=str(e))
 
     def has_active_workers(self) -> bool:
         all_workers = (
@@ -308,8 +307,7 @@ class RTIServiceBase(RTIRESTService):
 
             # is the state failed? -> delete the db record
             if proc.state == Processor.State.FAILED:
-                logger.warning(f"[undeploy:{shorten_id(proc_id)}] processor failed -> removing it. "
-                               f"error: {record.error}")
+                log.warning('undeploy', 'Processor failed, removing', proc=proc_id, error=record.error)
                 session.delete(record)
                 session.commit()
 
@@ -327,7 +325,7 @@ class RTIServiceBase(RTIRESTService):
 
             # is the state busy going down? -> do nothing
             elif proc.state == Processor.State.BUSY_UNDEPLOY:
-                logger.warning(f"[undeploy:{shorten_id(proc_id)}] already undeploying.")
+                log.warning('undeploy', 'Processor already undeploying', proc=proc_id)
 
         # start the worker as async task with tracking - outside any lock
         if start_undeploy:
@@ -516,7 +514,7 @@ class RTIServiceBase(RTIRESTService):
         except Exception as e:
             error = str(e)
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[submit] error while performing batch submission: {trace}")
+            log.error('submit', 'Error performing batch submission', exc=e, batch=batch_id)
 
         # if there was any error during batch submission, we need to clean-up whatever might be there/left
         if error and trace:
@@ -528,7 +526,7 @@ class RTIServiceBase(RTIRESTService):
                         try:
                             await self.perform_purge(record)
                         except Exception as e:
-                            logger.warning(f"[submit] purge {job.id} failed as part of batch termination: {e}")
+                            log.warning('submit', 'Purge failed during batch termination', job=job.id)
 
                     # update the runner information
                     status.state = JobStatus.State.FAILED
@@ -646,8 +644,7 @@ class RTIServiceBase(RTIRESTService):
             if current_status.state in [JobStatus.State.CANCELLED, JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL]:
                 if job_status.state != current_status.state:
                     # trying to change a terminal state - ignore
-                    logger.warning(f"Job {job_id} already in terminal state {current_status.state}, "
-                                   f"ignoring update to {job_status.state}")
+                    log.warning('status', 'Job in terminal state, ignoring update', job=job_id, current=str(current_status.state), requested=str(job_status.state))
                     return
 
             # update the status
@@ -661,7 +658,7 @@ class RTIServiceBase(RTIRESTService):
                     # noinspection PyTypeChecker
                     json.dump(job_status.model_dump(), f, indent=2)
             except Exception:
-                logger.warning(f"Could not write job status to {status_path}")
+                log.warning('status', 'Could not write job status file', path=status_path)
 
             # do we need to cancel a namespace reservation?
             if job_status.state in [
@@ -702,8 +699,7 @@ class RTIServiceBase(RTIRESTService):
                                 continue
                             self._cancellation_workers[related.id] = None  # placeholder
 
-                        logger.info(f"Job {job_id} failed/cancelled -> "
-                                    f"related job {related.id} status {related_status.state} -> cancel")
+                        log.info('batch', 'Job failed/cancelled, cancelling related job', job=job_id, related=related.id, state=str(related_status.state))
 
                         # extract runner info while session is open
                         if related.runner.get('identity') is not None and related.runner.get('address') is not None:
@@ -719,8 +715,7 @@ class RTIServiceBase(RTIRESTService):
 
                         jobs_to_cancel.append((related.id, runner_address))
                     else:
-                        logger.info(f"Job {job_id} failed/cancelled -> "
-                                    f"related job {related.id} status {related_status.state} -> skip")
+                        log.info('batch', 'Job failed/cancelled, skipping related job', job=job_id, related=related.id, state=str(related_status.state))
 
         # Async operations - outside any lock
         if namespace_to_cancel:

@@ -4,11 +4,8 @@ from typing import Optional
 from tabulate import tabulate
 
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, extract_address
-from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
-
-logger = Logging.get('cli')
 
 
 class NetworkList(CLICommand):

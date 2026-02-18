@@ -14,9 +14,9 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from simaas.core.errors import AuthenticationError, ConfigurationError
 from simaas.core.keypair import KeyPair
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'core')
 
 
 class RSAKeyPair(KeyPair):

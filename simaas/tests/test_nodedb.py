@@ -14,7 +14,7 @@ from simaas.core.async_helpers import run_coro_safely
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
@@ -23,8 +23,8 @@ from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.core.errors import OperationError
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================

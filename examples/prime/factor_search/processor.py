@@ -87,7 +87,7 @@ class ProcessorFactorSearch(ProcessorBase):
 
             # Handle cancellation and limit checks
             if self._is_cancelled:
-                print(f"Factor search was cancelled at i={i} (start={start} end={end})")
+                logger.info(f"Factor search cancelled at i={i} (start={start} end={end})")
                 break
             elif self._limit is not None and i >= self._limit:
                 break

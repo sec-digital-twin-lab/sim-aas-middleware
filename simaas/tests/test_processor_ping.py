@@ -15,7 +15,7 @@ import pytest
 
 from examples.simple.ping.processor import ProcessorPing, tcp_connect, udp_connect
 from examples.simple.ping.server import CombinedTestServer
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.rti.schemas import JobStatus
 from simaas.tests.fixture_core import BASE_DIR
 from simaas.tests.fixture_mocks import DummyProgressListener
@@ -23,8 +23,8 @@ from simaas.tests.helper_waiters import wait_for_job_completion
 from simaas.tests.helper_factories import TaskBuilder
 from simaas.tests.helper_assertions import assert_job_successful
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 @pytest.fixture
@@ -126,7 +126,7 @@ def test_processor_ping_local_only(dummy_namespace):
         proc.run(
             temp_dir, None, DummyProgressListener(
                 temp_dir, status, dummy_namespace.dor
-            ), dummy_namespace, None
+            ), dummy_namespace, logging.getLogger('test.ping')
         )
 
         # read the result
@@ -171,7 +171,7 @@ def test_processor_ping_local_tcp_udp(dummy_namespace, tcp_udp_server):
         proc.run(
             temp_dir, None, DummyProgressListener(
                 temp_dir, status, dummy_namespace.dor
-            ), dummy_namespace, None
+            ), dummy_namespace, logging.getLogger('test.ping')
         )
 
         # read the result

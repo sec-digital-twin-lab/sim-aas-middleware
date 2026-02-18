@@ -24,18 +24,18 @@ from simaas.core.errors import (
     ValidationError,
     NetworkError,
 )
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.meta import __title__, __version__, __description__
 from simaas.rest.schemas import EndpointDefinition
 
-logger = Logging.get('rest.service')
+log = get_logger('simaas.rest', 'rest')
 
 DOCS_ENDPOINT_PREFIX = "/api/v1"
 
 
 def _error_response(e: _BaseError, status_code: int) -> JSONResponse:
     """Create a JSON error response from a _BaseError exception."""
-    logger.error(f"Exception: {e.reason} {e.id} -> {e.details}", exc_info=True)
+    log.error('error', f'Exception: {e.reason}', id=e.id)
     return JSONResponse(
         status_code=status_code,
         content={
@@ -86,7 +86,7 @@ class RESTApp:
 
         @self.api.exception_handler(Exception)
         async def generic_exception_handler(_: Request, e: Exception):
-            logger.error(f"Unexpected exception: {e}", exc_info=True)
+            log.error('exception', 'Unexpected exception', exc=e)
             return JSONResponse(
                 status_code=500,
                 content={
@@ -107,7 +107,7 @@ class RESTApp:
 
     def register(self, endpoint: EndpointDefinition, dependencies: Optional[List[Depends]]) -> None:
         route = f"{endpoint.prefix}/{endpoint.rule}"
-        logger.info(f"REST app is mapping {endpoint.method}:{route} to {endpoint.function}")
+        log.info('register', 'Mapping route to function', method=endpoint.method, route=route)
         if endpoint.method in ['POST', 'GET', 'PUT', 'DELETE']:
             self.api.add_api_route(route,
                                    endpoint.function,
@@ -124,7 +124,7 @@ class RESTApp:
             )
 
     async def close(self) -> None:
-        logger.info("REST app is shutting down.")
+        log.info('shutdown', 'REST app is shutting down')
 
 
 class RESTService:
@@ -165,7 +165,7 @@ class RESTService:
 
     def start_service(self) -> None:
         if self._thread is None:
-            logger.info("REST service starting up...")
+            log.info('startup', 'REST service starting up')
             self._thread = Thread(target=uvicorn.run, args=(self._app.api,),
                                   kwargs={"host": self._host if not self._bind_all_address else "0.0.0.0",
                                           "port": self._port, "log_level": "info"},
@@ -181,14 +181,14 @@ class RESTService:
             Thread(target=_check_ready, daemon=True).start()
 
         else:
-            logger.warning("REST service asked to start up but thread already exists! Ignoring...")
+            log.warning('startup', 'REST service thread already exists, ignoring start request')
 
     def stop_service(self) -> None:
         if self._thread is None:
-            logger.warning("REST service asked to shut down but thread does not exist! Ignoring...")
+            log.warning('shutdown', 'REST service thread does not exist, ignoring stop request')
 
         else:
-            logger.info("REST service shutting down...")
+            log.info('shutdown', 'REST service shutting down')
             self._ready_event.clear()
             # there is no way to terminate a thread...
             # self._thread.terminate()

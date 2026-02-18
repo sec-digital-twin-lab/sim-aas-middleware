@@ -14,10 +14,10 @@ from simaas.core.errors import NetworkError, OperationError, AuthenticationError
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.errors import ExceptionContent
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
-logger = Logging.get('dor.protocol')
+log = get_logger('simaas.ns', 'ns')
 
 
 def serialise(obj: Any) -> Any:
@@ -163,8 +163,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
 
             except NetworkError:
                 delay = attempt + 1
-                logger.warning(f"Failed for perform namespace service call ({attempt+1}/{max_attempts}) -> "
-                               f"Trying again in {delay} seconds...")
+                log.warning('service', 'Failed to perform namespace service call, retrying', attempt=attempt+1, max_attempts=max_attempts, delay=delay)
                 await asyncio.sleep(delay)
 
         raise OperationError(operation='namespace_service_call', cause=f'failed after {max_attempts} attempts')

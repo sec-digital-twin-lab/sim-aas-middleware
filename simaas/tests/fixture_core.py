@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from simaas.core.async_helpers import run_coro_safely
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
@@ -28,11 +28,12 @@ from simaas.plugins.builtins.rti_aws.service import get_default_aws_config
 load_dotenv()
 
 REPOSITORY_URL = 'https://github.com/sec-digital-twin-lab/sim-aas-middleware'
-REPOSITORY_COMMIT_ID = 'b9e729d94e5ac55ff04eefef56d199396cdc1ba0'
-
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-logger = Logging.get('tests.fixtures.core')
+# Constant tag for test images - tests always use local builds
+CURRENT_COMMIT_ID = 'LOCAL_LATEST'
+
+log = get_logger('tests.fixtures.core', 'test')
 
 
 class TestContext:
@@ -55,7 +56,7 @@ class TestContext:
     def cleanup(self) -> None:
         """Clean up the test context."""
         for name in self.nodes:
-            logger.info(f"stopping node '{name}'")
+            log.info(f"stopping node '{name}'")
             node = self.nodes[name]
             # Note: we skip leave_network and shutdown_rti for fast test cleanup
             # In production, call await node.leave_network() and await node.shutdown_rti() first
@@ -65,7 +66,7 @@ class TestContext:
             shutil.rmtree(self._temp_testing_dir)
         except OSError as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"exception during cleanup() -> {e} {trace}")
+            log.error(f"exception during cleanup() -> {e} {trace}")
 
     def create_keystores(self, n: int) -> List[Keystore]:
         """Create n keystores."""

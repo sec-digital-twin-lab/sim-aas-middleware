@@ -12,14 +12,11 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_f
     default_if_missing, initialise_storage_folder, prompt_for_selection, load_keystore, extract_address, \
     use_env_or_prompt_if_missing
 from simaas.core.errors import _BaseError
-from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.plugins import discover_plugins, get_plugin_class
 from simaas.plugins import builtins
-
-logger = Logging.get('cli')
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)

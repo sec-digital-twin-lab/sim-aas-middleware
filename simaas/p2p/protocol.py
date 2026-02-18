@@ -10,10 +10,10 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.errors import NetworkError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 
-logger = Logging.get('p2p.protocol')
+log = get_logger('simaas.p2p', 'p2p')
 
 
 class LatencyMessage(BaseModel):

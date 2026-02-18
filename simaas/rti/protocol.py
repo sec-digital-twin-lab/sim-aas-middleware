@@ -9,11 +9,11 @@ from pydantic import BaseModel
 from simaas.core.errors import NetworkError, OperationError
 from simaas.rti.schemas import Job, JobStatus, BatchStatus
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 
-logger = Logging.get('rti.protocol')
+log = get_logger('simaas.rti', 'rti')
 
 
 class RunnerHandshakeRequest(BaseModel):
@@ -61,8 +61,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
             except NetworkError:
                 delay = attempt + 1
-                logger.warning(f"Failed for perform handshake with custodian ({attempt+1}/{max_attempts}) -> "
-                               f"Trying again in {delay} seconds...")
+                log.warning('handshake', 'Failed to perform handshake with custodian, retrying', attempt=attempt+1, max_attempts=max_attempts, delay=delay)
                 await asyncio.sleep(delay)
 
         raise OperationError(operation='handshake', cause=f'failed after {max_attempts} attempts')
@@ -91,8 +90,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             ), None
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"Handle handshake request failed: {e} {trace}")
+            log.error('handshake', 'Handle handshake request failed', exc=e)
 
             return RunnerHandshakeResponse(
                 job=None, custodian_identity=self._node.identity, secrets={}, join_batch=None
