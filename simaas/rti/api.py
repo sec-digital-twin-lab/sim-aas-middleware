@@ -21,7 +21,7 @@ JOB_ENDPOINT_PREFIX = "/api/v1/job"
 class RTIAdminInterface(abc.ABC):
     @abc.abstractmethod
     @requires_node_ownership_if_strict
-    def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
+    async def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
         """
         Deploys a processor.
         """
@@ -29,14 +29,14 @@ class RTIAdminInterface(abc.ABC):
     @abc.abstractmethod
     @requires_node_ownership_if_strict
     @requires_proc_not_busy
-    def undeploy(self, proc_id: str) -> Optional[Processor]:
+    async def undeploy(self, proc_id: str) -> Optional[Processor]:
         """
         Removes a processor from the RTI (if it exists).
         """
 
     @abc.abstractmethod
     @requires_proc_deployed
-    def jobs_by_proc(self, proc_id: str) -> List[Job]:
+    async def jobs_by_proc(self, proc_id: str) -> List[Job]:
         """
         Retrieves a list of active jobs processed by a processor. Any job that is pending execution or actively
         executed will be included in the list.
@@ -44,14 +44,14 @@ class RTIAdminInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_job_or_node_ownership
-    def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
+    async def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
         """
         Updates the status of a particular job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
         """
 
     @abc.abstractmethod
-    def get_job_owner_iid(self, job_id: str) -> str:
+    async def get_job_owner_iid(self, job_id: str) -> str:
         ...
 
 
@@ -61,20 +61,20 @@ class RTIInterface(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_all_procs(self) -> List[Processor]:
+    async def get_all_procs(self) -> List[Processor]:
         """
         Retrieves a dict of all deployed processors by their id.
         """
 
     @abc.abstractmethod
-    def get_proc(self, proc_id: str) -> Optional[Processor]:
+    async def get_proc(self, proc_id: str) -> Optional[Processor]:
         """
         Retrieves a specific processors given its id.
         """
 
     @abc.abstractmethod
     @requires_tasks_supported
-    def submit(self, tasks: List[Task]) -> List[Job]:
+    async def submit(self, tasks: List[Task]) -> List[Job]:
         """
         Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
         coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
@@ -83,7 +83,7 @@ class RTIInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_job_or_node_ownership
-    def get_job_status(self, job_id: str) -> JobStatus:
+    async def get_job_status(self, job_id: str) -> JobStatus:
         """
         Retrieves detailed information about the status of a job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
@@ -91,7 +91,7 @@ class RTIInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_batch_or_node_ownership
-    def get_batch_status(self, batch_id: str) -> BatchStatus:
+    async def get_batch_status(self, batch_id: str) -> BatchStatus:
         """
         Retrieves detailed information about the status of a batch of jobs. Authorisation is required by the owner of
         the batch (i.e., the user that has created the batch by submitting the tasks in the first place).
@@ -99,7 +99,7 @@ class RTIInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_job_or_node_ownership
-    def job_cancel(self, job_id: str) -> JobStatus:
+    async def job_cancel(self, job_id: str) -> JobStatus:
         """
         Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
         possible.
@@ -107,7 +107,7 @@ class RTIInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_job_or_node_ownership
-    def job_purge(self, job_id: str) -> JobStatus:
+    async def job_purge(self, job_id: str) -> JobStatus:
         """
         Purges a running job. It will be removed regardless of its state.
         """
@@ -129,7 +129,7 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
     @abc.abstractmethod
     @requires_tasks_supported
     @requires_authentication
-    def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
+    async def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
         """
         Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
         coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
@@ -138,7 +138,7 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
 
     @abc.abstractmethod
     @requires_authentication
-    def jobs_by_user(self, request: Request) -> List[Job]:
+    async def jobs_by_user(self, request: Request) -> List[Job]:
         """
         Retrieves a list of active jobs by a user. If the user is the node owner, all active jobs will be returned.
         """

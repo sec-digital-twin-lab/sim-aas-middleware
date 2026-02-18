@@ -167,12 +167,20 @@ class FilesystemDORService(DORRESTService):
                 else:
                     logger.info(f"database provenance record already exists for c_hash={c_hash} and p_hash={p_hash}.")
 
-    def _search_network_for_provenance(self, c_hash: str) -> List[DataObjectProvenance]:
+    async def _search_network_for_provenance(self, c_hash: str) -> List[DataObjectProvenance]:
         # check every node in the network for provenance information
         result = []
-        for node in self._node.db.get_network():
+        for node in await self._node.db.get_network():
             try:
-                if node.dor_service and node.rest_address is not None:
+                if not node.dor_service:
+                    continue
+
+                # Skip HTTP request to self (would cause deadlock), query local DOR directly
+                if node.identity.id == self._node.identity.id:
+                    provenance = await self.get_provenance(c_hash)
+                    if provenance is not None:
+                        result.append(provenance)
+                elif node.rest_address is not None:
                     dor = DORProxy(node.rest_address)
                     provenance = dor.get_provenance(c_hash)
                     if provenance is not None:
@@ -184,7 +192,7 @@ class FilesystemDORService(DORRESTService):
 
         return result
 
-    def _generate_provenance_information(self, c_hash: str, recipe: DataObjectRecipe) -> DataObjectProvenance:
+    async def _generate_provenance_information(self, c_hash: str, recipe: DataObjectRecipe) -> DataObjectProvenance:
         data_nodes = {}
         proc_nodes = {}
         steps = []
@@ -215,7 +223,7 @@ class FilesystemDORService(DORRESTService):
                 # search the network for provenance information. if there are multiple provenance instances (unlikely
                 # but not impossible), just use the first one.
                 # TODO: this behaviour should possibly be improved at some point
-                provenance = self._search_network_for_provenance(obj.c_hash)
+                provenance = await self._search_network_for_provenance(obj.c_hash)
                 provenance = provenance[0] if len(provenance) > 0 else None
 
                 # is the provenance information missing?
@@ -267,7 +275,7 @@ class FilesystemDORService(DORRESTService):
 
         return provenance
 
-    def search(
+    async def search(
             self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
             data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
     ) -> List[DataObject]:
@@ -315,7 +323,7 @@ class FilesystemDORService(DORRESTService):
 
             return result
 
-    def statistics(self) -> DORStatistics:
+    async def statistics(self) -> DORStatistics:
         """
         Retrieves some statistics from the DOR. This includes a list of all data types and formats found in the DOR.
         """
@@ -325,7 +333,7 @@ class FilesystemDORService(DORRESTService):
                 data_formats=[value[0] for value in session.query(DataObjectRecord.data_format).distinct()]
             )
 
-    def add(
+    async def add(
             self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
@@ -334,7 +342,7 @@ class FilesystemDORService(DORRESTService):
     ) -> DataObject:
 
         # get the owner identity
-        owner = self._node.db.get_identity(owner_iid, raise_if_unknown=True)
+        owner = await self._node.db.get_identity(owner_iid, raise_if_unknown=True)
 
         # determine the content hash
         c_hash: str = hash_file_content(content_path).hex()
@@ -346,7 +354,7 @@ class FilesystemDORService(DORRESTService):
             creators_iid = [owner.id]
         else:
             for creator_iid in creators_iid:
-                self._node.db.get_identity(creator_iid, raise_if_unknown=True)
+                await self._node.db.get_identity(creator_iid, raise_if_unknown=True)
 
         # fix the c_hash in the recipe (if any)
         if recipe is not None:
@@ -395,13 +403,13 @@ class FilesystemDORService(DORRESTService):
                             f"referenced by {len(records)} other data objects).")
 
         # determine the provenance and add to the database
-        provenance = self._generate_provenance_information(c_hash, recipe) if recipe else \
+        provenance = await self._generate_provenance_information(c_hash, recipe) if recipe else \
             _generate_missing_provenance(c_hash, data_type, data_format)
         self._add_provenance_record(c_hash, provenance.model_dump())
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
-    def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
+    async def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
         of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
@@ -471,20 +479,20 @@ class FilesystemDORService(DORRESTService):
         # create parameters object
         p = AddDataObjectParameters.model_validate(body)
 
-        return self.add(
+        return await self.add(
             attachment_path, p.data_type, p.data_format, p.owner_iid,
             creators_iid=p.creators_iid, access_restricted=p.access_restricted,
             content_encrypted=p.content_encrypted, license=p.license, tags=p.tags,
             recipe=p.recipe
         )
 
-    def remove(self, obj_id: str) -> Optional[DataObject]:
+    async def remove(self, obj_id: str) -> Optional[DataObject]:
         """
         Deletes a data object from the DOR and returns the meta information of that data object. Authorisation by the
         data object owner is required.
         """
         # get the meta information for this object (if it exists in the first place)
-        meta = self.get_meta(obj_id)
+        meta = await self.get_meta(obj_id)
         if meta is None:
             return None
 
@@ -513,7 +521,7 @@ class FilesystemDORService(DORRESTService):
 
         return meta
 
-    def get_meta(self, obj_id: str) -> Optional[DataObject]:
+    async def get_meta(self, obj_id: str) -> Optional[DataObject]:
         """
         Retrieves the meta information of a data object. Depending on the type of the data object, either a
         `CDataObject` or a `GPPDataObject` is returned, providing meta information for content and GPP data objects,
@@ -528,9 +536,9 @@ class FilesystemDORService(DORRESTService):
             # is it a GPP data object?
             return _extract_data_object(record, self._node.info)
 
-    def get_content(self, obj_id: str, content_path: str) -> None:
+    async def get_content(self, obj_id: str, content_path: str) -> None:
         # get the meta information for this object (if it exists in the first place)
-        meta = self.get_meta(obj_id)
+        meta = await self.get_meta(obj_id)
         if meta is None:
             raise DataObjectNotFoundError(obj_id)
 
@@ -549,13 +557,13 @@ class FilesystemDORService(DORRESTService):
             os.remove(content_path)
         os.symlink(content_path0, content_path)
 
-    def rest_get_content(self, obj_id: str) -> Response:
+    async def rest_get_content(self, obj_id: str) -> Response:
         """
         Retrieves the content of a data object. Authorisation required by a user who has been granted access to the
         data object.
         """
         # get the meta information for this object (if it exists in the first place)
-        meta = self.get_meta(obj_id)
+        meta = await self.get_meta(obj_id)
         if meta is None:
             raise DataObjectNotFoundError(obj_id)
 
@@ -577,7 +585,7 @@ class FilesystemDORService(DORRESTService):
         return StreamingResponse(file_iterator(content_path, chunk_size=1024*1204),
                                  media_type="application/octet-stream")
 
-    def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
+    async def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
         """
         Retrieves the provenance information of a data object (identified by its content hash `c_hash`). Provenance
         data includes detailed information how the content of a data object has been produced. In principle, this
@@ -592,13 +600,13 @@ class FilesystemDORService(DORRESTService):
                 (DataObjectProvenanceRecord.c_hash == c_hash)).all()
             return DataObjectProvenance.model_validate(records[0].provenance) if records else None
 
-    def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
+    async def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Grants a user the right to access the contents of a restricted data object. Authorisation required by the owner
         of the data object. Note that access rights only matter if the data object has access restrictions.
         """
         # do we have an identity for this iid?
-        user = self._node.db.get_identity(user_iid)
+        user = await self._node.db.get_identity(user_iid)
         if user is None:
             raise IdentityNotFoundError(user_iid)
 
@@ -617,15 +625,15 @@ class FilesystemDORService(DORRESTService):
         # touch data object
         self.touch_data_object(obj_id)
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
-    def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
+    async def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Revokes the right to access the contents of a restricted data object from a user. Authorisation required by the
         owner of the data object. Note that access rights only matter if the data object has access restrictions.
         """
         # do we have an identity for this iid?
-        user = self._node.db.get_identity(user_iid)
+        user = await self._node.db.get_identity(user_iid)
         if user is None:
             raise IdentityNotFoundError(user_iid)
 
@@ -644,15 +652,15 @@ class FilesystemDORService(DORRESTService):
         # touch data object
         self.touch_data_object(obj_id)
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
-    def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
+    async def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
         """
         Transfers the ownership of a data object to another user. Authorisation required by the current owner of the
         data object.
         """
         # do we have an identity for this iid?
-        new_owner = self._node.db.get_identity(new_owner_iid)
+        new_owner = await self._node.db.get_identity(new_owner_iid)
         if new_owner is None:
             raise IdentityNotFoundError(new_owner_iid)
 
@@ -670,9 +678,9 @@ class FilesystemDORService(DORRESTService):
         # touch data object
         self.touch_data_object(obj_id)
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
-    def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
+    async def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
         """
         Adds tags to a data object or updates tags in case they already exist. Authorisation required by the owner of
         the data object.
@@ -692,9 +700,9 @@ class FilesystemDORService(DORRESTService):
         # touch data object
         self.touch_data_object(obj_id)
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
-    def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
+    async def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
         """
         Removes tags from a data object. Authorisation required by the owner of the data object.
         """
@@ -713,7 +721,7 @@ class FilesystemDORService(DORRESTService):
         # touch data object
         self.touch_data_object(obj_id)
 
-        return self.get_meta(obj_id)
+        return await self.get_meta(obj_id)
 
     def touch_data_object(self, obj_id) -> None:
         with self._db_mutex:

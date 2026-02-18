@@ -84,9 +84,22 @@ class RoomProcessor(ProcessorBase):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(('0.0.0.0', 7001))
         server.listen(1)
+        server.settimeout(1.0)  # Set timeout to allow periodic cancellation checks
         try:
             listener.on_message(Severity.INFO, "Room Simulator: Waiting for connection...")
-            conn, _ = server.accept()
+            conn = None
+            while conn is None and not self._is_cancelled:
+                try:
+                    conn, _ = server.accept()
+                except socket.timeout:
+                    # Timeout allows us to check _is_cancelled flag
+                    continue
+
+            if self._is_cancelled:
+                server.close()
+                listener.on_message(Severity.INFO, "Room Simulator: Cancelled while waiting for connection.")
+                return
+
             listener.on_message(Severity.INFO, "Room Simulator: Connected to Thermostat Controller")
             listener.on_progress_update(20)
         except Exception as e:

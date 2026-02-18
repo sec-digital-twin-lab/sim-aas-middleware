@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from typing import Optional, Type
 
+from simaas.core.async_helpers import run_coro_safely
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
 from simaas.node.base import Node
@@ -48,13 +49,18 @@ class DefaultNode(Node):
     @classmethod
     def create(
             cls, keystore: Keystore, storage_path: str, p2p_address: str, rest_address: (str, int) = None,
-            boot_node_address: (str, int) = None, bind_all_address: bool = False, enable_db: bool = True,
+            bind_all_address: bool = False, enable_db: bool = True,
             dor_plugin_class: Optional[Type] = None, rti_plugin_class: Optional[Type] = None,
             retain_job_history: bool = False, strict_deployment: bool = True
     ) -> Node:
+        """
+        Create and start a node (sync convenience method).
+
+        To join a network after creation, call `await node.join_network(boot_node_address)`.
+        """
         node = DefaultNode(keystore, storage_path, enable_db=enable_db,
                            dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
                            retain_job_history=retain_job_history, strict_deployment=strict_deployment)
-        node.startup(p2p_address, rest_address, boot_node_address, bind_all_address)
+        run_coro_safely(node.startup(p2p_address, rest_address, bind_all_address))
 
         return node

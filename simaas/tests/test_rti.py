@@ -12,6 +12,8 @@ from typing import Union, Optional, List
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.core.identity import Identity
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
@@ -318,11 +320,11 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
 def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
     """Test job cancellation by the job owner.
 
-    NOTE: This test is Docker-only due to SSH tunnel limitations when testing AWS.
-    The SSH tunnel only allows outbound calls from the local node to AWS Batch.
-    AWS Batch jobs cannot call back to the local node to receive cancellation
-    signals, making cancellation testing impossible in this test environment.
-    In production, where the node runs on AWS infrastructure, cancellation works normally.
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
     """
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -457,9 +459,9 @@ def test_job_provenance_tracking(rti_context: RTIContext, test_context):
         )
 
         # wait until the job is done
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
         while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
             time.sleep(0.5)
 
         obj_c = status.output['c']
@@ -518,9 +520,9 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
 
             # wait until the job is done
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
             while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                status: JobStatus = rti.get_job_status(job.id)
+                status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
                 time.sleep(1.0)
 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} finished: {status.state}")
@@ -640,7 +642,17 @@ def test_batch_submit_and_complete(rti_context: RTIContext, test_context, extra_
 
 @pytest.mark.integration
 def test_batch_cancel_cascade(rti_context: RTIContext):
-    """Test batch cancellation cascade when one job fails."""
+    """Test batch cancellation cascade when one job fails.
+
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
+    """
+    if rti_context.backend == 'aws':
+        pytest.skip("Batch cancel cascade requires P2P connectivity to AWS jobs not available from local test environment")
+
     proc_id = rti_context.deployed_abc_processor.obj_id
     owner = rti_context.session_node.keystore
 
@@ -791,7 +803,7 @@ def test_namespace_resource_limits(rti_context: RTIContext):
 
     # test with namespace that has not enough resources for a single task
     namespace0 = 'namespace0'
-    rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2)))
 
     # get the tasks for namespace0 and try to submit jobs to namespace0 -> should fail
     tasks = get_cosim_tasks(
@@ -806,9 +818,9 @@ def test_namespace_resource_limits(rti_context: RTIContext):
     namespace1 = 'namespace1'
     namespace2 = 'namespace2'
     namespace3 = 'namespace3'
-    rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem)))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem)))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2)))
 
     # get the tasks for namespace1 and try to submit jobs to namespace1 -> should fail
     tasks = get_cosim_tasks(

@@ -1,9 +1,9 @@
+import asyncio
 import json
 import os
 import socket
 import tempfile
 import threading
-import asyncio
 import traceback
 
 import zmq
@@ -31,7 +31,9 @@ class P2PService:
         self._socket: Optional[Socket] = None
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
+        self._ready_event = threading.Event()
         self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
+        self._thread: Optional[threading.Thread] = None
 
     def is_ready(self) -> bool:
         return self._socket is not None
@@ -54,39 +56,85 @@ class P2PService:
         fqdn = socket.getfqdn()
         return f"tcp://{fqdn}:{self._port}"
 
-    def start_service(self, encrypt: bool = True, timeout: int = 5000) -> None:
-        """Starts the TCP socket server at the specified address."""
+    def _init_socket(self, encrypt: bool = True, timeout: int = 5000) -> None:
+        """Initialize the ZMQ socket."""
+        if not self._socket:
+            try:
+                context = Context.instance()
+                self._socket = context.socket(zmq.ROUTER)
+                self._socket.setsockopt(zmq.LINGER, 0)
+                self._socket.setsockopt(zmq.RCVTIMEO, timeout)
+                self._socket.setsockopt(zmq.SNDTIMEO, timeout)
+                if encrypt:
+                    self._socket.curve_secretkey = self._keystore.curve_secret_key()
+                    self._socket.curve_publickey = self._keystore.curve_public_key()
+                    self._socket.curve_server = True
+                self._socket.bind(self._address)
+                self._ready_event.set()
+                logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
+            except Exception as e:
+                raise SaaSRuntimeException("P2P server socket cannot be created", details={'exception': e})
+
+    async def start_service(self, encrypt: bool = True, timeout: int = 5000) -> asyncio.Task:
+        """Starts the P2P server and returns the connection handler task.
+
+        Use this in async contexts where the event loop will keep running.
+        """
         with self._mutex:
-            if not self._socket:
-                try:
-                    context = Context.instance()
-                    self._socket = context.socket(zmq.ROUTER)
-                    self._socket.setsockopt(zmq.LINGER, 0)
-                    self._socket.setsockopt(zmq.RCVTIMEO, timeout)
-                    self._socket.setsockopt(zmq.SNDTIMEO, timeout)
-                    if encrypt:
-                        self._socket.curve_secretkey = self._keystore.curve_secret_key()
-                        self._socket.curve_publickey = self._keystore.curve_public_key()
-                        self._socket.curve_server = True
-                    self._socket.bind(self._address)
-                    logger.info(f"[{self._keystore.identity.name}] P2P server initialised at '{self._address}'")
-                except Exception as e:
-                    raise SaaSRuntimeException("P2P server socket cannot be created", details={'exception': e})
+            self._init_socket(encrypt, timeout)
+        return asyncio.create_task(self._handle_incoming_connections())
 
-                threading.Thread(target=self._run_event_loop, daemon=True).start()
+    def start_service_background(self, encrypt: bool = True, timeout: int = 5000) -> None:
+        """Starts the P2P server in a background thread with its own event loop.
 
-    def stop_service(self) -> None:
-        """Signals the server thread to stop accepting connections."""
-        logger.info(f"[{self._keystore.identity.name}] initiating shutdown of P2P service.")
-        self._stop_event.set()
+        Use this in sync contexts (like DefaultNode.create()) where the caller
+        won't maintain a running event loop.
+        """
+        # Store config for socket initialization in the background thread
+        self._bg_encrypt = encrypt
+        self._bg_timeout = timeout
+        self._bg_error = None
+        self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self._thread.start()
+        # Wait for socket to be ready or error using event (outside mutex to avoid deadlock)
+        if not self._ready_event.wait(timeout=10.0):
+            if self._bg_error is not None:
+                raise self._bg_error
+            raise SaaSRuntimeException("P2P service failed to start within timeout")
 
     def _run_event_loop(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Initialize socket in this event loop where it will be used
+            with self._mutex:
+                self._init_socket(self._bg_encrypt, self._bg_timeout)
             loop.run_until_complete(self._handle_incoming_connections())
+        except Exception as e:
+            self._bg_error = e
         finally:
             loop.close()
+
+    def stop_service(self) -> None:
+        """Signals the server to stop accepting connections."""
+        logger.info(f"[{self._keystore.identity.name}] initiating shutdown of P2P service.")
+        self._stop_event.set()
+        self._ready_event.clear()
+        # Wait for the thread to finish (with timeout to avoid hanging)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=5.0)
+
+    async def wait_until_ready(self, timeout: float = 10.0) -> bool:
+        """Wait until the P2P service is ready.
+
+        Returns True if service is ready, False if timeout occurred.
+        """
+        start = asyncio.get_event_loop().time()
+        while not self._ready_event.is_set():
+            if asyncio.get_event_loop().time() - start > timeout:
+                return False
+            await asyncio.sleep(0.1)
+        return True
 
     async def _handle_incoming_connections(self):
         logger.info(f"[{self._keystore.identity.name}] listening to incoming P2P connections...")

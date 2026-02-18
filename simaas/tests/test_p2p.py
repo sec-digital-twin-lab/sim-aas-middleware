@@ -46,7 +46,7 @@ def p2p_server(test_context) -> Node:
 
     yield _node
 
-    _node.shutdown(leave_network=False)
+    _node.shutdown()
 
 
 @pytest.fixture(scope="session")
@@ -57,7 +57,7 @@ def p2p_client(test_context) -> Node:
 
     yield _node
 
-    _node.shutdown(leave_network=False)
+    _node.shutdown()
 
 
 # ==============================================================================
@@ -140,8 +140,8 @@ async def test_p2p_update_identity(p2p_server, p2p_client):
 @pytest.mark.asyncio
 async def test_p2p_join_leave_network(p2p_server, p2p_client):
     """Test P2P network join and leave operations."""
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 1
 
@@ -152,16 +152,16 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
     result: NodeInfo = await protocol.perform(boot_node)
     assert result.identity.id == p2p_server.identity.id
 
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 2
     assert len(networkC) == 2
 
     protocol = P2PLeaveNetwork(p2p_client)
     await protocol.perform(blocking=True)
 
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 2
 
@@ -230,7 +230,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         )
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()
-        client.startup(p2p_address, rest_address=rest_address)
+        await client.startup(p2p_address, rest_address=rest_address)
         await asyncio.sleep(1)
 
         # create an owner for the data object -> make the server aware of the identity
@@ -272,7 +272,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             assert False
 
         # update the server with the client identity
-        p2p_server.db.update_identity(client.identity)
+        await p2p_server.db.update_identity(client.identity)
 
         # the client does not have permission at this point to receive the data object
         try:

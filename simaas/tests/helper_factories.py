@@ -316,6 +316,9 @@ async def execute_job(
         if runner_identity is None or runner_address is None:
             assert False
 
+        # Simulate RTI cancel flow: mark cancelled in DB first, then send interrupt
+        rti.mark_job_cancelled(job_id)
+
         await P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             curve_secret_key=custodian.keystore.curve_secret_key(),
@@ -327,7 +330,7 @@ async def execute_job(
     timeout = 60  # seconds
     elapsed = 0
     while elapsed < timeout:
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = await rti.get_job_status(job.id)
 
         if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             return status

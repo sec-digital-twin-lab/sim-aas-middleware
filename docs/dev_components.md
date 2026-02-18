@@ -345,3 +345,121 @@ simaas-cli
 - Interactive password prompts
 - Rich progress indicators for long-running operations
 - Support for both interactive and batch processing modes
+
+---
+
+## Node Lifecycle (`simaas/node/`)
+
+The `Node` class is the central orchestrator that manages all services. It has a clear separation between **sync** operations (thread lifecycle management) and **async** operations (application logic).
+
+### Async/Sync Boundary
+
+| Layer | Methods | Purpose |
+|-------|---------|---------|
+| **Sync** | `shutdown()` | Stop daemon threads |
+| **Async** | `startup()`, `join_network()`, `leave_network()`, `shutdown_rti()`, `update_identity()` | Daemon start and network operations |
+
+### Sync Methods (Thread Lifecycle)
+
+```python
+def shutdown(self) -> None:
+    """Stop P2P and REST daemon threads."""
+```
+
+### Async Methods (Application Logic)
+
+```python
+async def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
+                  bind_all_address: bool = False, wait_until_ready: bool = True) -> None:
+    """Start P2P and REST daemon threads, wait for services to be ready."""
+```
+
+```python
+async def join_network(self, boot_node_address: Tuple[str, int]) -> None:
+    """Join the P2P network via a boot node."""
+
+async def leave_network(self, blocking: bool = False) -> None:
+    """Inform peers and leave the network."""
+
+async def shutdown_rti(self, timeout: int = 60) -> None:
+    """Undeploy all processors and wait for workers to finish."""
+
+async def update_identity(self, name: str = None, email: str = None,
+                          propagate: bool = True) -> Identity:
+    """Update identity and optionally broadcast to peers."""
+```
+
+### Usage Patterns
+
+**Pattern A: Script/CLI (no existing event loop)**
+
+Use `asyncio.run()` to execute async operations from sync code:
+
+```python
+from simaas.node.default import DefaultNode
+from simaas.core.keystore import Keystore
+import asyncio
+
+# Create and configure node
+keystore = Keystore.load("path/to/keystore", password="secret")
+node = DefaultNode(keystore, "path/to/datastore", enable_db=True,
+                   dor_plugin_class=FilesystemDORService,
+                   rti_plugin_class=DockerRTIService)
+
+# Async: Start daemon services
+asyncio.run(node.startup("tcp://0.0.0.0:4000", rest_address=("0.0.0.0", 5000)))
+
+# Async: Join network (if connecting to existing network)
+asyncio.run(node.join_network(("192.168.1.100", 5000)))
+
+# ... application runs ...
+
+# Async: Clean shutdown
+asyncio.run(node.leave_network())
+asyncio.run(node.shutdown_rti())
+
+# Sync: Stop daemon services
+node.shutdown()
+```
+
+**Pattern B: Async Application (existing event loop)**
+
+When running inside an async context (e.g., pytest-asyncio, async web framework):
+
+```python
+async def main():
+    # Create and configure node
+    keystore = Keystore.load("path/to/keystore", password="secret")
+    node = DefaultNode(keystore, "path/to/datastore", enable_db=True,
+                       dor_plugin_class=FilesystemDORService,
+                       rti_plugin_class=DockerRTIService)
+
+    # Async: Start daemon services (runs in background threads)
+    await node.startup("tcp://0.0.0.0:4000", rest_address=("0.0.0.0", 5000))
+
+    # Async: Join network
+    await node.join_network(("192.168.1.100", 5000))
+
+    try:
+        # ... application runs ...
+        await some_async_work()
+    finally:
+        # Async: Clean shutdown
+        await node.leave_network()
+        await node.shutdown_rti()
+
+        # Sync: Stop daemon services
+        node.shutdown()
+
+asyncio.run(main())
+```
+
+### Design Rationale
+
+The P2P and REST services run in their own daemon threads with isolated event loops because:
+
+1. **Long-running servers**: They continuously accept connections independent of application logic
+2. **Thread isolation**: Prevents blocking the main application's event loop
+3. **Clean separation**: Thread management is inherently sync; network I/O is naturally async
+
+This design allows the Node to be used in both sync scripts and async applications without nested event loop issues.

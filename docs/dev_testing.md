@@ -104,6 +104,19 @@ SIMAAS_AWS_JOB_QUEUE=simaas-queue
 .venv/bin/python -m pytest simaas/tests/ -v -m "aws_only"
 ```
 
+## Async Tests
+
+Some tests use `pytest-asyncio`:
+
+```bash
+# Run async tests
+.venv/bin/python -m pytest simaas/tests/test_p2p.py -v
+```
+
+**Patterns**:
+- Use `@pytest.mark.asyncio` decorator for async test functions
+- Use `run_coro_safely()` from `simaas.core.async_helpers` when calling coroutines from sync context
+
 ## Test Categories
 
 | Category | Files | Description |

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import signal
@@ -212,15 +213,18 @@ class Service(CLICommand):
             raise ValueError(f"RTI plugin '{args['rti']}' not found. Available: {list(plugin_registry['rti'].keys())}")
 
         # create a node instance
-        node = DefaultNode.create(keystore, args['datastore'],
-                                  p2p_address=p2p_service_address,
-                                  rest_address=rest_service_address,
-                                  boot_node_address=boot_node_address,
-                                  dor_plugin_class=dor_plugin_class,
-                                  rti_plugin_class=rti_plugin_class,
-                                  retain_job_history=args['retain-job-history'],
-                                  strict_deployment=args['strict-deployment'],
-                                  bind_all_address=args['bind-all-address'])
+        node = DefaultNode(keystore, args['datastore'], enable_db=True,
+                           dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
+                           retain_job_history=args['retain-job-history'],
+                           strict_deployment=args['strict-deployment'])
+
+        # startup and join the network using single event loop
+        async def _startup_and_join():
+            await node.startup(p2p_service_address, rest_address=rest_service_address,
+                               bind_all_address=args['bind-all-address'])
+            await node.join_network(boot_node_address)
+
+        asyncio.run(_startup_and_join())
 
         # print info message
         if args['rti'] == 'none':

@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import traceback
 from pathlib import Path
 from typing import List
@@ -11,6 +12,7 @@ from typing import List
 import pytest
 from dotenv import load_dotenv
 
+from simaas.core.async_helpers import run_coro_safely
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
 from simaas.core.logging import Logging
@@ -55,7 +57,9 @@ class TestContext:
         for name in self.nodes:
             logger.info(f"stopping node '{name}'")
             node = self.nodes[name]
-            node.shutdown(leave_network=False)
+            # Note: we skip leave_network and shutdown_rti for fast test cleanup
+            # In production, call await node.leave_network() and await node.shutdown_rti() first
+            node.shutdown()
 
         try:
             shutil.rmtree(self._temp_testing_dir)
@@ -104,7 +108,7 @@ class TestContext:
                            dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
                            retain_job_history=retain_job_history if rti_plugin_class is not None else None,
                            strict_deployment=strict_deployment if rti_plugin_class is not None else None)
-        node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
+        run_coro_safely(node.startup(p2p_address, rest_address=rest_address if enable_rest else None))
 
         import time
         time.sleep(2)

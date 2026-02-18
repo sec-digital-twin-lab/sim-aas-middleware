@@ -12,6 +12,8 @@ from typing import Type
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.cli.cmd_image import build_processor_image
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
@@ -443,10 +445,13 @@ def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
 
             _node = DefaultNode.create(
                 keystore=session_keystore, storage_path=tempdir,
-                p2p_address=p2p_address, rest_address=rest_address, boot_node_address=rest_address,
+                p2p_address=p2p_address, rest_address=rest_address,
                 enable_db=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=AWSRTIService,
                 retain_job_history=True, strict_deployment=False
             )
+
+            # join the network using the session_node's REST address
+            run_coro_safely(_node.join_network(session_node.rest.address()))
 
             yield _node
 

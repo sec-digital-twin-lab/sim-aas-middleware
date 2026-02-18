@@ -91,7 +91,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    def _check_restrictions(self, service, method, args, identity: Identity) -> None:
+    async def _check_restrictions(self, service, method, args, identity: Identity) -> None:
         cls = service.__class__  # Get actual class if method is bound
 
         # Iterate over the class and its parent classes (including ABCs)
@@ -101,36 +101,36 @@ class P2PNamespaceServiceCall(P2PProtocol):
                 # Check for restriction flags and append appropriate dependencies
                 if getattr(interface_method, "_dor_requires_ownership", False):
                     obj_id: str = args['obj_id']
-                    self._node.check_dor_ownership(obj_id, identity)
+                    await self._node.check_dor_ownership(obj_id, identity)
 
                 if getattr(interface_method, "_dor_requires_access", False):
                     obj_id: str = args['obj_id']
-                    self._node.check_dor_has_access(obj_id, identity)
+                    await self._node.check_dor_has_access(obj_id, identity)
 
                 if getattr(interface_method, "_rti_requires_tasks_supported", False):
                     for task in args['tasks']:
-                        self._node.check_rti_is_deployed(task.proc_id)
-                        self._node.check_rti_not_busy(task.proc_id)
+                        await self._node.check_rti_is_deployed(task.proc_id)
+                        await self._node.check_rti_not_busy(task.proc_id)
 
                 if getattr(interface_method, "_rti_requires_proc_deployed", False):
                     proc_id: str = args['proc_id']
-                    self._node.check_rti_is_deployed(proc_id)
+                    await self._node.check_rti_is_deployed(proc_id)
 
                 if getattr(interface_method, "_rti_node_ownership_if_strict", False):
                     if self._node.rti.strict_deployment:
-                        self._node.check_rti_node_owner(identity)
+                        await self._node.check_rti_node_owner(identity)
 
                 if getattr(interface_method, "_rti_job_or_node_ownership", False):
                     job_id: str = args['job_id']
-                    self._node.check_rti_job_or_node_owner(job_id, identity)
+                    await self._node.check_rti_job_or_node_owner(job_id, identity)
 
                 if getattr(interface_method, "_rti_batch_or_node_ownership", False):
                     batch_id: str = args['batch_id']
-                    self._node.check_rti_batch_or_node_owner(batch_id, identity)
+                    await self._node.check_rti_batch_or_node_owner(batch_id, identity)
 
                 if getattr(interface_method, "_rti_requires_proc_not_busy", False):
                     proc_id: str = args['proc_id']
-                    self._node.check_rti_not_busy(proc_id)
+                    await self._node.check_rti_not_busy(proc_id)
 
     @classmethod
     async def perform(
@@ -177,7 +177,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
 
         try:
             # do we know the identity that authorised the request?
-            identity = self._node.db.get_identity(request.authorisation.iid)
+            identity = await self._node.db.get_identity(request.authorisation.iid)
             if identity is None:
                 raise SaaSRuntimeException(reason="Namespace request authorisation failed: identity unknown", details={
                     'request': request.model_dump()
@@ -227,7 +227,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                         args[key] = attachment_path
 
             # check restrictions
-            self._check_restrictions(service, method, args, identity)
+            await self._check_restrictions(service, method, args, identity)
 
             # are we expected to send an attachment back?
             content_path = None
@@ -237,7 +237,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                     args[key] = content_path
 
             # call the method
-            result = method(**args)
+            result = await method(**args)
             result = serialise(result)
 
             # serialise the result
