@@ -1,11 +1,12 @@
 """Mock classes and fixtures for testing."""
 
+import hashlib
 import json
 import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 import pytest
 
@@ -31,12 +32,15 @@ class DummyProgressListener(ProgressListener):
     """Progress listener for testing processor execution."""
 
     def __init__(
-            self, job_path: str, status: JobStatus, dor: SyncNamespaceDOR, expected_messages: Optional[List[str]] = None
+            self, job_path: str, status: JobStatus, dor: SyncNamespaceDOR,
+            expected_messages: Optional[List[str]] = None,
+            output_specs: Optional[Dict[str, tuple]] = None
     ):
         self._job_path = job_path
         self._status = status
         self._dor = dor
         self._expected_messages = expected_messages
+        self._output_specs = output_specs or {}
 
     def on_progress_update(self, progress: float) -> None:
         """Handle progress update callback."""
@@ -47,7 +51,8 @@ class DummyProgressListener(ProgressListener):
         """Handle output available callback."""
         print(f"on_output_available: {output_name}")
         content_path = os.path.join(self._job_path, output_name)
-        meta: DataObject = self._dor.add(content_path, 'JSON', 'json', 'someone')
+        data_type, data_format = self._output_specs.get(output_name, ('JSON', 'json'))
+        meta: DataObject = self._dor.add(content_path, data_type, data_format, 'someone')
         self._status.output[output_name] = meta
 
     def on_message(self, severity: Severity, message: str) -> None:
@@ -67,7 +72,7 @@ class DummyNamespace(Namespace):
         def __init__(self):
             self._next_obj_id: int = 0
             self._meta: Dict[str, DataObject] = {}
-            self._content: Dict[str, dict] = {}
+            self._content: Dict[str, Union[dict, bytes]] = {}
 
         def type(self) -> str:
             return 'dummy'
@@ -89,9 +94,15 @@ class DummyNamespace(Namespace):
             obj_id = str(self._next_obj_id)
             self._next_obj_id += 1
 
-            with open(content_path, 'r') as f:
-                self._content[obj_id] = json.load(f)
-                c_hash: str = hash_json_object(self._content[obj_id]).hex()
+            if data_format == 'json':
+                with open(content_path, 'r') as f:
+                    self._content[obj_id] = json.load(f)
+                    c_hash: str = hash_json_object(self._content[obj_id]).hex()
+            else:
+                with open(content_path, 'rb') as f:
+                    data = f.read()
+                    self._content[obj_id] = data
+                    c_hash: str = hashlib.sha256(data).hexdigest()
 
             meta = DataObject(
                 obj_id=obj_id,
@@ -122,8 +133,13 @@ class DummyNamespace(Namespace):
             return self._meta[obj_id]
 
         async def get_content(self, obj_id: str, content_path: str) -> None:
-            with open(content_path, 'w') as f:
-                json.dump(self._content[obj_id], f, indent=2)
+            content = self._content[obj_id]
+            if isinstance(content, bytes):
+                with open(content_path, 'wb') as f:
+                    f.write(content)
+            else:
+                with open(content_path, 'w') as f:
+                    json.dump(content, f, indent=2)
 
         async def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
             pass
