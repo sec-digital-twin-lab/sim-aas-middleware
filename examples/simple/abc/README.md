@@ -32,6 +32,20 @@ This setup demonstrates how to:
 ## Running the Example using Python
 Test cases with working code can be found in [test_example_abc.py](../../simaas/tests/test_example_abc.py).
 
+## Running Tests Inside the Container
+This processor includes a test stage in its Dockerfile and a `requirements-dev.txt` with
+test dependencies (pytest). To build the test image and run tests inside the container:
+
+```shell
+# Build the test image
+simaas-cli image build-local --target test --arch linux/amd64 .
+
+# Run tests inside the container (override the entrypoint)
+docker run --rm --entrypoint pytest <image-name> /processor/test_processor.py -v
+```
+
+The production image (built without `--target`) does not include test dependencies.
+
 ## Running the Example using the CLI
 > This examples assumes you have a Sim-aaS Node instance running, read the documentation
 > [here](../../docs/usage_run_simaas_node.md) to learn how to do that.

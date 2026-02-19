@@ -186,7 +186,8 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
 
 
 def build_processor_image(processor_path: str, simaas_path: str, image_name: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False, platform: Optional[str] = None) -> bool:
+                          force_build: bool = False, platform: Optional[str] = None,
+                          target: Optional[str] = None) -> bool:
     # does the processor path exist?
     if not os.path.isdir(processor_path):
         raise CLIError(f"Processor path {processor_path} does not exist or not a directory")
@@ -234,6 +235,8 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
                         f.write(f"{credentials[0]}:{credentials[1]}")
 
                     command.extend(['--secret', f'id=git_credentials,src={credentials_path}'])
+                if target:
+                    command.extend(['--target', target])
                 command.extend(['-t', image_name, '.'])
 
                 env = os.environ.copy()
@@ -294,7 +297,8 @@ def build_pdi_file(args: dict) -> dict:
     # build the image
     image_existed = build_processor_image(
         args['proc_path'], args['simaas_repo_path'], image_name,
-        force_build=args['force_build'], platform=args['arch']
+        force_build=args['force_build'], platform=args['arch'],
+        target=args.get('target')
     )
     if args['force_build'] or not image_existed:
         print(f"Done building docker image (forced build: {'YES' if args['force_build'] else 'NO'}).")
@@ -346,6 +350,8 @@ class PDIBuildLocal(CLICommand):
                      help="Path to the sim-aas-middleware repository used for building PDIs."),
             Argument('--verbose', dest="verbose", action='store_const', const=True,
                      help="Show additional information during build process."),
+            Argument('--target', dest='target', action='store',
+                     help="Docker build target stage (e.g., 'test'). If not specified, builds the default (final) stage."),
             Argument('proc_path', metavar='proc_path', type=str, nargs=1,
                      help="the path to the directory of the processor"),
             Argument('pdi_path', metavar='pdi_path', type=str, nargs='?',
@@ -412,6 +418,8 @@ class PDIBuildGithub(CLICommand):
                      help="Path to the sim-aas-middleware repository used for building PDIs."),
             Argument('--verbose', dest="verbose", action='store_const', const=True,
                      help="Show additional information during build process."),
+            Argument('--target', dest='target', action='store',
+                     help="Docker build target stage (e.g., 'test'). If not specified, builds the default (final) stage."),
             Argument('pdi_path', metavar='pdi_path', type=str, nargs='?',
                      help=f"the path to store the PDI file (default: {os.path.join(Path.cwd(), '<image_name>.pdi')})")
         ])

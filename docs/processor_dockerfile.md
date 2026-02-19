@@ -102,3 +102,60 @@ ENTRYPOINT ["simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-
 
 > Note: The sim-aas-middleware is copied into the build context and installed during the build process.
 > The build system automatically includes the middleware sources when building processor images.
+
+## Optional Test Stage
+Processors can define an optional test stage for running tests inside the container environment.
+This is useful when tests require native dependencies or libraries that are only available
+in the container (e.g., compiled model binaries, system libraries).
+
+The test stage is placed **between** the builder and runtime stages so that the default build
+(no `--target` flag) still produces the production image:
+
+```dockerfile
+########################################
+# -------- 1. Builder stage ----------
+########################################
+FROM python:3.13-slim-bookworm AS builder
+# ... (same as above)
+
+########################################
+# -------- 2. Test stage (optional) ---
+########################################
+FROM python:3.13-slim-bookworm AS test
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /processor /processor
+
+ENV PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /processor
+RUN if [ -f requirements-dev.txt ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
+
+RUN mkdir /job
+EXPOSE 6000 7000
+
+ENTRYPOINT ["simaas-cli","--log-console","run",\
+            "--job-path","/job",\
+            "--proc-path","/processor",\
+            "--service-address","tcp://0.0.0.0:6000"]
+
+########################################
+# -------- 3. Runtime stage ----------
+########################################
+FROM python:3.13-slim-bookworm
+# ... (same as above, remains the final/default stage)
+```
+
+Key points:
+- The test stage installs additional dependencies from `requirements-dev.txt` (e.g., `pytest`).
+  Not every processor needs a `requirements-dev.txt` — the conditional `if [ -f ... ]` handles
+  its absence gracefully.
+- The runtime stage remains the **last** stage, so `docker build .` without `--target` still
+  produces the production image.
+- Build the test image with: `simaas-cli image build-local --target test .`
+- Run tests inside the test image by overriding the entrypoint:
+  `docker run --rm --entrypoint pytest <image> /processor/test_processor.py`

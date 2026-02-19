@@ -30,7 +30,32 @@ WORKDIR /processor
 RUN /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 ########################################
-# -------- 2. Runtime stage ----------
+# -------- 2. Test stage (optional) ---
+########################################
+FROM python:3.12.10-slim-bullseye AS test
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /processor /processor
+
+ENV PATH="/opt/venv/bin:${PATH}"
+
+WORKDIR /processor
+RUN if [ -f requirements-dev.txt ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
+
+RUN mkdir /job
+EXPOSE 6000 7000
+
+ENTRYPOINT ["simaas-cli","--log-console","run",\
+            "--job-path","/job",\
+            "--proc-path","/processor",\
+            "--service-address","tcp://0.0.0.0:6000"]
+
+########################################
+# -------- 3. Runtime stage ----------
 ########################################
 FROM python:3.12.10-slim-bullseye
 

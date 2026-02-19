@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import tempfile
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -411,6 +412,55 @@ def test_cli_image_export_import(docker_available, session_node, temp_dir):
 
     except CLIError:
         assert False
+
+
+def test_build_processor_image_with_target(docker_available):
+    """Test building production and test images using the --target flag.
+
+    Builds the abc processor twice:
+    - Production image: no target (builds the default/final runtime stage)
+    - Test image: target='test' (builds the test stage with dev dependencies)
+
+    Verifies that the processor's test suite passes inside the test image
+    but fails inside the production image (missing test dependencies).
+    """
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    proc_path = os.path.join(examples_path, 'simple', 'abc')
+    prod_image = 'test-abc-production'
+    test_image = 'test-abc-test'
+
+    # Build production image (no target — builds the default/final runtime stage)
+    build_processor_image(
+        proc_path, repo_root_path, prod_image,
+        platform='linux/amd64', force_build=True
+    )
+    assert check_docker_image_exists(prod_image)
+
+    # Build test image (target='test' — includes dev dependencies)
+    build_processor_image(
+        proc_path, repo_root_path, test_image,
+        platform='linux/amd64', target='test', force_build=True
+    )
+    assert check_docker_image_exists(test_image)
+
+    # Run the processor's test suite inside the test image — should pass
+    result = subprocess.run(
+        ['docker', 'run', '--rm', '--entrypoint', 'pytest',
+         test_image, '/processor/test_processor.py', '-v'],
+        capture_output=True, text=True
+    )
+    assert result.returncode == 0, f"Tests should pass in the test image:\n{result.stdout}\n{result.stderr}"
+
+    # Run the same test suite inside the production image — should fail
+    # (pytest is not installed in the production image)
+    result = subprocess.run(
+        ['docker', 'run', '--rm', '--entrypoint', 'pytest',
+         prod_image, '/processor/test_processor.py', '-v'],
+        capture_output=True, text=True
+    )
+    assert result.returncode != 0, "Tests should fail in the production image (missing test dependencies)"
 
 
 def test_zz_build_all_processors(docker_available):

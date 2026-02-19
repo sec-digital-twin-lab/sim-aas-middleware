@@ -16,17 +16,18 @@ with open('README.md') as f:
 
 # read the requirements
 with open('requirements.txt') as f:
-    requirements = f.read().splitlines()
+    requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+# read the dev requirements
+with open('requirements-dev.txt') as f:
+    dev_requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
 setup(
     name=package_name,
     version=_locals["__version__"],
     install_requires=requirements,
     extras_require={
-        'dev': [
-            'pytest',
-            'ruff'
-        ]
+        'dev': dev_requirements
     },
     packages=find_packages(),
     include_package_data=True,

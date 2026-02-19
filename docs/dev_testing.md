@@ -10,9 +10,8 @@ Tests must be run using the project's virtual environment:
 # Create virtual environment (if not exists)
 python3.13 -m venv .venv
 
-# Install dependencies
-.venv/bin/pip install -r requirements.txt
-.venv/bin/pip install -e .
+# Install with dev dependencies (includes pytest, pytest-asyncio, pytest-cov, ruff)
+.venv/bin/pip install -e ".[dev]"
 ```
 
 ### Environment Variables

@@ -93,6 +93,14 @@ By default, the build command reuses existing Docker images to save time. If a D
 with the same name already exists, the build step is skipped. Use the `--force-build` flag
 to rebuild the Docker image even if one already exists. 
 
+The `--target` flag can be used to build a specific Dockerfile stage (e.g., a test stage):
+```shell
+simaas-cli image build-local --target test --arch linux/amd64 simple/abc ~/Desktop
+```
+When `--target` is not specified, the default (final) stage is built — which should be the
+production runtime stage. See [Processor Dockerfile](processor_dockerfile.md#optional-test-stage)
+for how to define a test stage.
+
 The `--verbose` flag can be used to display the PDI meta information:
 ```
 Appending PDI meta information: {
@@ -253,6 +261,8 @@ Done building PDI.
 > For private repositories, provide GitHub credentials via the `GITHUB_USERNAME` and
 > `GITHUB_TOKEN` environment variables (or in a `.env` file), or use the `--git-username`
 > and `--git-token` command-line flags.
+
+The `--target` flag is also available for `build-github`, with the same behavior as `build-local`.
 
 
 ## Importing PDIs to a DOR
