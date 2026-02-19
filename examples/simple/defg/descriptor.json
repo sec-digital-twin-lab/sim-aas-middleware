@@ -1,0 +1,32 @@
+{
+  "name": "proc-defg",
+  "input": [
+    {
+      "name": "d",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "optional": true
+    },
+    {
+      "name": "e",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "optional": true
+    }
+  ],
+  "output": [
+    {
+      "name": "f",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "optional": true
+    },
+    {
+      "name": "g",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "optional": true
+    }
+  ],
+  "required_secrets": []
+}

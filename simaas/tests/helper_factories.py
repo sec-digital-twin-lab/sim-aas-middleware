@@ -168,6 +168,31 @@ def create_ping_task(
     return builder.build()
 
 
+def create_defg_task(
+    proc_id: str,
+    owner: Keystore,
+    d: Optional[int] = None,
+    e: Optional[int] = None,
+    include_f: bool = True,
+    include_g: bool = True,
+    memory: int = 1024,
+    target_node_iid: Optional[str] = None
+) -> Task:
+    """Factory function for creating DEFG processor tasks with optional I/O."""
+    builder = TaskBuilder(proc_id, owner.identity.id).with_budget(memory=memory)
+
+    if d is not None:
+        builder.with_input_value('d', {'v': d})
+    if e is not None:
+        builder.with_input_value('e', {'v': e})
+    if include_f:
+        builder.with_output('f', owner.identity.id, target_node_iid=target_node_iid)
+    if include_g:
+        builder.with_output('g', owner.identity.id, target_node_iid=target_node_iid)
+
+    return builder.build()
+
+
 def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: str = 'JSONObject',
                         data_format: str = 'json', access: List[Identity] = None) -> DataObject:
     """Create a test data object with JSON content."""
