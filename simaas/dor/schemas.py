@@ -30,7 +30,7 @@ class ProcessorDescriptor(BaseModel):
         name: str = Field(..., title="Data Object Name", description="The name of the data object.", examples=["parameters"])
         data_type: str = Field(..., title="Data Type", description="The data type that is expected or produced in case of an input or output data objects, respectively.", examples=["JSONObject"])
         data_format: str = Field(..., title="Data Format", description="The data format that is expected or produced in case of an input or output data objects, respectively.", examples=["json"])
-        data_schema: Optional[dict] = Field(title="Data Schema", description="The scheme that can be used for validating the content of this data object. Note: this is only applicable in case the data type and format is `JSONObject` and `json`, respectively.")
+        data_schema: Optional[dict] = Field(default=None, title="Data Schema", description="The scheme that can be used for validating the content of this data object. Note: this is only applicable in case the data type and format is `JSONObject` and `json`, respectively.")
         optional: bool = Field(default=False, title="Optional", description="Indicates if this data object is optional. When True, tasks may omit this data object without causing a validation error.")
 
     name: str = Field(..., title="Processor Name", description="The name of the processor", examples=["urban-climate-sim"])
