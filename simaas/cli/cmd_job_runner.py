@@ -763,6 +763,8 @@ class JobRunner(CLICommand, ProgressListener):
             input_path0 = os.path.join(self._wd_path, f"{i.name}.meta")
             input_path1 = os.path.join(self._wd_path, i.name)
             if not os.path.isfile(input_path0) or not os.path.isfile(input_path1):
+                if i.optional:
+                    continue
                 raise NotFoundError(
                     resource_type='input_data_object',
                     resource_id=i.name,
@@ -935,6 +937,14 @@ class JobRunner(CLICommand, ProgressListener):
                 # do we have failed outputs?
                 if len(self._failed_output) > 0:
                     raise OperationError(operation='upload_outputs', cause='failed to upload some outputs', failed_outputs=list(self._failed_output))
+
+                # check that all required outputs were produced
+                missing_required = [
+                    name for name, desc in self._output_interface.items()
+                    if not desc.optional and not self._status_handler.has_output(name)
+                ]
+                if missing_required:
+                    raise OperationError(operation='check_required_outputs', cause='missing required outputs', missing=missing_required)
 
                 # wrap up
                 self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> DONE")
