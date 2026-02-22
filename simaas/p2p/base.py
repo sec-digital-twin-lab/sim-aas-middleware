@@ -118,6 +118,14 @@ async def p2p_request(
         socket.close()
         raise NetworkError(peer_address=peer.address, operation='send', trace=trace)
 
+    # After sending a large attachment, the server needs time to receive all chunks,
+    # process the data (hash, store), and compose the reply. Scale the receive timeout
+    # based on the attachment size: 30s base + 200ms per MB.
+    effective_timeout = timeout
+    if attachment_size > 0:
+        effective_timeout = max(timeout, 30_000 + (attachment_size // (1024 * 1024)) * 200)
+        socket.setsockopt(zmq.RCVTIMEO, effective_timeout)
+
     # try to receive the reply
     try:
         # wait for reply and parse it
@@ -156,7 +164,7 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=timeout, trace=trace)
+        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=effective_timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
