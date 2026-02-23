@@ -218,13 +218,9 @@ class Service(CLICommand):
                 rti_choices += [Choice(name, name.capitalize()) for name in plugin_registry['rti'].keys()]
                 args['rti'] = prompt_for_selection(rti_choices, "Select the type of RTI service:")
 
-            if args['rti'] not in ['none', None]:
-                prompt_if_missing(args, 'retain-job-history', prompt_for_confirmation,
-                                  message='Retain RTI job history?', default=False)
-                prompt_if_missing(args, 'bind-all-address', prompt_for_confirmation,
-                                  message='Bind service to all network addresses?', default=False)
-                prompt_if_missing(args, 'strict-deployment', prompt_for_confirmation,
-                                  message='Strict processor deployment?', default=True)
+            default_if_missing(args, 'retain-job-history', self.default_retain_job_history)
+            default_if_missing(args, 'strict-deployment', self.default_strict_deployment)
+            default_if_missing(args, 'bind-all-address', self.default_bind_all_address)
 
             # determine if SSH tunneling requires
             required = ['SSH_TUNNEL_HOST', 'SSH_TUNNEL_USER', 'SSH_TUNNEL_KEY_PATH', 'SIMAAS_CUSTODIAN_HOST']

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import traceback
@@ -841,28 +842,35 @@ class JobRunner(CLICommand, ProgressListener):
         if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
             raise ValidationError(field='arguments', expected='custodian_address, custodian_pub_key, job_id', actual='missing')
 
-        # determine working directory
+        # Set up /scratch: use existing mount or fall back to /tmp
         self._wd_path = args['job_path']
-        if not os.path.isdir(self._wd_path):
-            raise NotFoundError(resource_type='directory', resource_id=self._wd_path)
+        if os.path.exists('/scratch'):
+            print("Using externally mounted scratch folder.")
+        else:
+            try:
+                os.makedirs('/tmp/scratch', exist_ok=True)
+                os.symlink('/tmp/scratch', '/scratch')
+                print("Using symlink to /tmp/scratch as scratch folder.")
+            except Exception as e:
+                print(f"Creating symlink to /tmp/scratch as scratch folder failed: {e}")
+
+        # Create job working directory inside /scratch to avoid Docker overlay bloat.
+        # All job I/O (inputs, outputs, logs) goes to the volume or /tmp instead.
+        if os.path.exists('/scratch'):
+            scratch_job_path = os.path.join('/scratch', 'job')
+            os.makedirs(scratch_job_path, exist_ok=True)
+            if os.path.exists(self._wd_path):
+                shutil.rmtree(self._wd_path)
+            os.symlink(scratch_job_path, self._wd_path)
+            print(f"Redirected {self._wd_path} -> {scratch_job_path}")
+        else:
+            os.makedirs(self._wd_path, exist_ok=True)
 
         # setup logger
         self._setup_logger(args.get('log_level'))
 
         try:
             self._logger.info("BEGIN initialising job runner...")
-
-            # determine if /scratch exists
-            if os.path.exists('/scratch'):
-                self._logger.info("Using externally mounted scratch folder.")
-            else:
-                try:
-                    # if not create a symlink pointing at /tmp/scratch
-                    os.makedirs('/tmp/scratch', exist_ok=True)
-                    os.symlink('/tmp/scratch', '/scratch')
-                    self._logger.info("Using symlink to /tmp/scratch as scratch folder.")
-                except Exception as e:
-                    self._logger.warning(f"Creating symlink to /tmp/scratch as scratch folder failed: {e}")
 
             # initialise processor
             self._initialise_processor(args['proc_path'])
@@ -982,3 +990,16 @@ class JobRunner(CLICommand, ProgressListener):
         finally:
             if self._status_handler:
                 self._status_handler.join(5)
+
+            # Delete everything in the working directory to free container overlay space.
+            # Status has already been pushed to the custodian; nothing here is needed.
+            if self._wd_path and os.path.isdir(self._wd_path):
+                for entry in os.listdir(self._wd_path):
+                    path = os.path.join(self._wd_path, entry)
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                    except OSError:
+                        pass
