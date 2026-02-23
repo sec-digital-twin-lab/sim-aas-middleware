@@ -43,7 +43,6 @@ COPY --from=builder /processor /processor
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
-RUN mkdir /job
 EXPOSE 6000 7001
 
 ENTRYPOINT ["simaas-cli","--log-console","run",\

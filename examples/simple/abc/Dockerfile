@@ -46,7 +46,6 @@ ENV PATH="/opt/venv/bin:${PATH}"
 WORKDIR /processor
 RUN if [ -f requirements-dev.txt ]; then pip install --no-cache-dir -r requirements-dev.txt; fi
 
-RUN mkdir /job
 EXPOSE 6000 7000
 
 ENTRYPOINT ["simaas-cli","--log-console","run",\
@@ -68,7 +67,6 @@ COPY --from=builder /processor /processor
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
-RUN mkdir /job
 EXPOSE 6000 7000
 
 ENTRYPOINT ["simaas-cli","--log-console","run",\
