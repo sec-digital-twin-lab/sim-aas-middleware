@@ -4,14 +4,12 @@ import os
 import socket
 import tempfile
 import threading
-import traceback
 
 import zmq
 
 from threading import Lock
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Set, Tuple
 
-from zmq import Again
 from zmq.asyncio import Socket, Context
 
 from simaas.core.errors import ConfigurationError, OperationError
@@ -32,8 +30,9 @@ class P2PService:
         self._protocols: Dict[str, P2PProtocol] = {}
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
-        self._stopped_event = threading.Event()  # Signals handler has fully stopped
-        self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
+        self._stopped_event = threading.Event()
+        self._pending: Dict[Tuple[bytes, bytes], Tuple[P2PProtocol, P2PMessage, str, int]] = {}
+        self._handler_tasks: Set[asyncio.Task] = set()
         self._thread: Optional[threading.Thread] = None
 
     def is_ready(self) -> bool:
@@ -64,7 +63,6 @@ class P2PService:
                 context = Context.instance()
                 self._socket = context.socket(zmq.ROUTER)
                 self._socket.setsockopt(zmq.LINGER, 0)
-                self._socket.setsockopt(zmq.RCVTIMEO, timeout)
                 self._socket.setsockopt(zmq.SNDTIMEO, timeout)
                 if encrypt:
                     self._socket.curve_secretkey = self._keystore.curve_secret_key()
@@ -170,69 +168,87 @@ class P2PService:
             await asyncio.sleep(0.1)
         return True
 
+    def _dispatch_handler(self, cid: bytes, rid: bytes, protocol: P2PProtocol,
+                          request: P2PMessage, attachment_path: Optional[str],
+                          download_path: str) -> None:
+        """Dispatch a request handler as a concurrent task."""
+        async def _run():
+            try:
+                await p2p_respond(self._socket, cid, rid, protocol, request, attachment_path, download_path)
+            except Exception as e:
+                log.warning('server', 'Handler failed', protocol=protocol.name(), exc=e)
+
+        task = asyncio.create_task(_run())
+        self._handler_tasks.add(task)
+        task.add_done_callback(self._handler_tasks.discard)
+
     async def _handle_incoming_connections(self):
         log.info('server', 'Listening for P2P connections')
         try:
             with tempfile.TemporaryDirectory() as tempdir:
                 while not self._stop_event.is_set():
                     try:
-                        frames = await self._socket.recv_multipart(flags=zmq.NOBLOCK)
+                        # Use asyncio.wait_for so we can check _stop_event periodically.
+                        # Plain await recv_multipart() would block until a message arrives,
+                        # preventing clean shutdown.
+                        frames = await asyncio.wait_for(
+                            self._socket.recv_multipart(), timeout=1.0
+                        )
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception as e:
+                        log.warning('server', 'Recv error', exc=e)
+                        continue
+
+                    try:
                         cid, rid, content = frames[:3]
+                        pending_key = (cid, rid)
 
-                        # do we have already a pending transfer?
-                        pending: Optional[Tuple[P2PProtocol, P2PMessage, str]] = self._pending.get(rid)
+                        # Is this a continuation of a pending chunked transfer?
+                        pending = self._pending.get(pending_key)
 
-                        # if not, then treat it as a P2P message frame
                         if pending is None:
-                            request: str = content.decode('utf-8')
-                            request: dict = json.loads(request)
-                            request: P2PMessage = P2PMessage.model_validate(request)
+                            # New request — parse the message
+                            request: P2PMessage = P2PMessage.model_validate(
+                                json.loads(content.decode('utf-8'))
+                            )
 
-                            # do we know the protocol?
                             protocol = self._protocols.get(request.protocol)
                             if protocol is None:
-                                log.warning('server', 'Unsupported protocol, ignoring', protocol=request.protocol)
+                                log.warning('server', 'Unsupported protocol, ignoring',
+                                            protocol=request.protocol)
                                 continue
 
-                            # does this request come with an attachment?
                             if request.attachment_size > 0:
-                                attachment_path: str = os.path.join(tempdir, rid.decode('utf-8'))
-                                self._pending[rid] = (protocol, request, attachment_path)
-
-                            # if there is no attachment, process the message straight away
+                                attachment_path = os.path.join(tempdir, rid.hex())
+                                self._pending[pending_key] = (protocol, request, attachment_path, 0)
                             else:
-                                await p2p_respond(
-                                    self._socket, cid, rid, protocol, request, download_path=tempdir
-                                )
+                                self._dispatch_handler(cid, rid, protocol, request, None, tempdir)
 
-                        # if it's pending, then we need to keep receiving the contents until the attachment has been
-                        # fully received.
                         else:
-                            protocol: P2PProtocol = pending[0]
-                            request: P2PMessage = pending[1]
-                            attachment_path: str = pending[2]
+                            protocol, request, attachment_path, received = pending
                             with open(attachment_path, 'ab') as f:
                                 f.write(content)
+                            received += len(content)
 
-                            # is the file size equal to the size of the attachment?
-                            file_size = os.path.getsize(attachment_path)
-                            if file_size == request.attachment_size:
-                                self._pending.pop(rid)
-                                await p2p_respond(
-                                    self._socket, cid, rid, protocol, request, attachment_path, download_path=tempdir
+                            if received >= request.attachment_size:
+                                self._pending.pop(pending_key)
+                                self._dispatch_handler(
+                                    cid, rid, protocol, request, attachment_path, tempdir
                                 )
-
-                            elif file_size > request.attachment_size:
-                                log.warning('server', 'Attachment bigger than expected, ignoring', protocol=request.protocol)
-
-                    except Again:
-                        await asyncio.sleep(0.1)
+                            else:
+                                self._pending[pending_key] = (protocol, request, attachment_path, received)
 
                     except Exception as e:
-                        log.warning('server', 'Exception in server loop', exc=e)
+                        log.warning('server', 'Error processing frame', exc=e)
+
+                # Shutdown: wait for in-flight handlers to finish
+                if self._handler_tasks:
+                    log.info('server', 'Waiting for in-flight handlers',
+                             count=len(self._handler_tasks))
+                    await asyncio.gather(*self._handler_tasks, return_exceptions=True)
 
         finally:
-            # Ensure socket is always closed and signal completion
             log.info('server', 'Stopped listening for P2P connections')
             with self._mutex:
                 if self._socket is not None:
