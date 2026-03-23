@@ -777,7 +777,8 @@ class JobRunner(CLICommand, ProgressListener):
                 meta = json.load(f)
 
             # compare data types and format
-            if meta['data_type'] != i.data_type or meta['data_format'] != i.data_format:
+            if not data_type_matches(i.data_type, meta['data_type']) or \
+               not data_type_matches(i.data_format, meta['data_format']):
                 raise ValidationError(
                     field='data_type_format',
                     expected=f"{i.data_type}/{i.data_format}",

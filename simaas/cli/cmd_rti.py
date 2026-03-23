@@ -15,7 +15,7 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_f
     label_identity, default_if_missing
 from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
-from simaas.helpers import determine_default_rest_address
+from simaas.helpers import determine_default_rest_address, data_type_matches
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import ResourceDescriptor
 from simaas.rti.api import RTIProxy
@@ -651,8 +651,13 @@ class RTIJobSubmit(CLICommand):
             else:
                 # get the data object choices for this input item
                 object_choices = []
-                for found in self._dor.search(data_type=item.data_type, data_format=item.data_format):
-                    object_choices.append(Choice(found.obj_id, label_data_object(found)))
+                search_type = None if item.data_type.endswith('*') else item.data_type
+                search_format = None if item.data_format.endswith('*') else item.data_format
+
+                for found in self._dor.search(data_type=search_type, data_format=search_format):
+                    if data_type_matches(item.data_type, found.data_type) and \
+                       data_type_matches(item.data_format, found.data_format):
+                        object_choices.append(Choice(found.obj_id, label_data_object(found)))
 
                 # do we have any matching objects?
                 if len(object_choices) == 0:

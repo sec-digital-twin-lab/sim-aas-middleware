@@ -29,6 +29,7 @@ from simaas.tests.helper_assertions import (
     assert_data_object_content,
     assert_data_object_exists,
 )
+from simaas.helpers import data_type_matches
 from simaas.rti.schemas import JobStatus, Processor
 
 
@@ -502,3 +503,35 @@ class TestAssertDataObjectExists:
             assert_data_object_exists(mock_dor, "obj-123", expected_data_type="JSONObject")
 
         assert "JSONObject" in str(exc_info.value)
+
+
+# =============================================================================
+# data_type_matches Tests
+# =============================================================================
+
+class TestDataTypeMatches:
+    """Tests for data_type_matches utility."""
+
+    def test_exact_match(self):
+        assert data_type_matches("JSONObject", "JSONObject") is True
+
+    def test_exact_mismatch(self):
+        assert data_type_matches("JSONObject", "BinaryBlob") is False
+
+    def test_full_wildcard(self):
+        assert data_type_matches("*", "anything") is True
+
+    def test_prefix_wildcard_match_suffix(self):
+        assert data_type_matches("Temperature*", "TemperatureIndoor") is True
+
+    def test_prefix_wildcard_match_other_suffix(self):
+        assert data_type_matches("Temperature*", "TemperatureOutdoor") is True
+
+    def test_prefix_wildcard_mismatch(self):
+        assert data_type_matches("Temperature*", "Humidity") is False
+
+    def test_prefix_only_no_extra_chars(self):
+        assert data_type_matches("Temperature*", "Temperature") is True
+
+    def test_empty_prefix_wildcard(self):
+        assert data_type_matches("*", "") is True

@@ -255,6 +255,7 @@ def docker_run_job_container(
                 auto_remove=False,
                 environment=environment,
                 mem_limit=f"{budget.memory}m",
+                shm_size=f"{budget.memory}m",
                 cpu_period=cpu_period,
                 cpu_quota=cpu_quota
             )
@@ -363,3 +364,13 @@ def is_valid_new_file(path: str) -> bool:
 
     except Exception:
         return False
+
+
+def data_type_matches(declared: str, actual: str) -> bool:
+    """Check if an actual data type/format matches a declared spec.
+    Supports trailing wildcard: 'Foo*' matches any string starting with 'Foo'.
+    A bare '*' matches everything. No wildcard means exact match.
+    """
+    if declared.endswith('*'):
+        return actual.startswith(declared[:-1])
+    return declared == actual
