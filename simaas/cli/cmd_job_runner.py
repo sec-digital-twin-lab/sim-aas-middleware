@@ -22,6 +22,7 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_i
 from simaas.core.errors import ExceptionContent
 from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
+from simaas.helpers import data_type_matches
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
