@@ -369,7 +369,7 @@ class AWSRTIService(RTIServiceBase):
             custodian = None
             proc_obj: Optional[DataObject] = None
             for node in [node for node in await self._node.db.get_network() if node.dor_service and node.dor_service.lower() != 'none']:
-                result: Dict[str, DataObject] = await protocol.perform(node, [proc.id])
+                result: Dict[str, DataObject] = protocol.perform(node, [proc.id])
                 proc_obj = result.get(proc.id)
                 if proc_obj:
                     custodian = node
@@ -395,7 +395,7 @@ class AWSRTIService(RTIServiceBase):
                 image_path = os.path.join(self._procs_path, f"{proc.id}.content")
                 meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
                 protocol = P2PFetchDataObject(self._node)
-                await protocol.perform(custodian, proc.id, meta_path, image_path)
+                protocol.perform(custodian, proc.id, meta_path, image_path)
 
                 # load the image
                 await asyncio.to_thread(docker_load_image, image_path, image_name)
@@ -596,7 +596,7 @@ class AWSRTIService(RTIServiceBase):
             # send P2P interrupt (best effort)
             if peer_address:
                 try:
-                    await P2PInterruptJob.perform(peer_address)
+                    P2PInterruptJob.perform(peer_address)
                 except Exception:
                     pass
 

@@ -52,7 +52,7 @@ class P2PLatency(P2PProtocol):
         for attempt in range(max_attempts):
             try:
                 t0 = get_timestamp_now()
-                reply: Tuple[Optional[LatencyMessage], Optional[str]] = await p2p_request(
+                reply: Tuple[Optional[LatencyMessage], Optional[str]] = p2p_request(
                     peer_address, cls.NAME, LatencyMessage(t_now=t0),
                     reply_type=LatencyMessage
                 )
@@ -122,7 +122,7 @@ class P2PThroughput(P2PProtocol):
             for attempt in range(max_attempts):
                 try:
                     t0 = get_timestamp_now()
-                    reply: Tuple[Optional[ThroughputMessage], Optional[str]] = await p2p_request(
+                    reply: Tuple[Optional[ThroughputMessage], Optional[str]] = p2p_request(
                         peer_address, cls.NAME, ThroughputMessage(t_now=t0),
                         reply_type=ThroughputMessage, attachment_path=attachment_path
                     )

@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from typing import Optional, List, Tuple, Dict
 
 from pydantic import BaseModel
@@ -29,7 +30,7 @@ class P2PUpdateIdentity(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def perform(self, peer: NodeInfo) -> Identity:
+    def perform(self, peer: NodeInfo) -> Identity:
         peer_address = P2PAddress(
             address=peer.p2p_address,
             curve_secret_key=self._node.keystore.curve_secret_key(),
@@ -39,7 +40,7 @@ class P2PUpdateIdentity(P2PProtocol):
 
         message = UpdateIdentityMessage(identity=self._node.identity)
 
-        reply, _ = await p2p_request(
+        reply, _ = p2p_request(
             peer_address, self.NAME, message, reply_type=UpdateIdentityMessage
         )
         reply: UpdateIdentityMessage = reply  # casting for PyCharm
@@ -59,7 +60,7 @@ class P2PUpdateIdentity(P2PProtocol):
 
                 message = UpdateIdentityMessage(identity=self._node.identity)
 
-                reply, _ = await p2p_request(
+                reply, _ = p2p_request(
                     peer_address, self.NAME, message, reply_type=UpdateIdentityMessage
                 )
                 reply: UpdateIdentityMessage = reply  # casting for PyCharm
@@ -103,8 +104,8 @@ class P2PGetIdentity(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(cls, peer_address: P2PAddress, iid: str) -> Optional[Identity]:
-        reply, _ = await p2p_request(
+    def perform(cls, peer_address: P2PAddress, iid: str) -> Optional[Identity]:
+        reply, _ = p2p_request(
             peer_address, cls.NAME, GetIdentityRequest(iid=iid), reply_type=GetIdentityResponse
         )
         reply: GetIdentityResponse = reply  # casting for PyCharm
@@ -143,8 +144,8 @@ class P2PGetNetwork(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(cls, peer_address: P2PAddress) -> List[NodeInfo]:
-        reply, _ = await p2p_request(
+    def perform(cls, peer_address: P2PAddress) -> List[NodeInfo]:
+        reply, _ = p2p_request(
             peer_address, cls.NAME, GetNetworkRequest(), reply_type=GetNetworkResponse
         )
         reply: GetNetworkResponse = reply  # casting for PyCharm
@@ -208,7 +209,7 @@ class P2PJoinNetwork(P2PProtocol):
                 )
 
                 # send update and wait for reply
-                reply, _ = await p2p_request(
+                reply, _ = p2p_request(
                     peer_address, self.NAME, message, reply_type=PeerUpdateMessage
                 )
                 reply: PeerUpdateMessage = reply  # casing for PyCharm
@@ -304,16 +305,17 @@ class P2PLeaveNetwork(P2PProtocol):
                 )
 
                 if blocking:
-                    await p2p_request(peer_address, self.NAME, message)
+                    p2p_request(peer_address, self.NAME, message)
                 else:
-                    def _on_leave_done(task: asyncio.Task):
+                    def _fire_and_forget(addr, name, msg):
                         try:
-                            task.result()
+                            p2p_request(addr, name, msg)
                         except Exception as e:
                             log.warning('leave', 'Failed to notify peer of leave', exc=e)
 
-                    task = asyncio.create_task(p2p_request(peer_address, self.NAME, message))
-                    task.add_done_callback(_on_leave_done)
+                    threading.Thread(
+                        target=_fire_and_forget, args=(peer_address, self.NAME, message), daemon=True
+                    ).start()
 
     async def handle(
             self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
@@ -344,7 +346,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, node, peer: NodeInfo, namespace: str, budget: ResourceDescriptor
     ) -> None:
         # get the fully qualified P2P address for the peer
@@ -357,7 +359,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
 
         try:
             # send the request
-            reply, _ = await p2p_request(
+            reply, _ = p2p_request(
                 peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget)
             )
 
@@ -398,7 +400,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, node, peer: NodeInfo, namespace: str, job_id: str, resources: ResourceDescriptor
     ) -> bool:
         # get the fully qualified P2P address for the peer
@@ -411,7 +413,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
 
         try:
             # send the request
-            reply, _ = await p2p_request(
+            reply, _ = p2p_request(
                 peer_address, cls.NAME, ResourceReservationRequest(
                     namespace=namespace, job_id=job_id, resources=resources
                 ), reply_type=ResourceReservationReply
@@ -454,7 +456,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(cls, node, peer: NodeInfo, namespace: str, job_id: str) -> None:
+    def perform(cls, node, peer: NodeInfo, namespace: str, job_id: str) -> None:
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
@@ -465,7 +467,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
 
         try:
             # send the request
-            reply, _ = await p2p_request(
+            reply, _ = p2p_request(
                 peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id)
             )
 

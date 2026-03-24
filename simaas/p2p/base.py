@@ -1,17 +1,32 @@
 import abc
 import json
 import os
+import threading
 import traceback
 import zmq
 
 from typing import Optional, Tuple
 from pydantic import BaseModel
-from zmq.asyncio import Socket, Context
+from zmq.asyncio import Socket
 
 from simaas.core.logging import get_logger
 from simaas.core.errors import NetworkError
 
 log = get_logger('simaas.p2p', 'p2p')
+
+# Thread-local zmq context: one sync context (and its I/O thread) per calling
+# thread, reused across requests. Prevents I/O thread churn that causes
+# fork()/dlopen() deadlocks via allocator lock contention.
+_thread_local = threading.local()
+
+
+def _get_context() -> zmq.Context:
+    """Return a zmq sync Context bound to the current thread."""
+    ctx = getattr(_thread_local, 'zmq_context', None)
+    if ctx is None or ctx.closed:
+        ctx = zmq.Context()
+        _thread_local.zmq_context = ctx
+    return ctx
 
 
 class P2PMessage(BaseModel):
@@ -58,28 +73,12 @@ def _decode_message(data: bytes) -> P2PMessage:
     return P2PMessage.model_validate(json.loads(data.decode('utf-8')))
 
 
-async def _send_chunks(socket, frames_prefix: list, path: str, chunk_size: int = 1024 * 1024) -> None:
-    with open(path, 'rb') as f:
-        while chunk := f.read(chunk_size):
-            await socket.send_multipart(frames_prefix + [chunk])
-
-
-async def _recv_chunks(socket, download_path: str, expected_size: int) -> None:
-    with open(download_path, 'wb') as f:
-        total = 0
-        while total < expected_size:
-            frames = await socket.recv_multipart()
-            chunk = frames[-1]
-            f.write(chunk)
-            total += len(chunk)
-
-
-async def p2p_request(
+def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
         attachment_path: Optional[str] = None, download_path: Optional[str] = None,
         timeout: int = 5000, chunk_size: int = 1024 * 1024
 ) -> Tuple[Optional[BaseModel], Optional[str]]:
-    context = Context.instance()
+    context = _get_context()
     socket = context.socket(zmq.DEALER)
     socket.setsockopt(zmq.LINGER, 1000)
     socket.setsockopt(zmq.RCVTIMEO, timeout)
@@ -101,10 +100,12 @@ async def p2p_request(
             protocol=protocol, type='request', content=content.model_dump(),
             attachment_size=attachment_size
         )
-        await socket.send_multipart([rid, _encode_message(request)])
+        socket.send_multipart([rid, _encode_message(request)])
 
         if attachment_path is not None:
-            await _send_chunks(socket, [rid], attachment_path, chunk_size)
+            with open(attachment_path, 'rb') as f:
+                while chunk := f.read(chunk_size):
+                    socket.send_multipart([rid, chunk])
 
         # scale receive timeout for large attachments: 30s base + 200ms per MB
         if attachment_size > 0:
@@ -113,13 +114,19 @@ async def p2p_request(
 
         # receive reply
         operation = 'receive'
-        frames = await socket.recv_multipart()
+        frames = socket.recv_multipart()
         reply = _decode_message(frames[1])
 
         if reply.attachment_size > 0:
             if download_path is None:
                 download_path = os.devnull
-            await _recv_chunks(socket, download_path, reply.attachment_size)
+            with open(download_path, 'wb') as f:
+                total = 0
+                while total < reply.attachment_size:
+                    frames = socket.recv_multipart()
+                    chunk = frames[-1]
+                    f.write(chunk)
+                    total += len(chunk)
 
         if reply_type is not None and reply.content is not None:
             return reply_type.model_validate(reply.content), download_path
@@ -155,7 +162,9 @@ async def p2p_respond(
         await socket.send_multipart([cid, rid, _encode_message(reply)])
 
         if reply_attachment_path is not None:
-            await _send_chunks(socket, [cid, rid], reply_attachment_path, chunk_size)
+            with open(reply_attachment_path, 'rb') as f:
+                while chunk := f.read(chunk_size):
+                    await socket.send_multipart([cid, rid, chunk])
 
     except Exception as e:
         log.error('respond', 'P2P handler error', protocol=protocol.name(), exc=e)

@@ -335,7 +335,7 @@ class DefaultNodeDBService(NodeDBService):
         ns_info: NamespaceInfo = await self.handle_namespace_update(name, budget)
         for peer in await self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                await P2PUpdateNamespaceBudget.perform(self._node, peer, name, budget)
+                P2PUpdateNamespaceBudget.perform(self._node, peer, name, budget)
 
         return ns_info
 
@@ -346,7 +346,7 @@ class DefaultNodeDBService(NodeDBService):
             if peer.identity.id == self._node.identity.id:
                 successful = await self.handle_namespace_reservation(name, job_id, resources)
             else:
-                successful = await P2PReserveNamespaceResources.perform(
+                successful = P2PReserveNamespaceResources.perform(
                     self._node, peer, name, job_id, resources
                 )
 
@@ -360,7 +360,7 @@ class DefaultNodeDBService(NodeDBService):
                 if peer.identity.id == self._node.identity.id:
                     await self.handle_namespace_cancellation(name, job_id)
                 else:
-                    await P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
+                    P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
 
             raise OperationError(operation='reserve_namespace', stage='reservation', cause=f'{name}:{job_id} failed')
 
@@ -368,7 +368,7 @@ class DefaultNodeDBService(NodeDBService):
         result = await self.handle_namespace_cancellation(name, job_id)
         for peer in await self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                await P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
+                P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
         return result
 
     async def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:

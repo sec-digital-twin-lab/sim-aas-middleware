@@ -345,7 +345,7 @@ async def execute_job(
         # Simulate RTI cancel flow: mark cancelled in DB first, then send interrupt
         rti.mark_job_cancelled(job_id)
 
-        await P2PInterruptJob.perform(P2PAddress(
+        P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             curve_secret_key=custodian.keystore.curve_secret_key(),
             curve_public_key=custodian.keystore.curve_public_key(),

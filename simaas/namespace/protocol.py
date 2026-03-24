@@ -143,7 +143,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                 request = generate_authorised_request(authority, service, method, args)
 
                 # send the request
-                reply, _ = await p2p_request(
+                reply, _ = p2p_request(
                     peer_address, cls.NAME, request, reply_type=NamespaceServiceResponse,
                     attachment_path=attachment_path,
                     download_path=download_path

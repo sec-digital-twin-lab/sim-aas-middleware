@@ -32,7 +32,7 @@ class P2PLookupDataObject(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
+    def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
         peer_address = P2PAddress(
             address=peer.p2p_address,
             curve_secret_key=self._node.keystore.curve_secret_key(),
@@ -40,7 +40,7 @@ class P2PLookupDataObject(P2PProtocol):
             curve_server_key=peer.identity.c_public_key
         )
 
-        reply, _ = await p2p_request(
+        reply, _ = p2p_request(
             peer_address, self.NAME, LookupRequest(obj_ids=obj_ids), reply_type=LookupResponse
         )
         reply: LookupResponse = reply  # casting for PyCharm
@@ -87,8 +87,8 @@ class P2PFetchDataObject(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
-                      user_iid: str = None, user_signature: str = None) -> DataObject:
+    def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
+                user_iid: str = None, user_signature: str = None) -> DataObject:
         peer_address = P2PAddress(
             address=peer.p2p_address,
             curve_secret_key=self._node.keystore.curve_secret_key(),
@@ -98,7 +98,7 @@ class P2PFetchDataObject(P2PProtocol):
 
         message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
 
-        reply, _ = await p2p_request(
+        reply, _ = p2p_request(
             peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path
         )
         reply: FetchResponse = reply  # casting for PyCharm
@@ -218,7 +218,7 @@ class P2PPushDataObject(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, p2p_address: str, keystore: Keystore, peer: Identity, content_path: str,
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
             access_restricted: bool, content_encrypted: bool, license: DataObject.License,
@@ -244,7 +244,7 @@ class P2PPushDataObject(P2PProtocol):
             tags=tags
         )
 
-        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+        reply: Tuple[Optional[BaseModel], Optional[str]] = p2p_request(
             peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path
         )
         reply: PushResponse = reply[0]  # casting for PyCharm

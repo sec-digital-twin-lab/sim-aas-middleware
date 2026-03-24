@@ -115,7 +115,7 @@ async def test_p2p_unreachable(p2p_server, p2p_client):
     info.p2p_address = PortMaster.generate_p2p_address()
 
     try:
-        await protocol.perform(info)
+        protocol.perform(info)
         assert False
     except PeerUnavailableError:
         assert True
@@ -130,7 +130,7 @@ async def test_p2p_update_identity(p2p_server, p2p_client):
     protocol = P2PUpdateIdentity(p2p_client)
 
     try:
-        result: Identity = await protocol.perform(p2p_server.info)
+        result: Identity = protocol.perform(p2p_server.info)
         assert result.id == p2p_server.identity.id
     except Exception:
         assert False
@@ -188,7 +188,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
     # perform the lookup
     protocol = P2PLookupDataObject(p2p_client)
-    result: Dict[str, DataObject] = await protocol.perform(p2p_server.info, [obj_id])
+    result: Dict[str, DataObject] = protocol.perform(p2p_server.info, [obj_id])
     assert len(result) == 1
     assert obj_id in result
 
@@ -200,7 +200,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
         # perform a valid fetch
         try:
-            meta: DataObject = await protocol.perform(p2p_server.info, obj_id, meta_path, content_path)
+            meta: DataObject = protocol.perform(p2p_server.info, obj_id, meta_path, content_path)
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
             assert os.path.isfile(content_path)
@@ -209,7 +209,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
         # perform an invalid fetch
         try:
-            await protocol.perform(p2p_server.info, '01234', meta_path, content_path)
+            protocol.perform(p2p_server.info, '01234', meta_path, content_path)
             assert False
         except NetworkError as e:
             assert 'data object not found' in e.details['reason']
@@ -255,7 +255,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         # try to fetch a data object that doesn't exist
         try:
             fake_obj_id = 'abcdef'
-            await protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
+            protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
             assert False
         except NetworkError as e:
             assert 'data object not found' in e.details['reason']
@@ -264,7 +264,7 @@ async def test_p2p_fetch_restricted(p2p_server):
 
         # the client identity is not known to the server at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
             assert 'user id not found' in e.details['reason']
@@ -276,7 +276,7 @@ async def test_p2p_fetch_restricted(p2p_server):
 
         # the client does not have permission at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
             assert 'user does not have access' in e.details['reason']
@@ -293,8 +293,8 @@ async def test_p2p_fetch_restricted(p2p_server):
             token = f"{client.identity.id}:12343245"
             invalid_signature = client.keystore.sign(token.encode('utf-8'))
 
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
-                                   user_signature=invalid_signature)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
+                             user_signature=invalid_signature)
             assert False
         except NetworkError as e:
             assert 'authorisation failed' in e.details['reason']
@@ -307,8 +307,8 @@ async def test_p2p_fetch_restricted(p2p_server):
 
         # the client does not have permission at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path,
-                                   user_iid=client.identity.id, user_signature=signature)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path,
+                             user_iid=client.identity.id, user_signature=signature)
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
             assert os.path.isfile(content_path)

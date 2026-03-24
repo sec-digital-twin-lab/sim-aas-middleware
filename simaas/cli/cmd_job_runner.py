@@ -42,7 +42,7 @@ class OutputObjectHandler(threading.Thread):
         self._owner: JobRunner = owner
         self._obj_name: str = obj_name
 
-    async def push_data_object(self, obj_name: str) -> DataObject:
+    def push_data_object(self, obj_name: str) -> DataObject:
         # convenience variables
         task_out_items = {item.name: item for item in self._owner.job.task.output}
         task_out = task_out_items.get(obj_name)
@@ -66,7 +66,7 @@ class OutputObjectHandler(threading.Thread):
             )
 
         # get the owner
-        owner = await P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
+        owner = P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
         if owner is None:
             raise NotFoundError(
                 resource_type='identity',
@@ -95,7 +95,7 @@ class OutputObjectHandler(threading.Thread):
         #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
 
         # get the network
-        network: List[NodeInfo] = await P2PGetNetwork.perform(self._owner.custodian_address)
+        network: List[NodeInfo] = P2PGetNetwork.perform(self._owner.custodian_address)
 
         # do we have a target node specified for storing the data object?
         target_node = self._owner.job.custodian
@@ -163,7 +163,7 @@ class OutputObjectHandler(threading.Thread):
             f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
         )
 
-        obj = await P2PPushDataObject.perform(
+        obj = P2PPushDataObject.perform(
             target_node.p2p_address, self._owner.keystore, target_node.identity,
             output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
             restricted_access, content_encrypted,
@@ -181,7 +181,7 @@ class OutputObjectHandler(threading.Thread):
     def run(self) -> None:
         try:
             # upload the data object to the target DOR
-            obj = asyncio.run(self.push_data_object(self._obj_name))
+            obj = self.push_data_object(self._obj_name)
 
             # remove the output from the pending set
             self._logger.info(f"pushing output data object '{self._obj_name}' SUCCESSFUL.")
@@ -268,7 +268,7 @@ class StatusHandler(threading.Thread):
 
             # push the job status to the custodian (unless cancelled - custodian handles that)
             if self._job_status.state != JobStatus.State.CANCELLED:
-                asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
+                P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status)
                 self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
 
         except _BaseError as e:
@@ -521,9 +521,9 @@ class JobRunner(CLICommand, ProgressListener):
 
         # perform handshake with custodian
         self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address.address}...")
-        self._job, self._custodian, self._batch_status = asyncio.run(P2PRunnerPerformHandshake.perform(
+        self._job, self._custodian, self._batch_status = P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
-        ))
+        )
         self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
                           f"has id={self._custodian.id}")
 
@@ -592,7 +592,7 @@ class JobRunner(CLICommand, ProgressListener):
                     self._logger.info(
                         f"[barrier] send release for 'initial_barrier' to {name} at {p2p_address.address}"
                     )
-                    asyncio.run(BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status))
+                    BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status)
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                     self._logger.error(f"[barrier] error: {e} -> {trace}")
@@ -644,10 +644,9 @@ class JobRunner(CLICommand, ProgressListener):
             return {}
 
         # obtain a list of nodes in the network and filter by peers with DOR capability
-        network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
+        network = P2PGetNetwork.perform(self._custodian_address)
         network = [node for node in network if node.dor_service]
 
-        loop = asyncio.new_event_loop()
         try:
             class KeystoreWrapper:
                 def __init__(self, keystore: Keystore):
@@ -667,9 +666,7 @@ class JobRunner(CLICommand, ProgressListener):
                     peer.p2p_address = self.custodian_address.address
 
                 # does the remote DOR have any of the pending data objects?
-                result: Dict[str, DataObject] = loop.run_until_complete(
-                    lookup.perform(peer, list(pending.keys()))
-                )
+                result: Dict[str, DataObject] = lookup.perform(peer, list(pending.keys()))
 
                 # process the results (if any)
                 for obj_id, meta in result.items():
@@ -701,18 +698,14 @@ class JobRunner(CLICommand, ProgressListener):
                             )
 
                         # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path, user_iid=self._user.id, user_signature=signature
-                            )
+                        fetch.perform(
+                            peer, obj_id, meta_path, content_path, user_iid=self._user.id, user_signature=signature
                         )
 
                     else:
                         # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path
-                            )
+                        fetch.perform(
+                            peer, obj_id, meta_path, content_path
                         )
 
                     found[obj_id] = meta.c_hash
@@ -754,9 +747,6 @@ class JobRunner(CLICommand, ProgressListener):
                 cause='fetching reference input objects failed',
                 trace=trace
             )
-
-        finally:
-            loop.close()
 
     def _verify_inputs_and_outputs(self) -> None:
         proc_descriptor: ProcessorDescriptor = self._gpp.proc_descriptor
@@ -805,7 +795,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # check if the owner identity exists for each output data object
         for o in self._job.task.output:
-            owner = asyncio.run(P2PGetIdentity.perform(self._custodian_address, o.owner_iid))
+            owner = P2PGetIdentity.perform(self._custodian_address, o.owner_iid)
             if owner is None:
                 raise NotFoundError(
                     resource_type='identity',
@@ -906,8 +896,8 @@ class JobRunner(CLICommand, ProgressListener):
                     return
 
             # fetch the user identity
-            self._user: Optional[Identity] = asyncio.run(
-                P2PGetIdentity.perform(self._custodian_address, self._job.task.user_iid)
+            self._user: Optional[Identity] = P2PGetIdentity.perform(
+                self._custodian_address, self._job.task.user_iid
             )
             if self._user is None:
                 raise NotFoundError(resource_type='identity', resource_id=self._job.task.user_iid)
