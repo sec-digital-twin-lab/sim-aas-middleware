@@ -2,6 +2,10 @@
 
 A processor is a containerised computational model with a formal I/O interface. This guide covers everything you need to create one: the descriptor, the Python implementation, the Dockerfile, and advanced patterns like co-simulation and child job spawning.
 
+### Processors and Adapters
+
+In practice, many processors act as **adapters** — they bridge between the middleware's data object model and an external tool or data source. For example, an adapter might wrap an existing simulation engine by translating DOR inputs into the engine's native format, running it, and converting the results back. Or it might fetch data from a public API and write it as a DOR-compatible output. The implementation techniques are identical — `ProcessorBase`, descriptors, Dockerfiles — but the mental model is different: an adapter's job is translation and orchestration rather than implementing computational logic from scratch. When building a system of multiple adapters, each one handles a well-defined transformation step, and the middleware chains them through their data type contracts (see [Building Pipelines](05_running_jobs.md#building-pipelines)).
+
 ## Processor Directory Structure
 
 A processor lives in a directory with at minimum these files:

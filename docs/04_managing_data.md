@@ -180,3 +180,61 @@ The middleware does not interpret `data_type` or `data_format` values. They are 
 | Processor images | `DockerImage` | `tar` |
 
 The only constraint: what you specify when adding a data object must match what the consuming processor declares in its descriptor (or match a wildcard pattern if the processor uses one).
+
+## Designing Data Contracts for Multi-Adapter Systems
+
+When building a system of multiple adapters that chain together, the `data_type` and `data_format` fields become your interoperability contract. Careful upfront design prevents integration headaches later.
+
+### Namespaced Data Types
+
+Use a project-level prefix to avoid collisions across teams or projects:
+
+| Use case | data_type | data_format |
+|----------|-----------|-------------|
+| Building footprints | `MyProject.GeoVectorData` | `geojson` |
+| Raster climate output | `MyProject.ClimateVariables` | `hdf5` |
+| Simulation run package | `MyProject.RunPackage` | `tar.gz` |
+| Energy demand results | `MyProject.EnergyDemand` | `json` |
+
+When one adapter produces `MyProject.RunPackage` / `tar.gz` and another declares it as an input, the middleware enforces the match at submission time.
+
+### Composite and Archive Formats
+
+Many real-world adapters produce or consume multi-file outputs — a simulation run package with config files, NetCDF drivers, and metadata, or a results archive with multiple GeoTIFFs. Common patterns:
+
+- **tar.gz / zip archives**: Bundle multiple files into a single data object. The producing adapter packs them; the consuming adapter unpacks and knows the internal layout by convention.
+- **HDF5**: Store multi-dimensional arrays with metadata (units, timestamps, bounding boxes, coordinate reference systems) in a single file. Useful for spatio-temporal simulation output.
+
+The middleware treats these as opaque blobs — it stores and transfers them without interpretation. The contract between producer and consumer is the internal structure, which should be documented alongside your descriptors.
+
+### Schema Validation
+
+For JSON data objects, use the `data_schema` field in the descriptor to enforce structure at submission time. The middleware validates inputs against the schema before the processor runs, and validates outputs after:
+
+```json
+{
+  "name": "parameters",
+  "data_type": "MyProject.SimParameters",
+  "data_format": "json",
+  "data_schema": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string"},
+      "bbox": {
+        "type": "array",
+        "items": {"type": "number"},
+        "minItems": 4,
+        "maxItems": 4
+      },
+      "resolution_m": {"type": "number", "minimum": 1}
+    },
+    "required": ["name", "bbox", "resolution_m"]
+  }
+}
+```
+
+For non-JSON formats (GeoTIFF, HDF5, archives), schema validation is not built in. Adapters should validate these in their `run()` method and raise `ProcessorRuntimeError` with a clear message on mismatch.
+
+### Documenting Your Contracts
+
+For any multi-adapter system, maintain a registry of your data types — what each type represents, its internal structure, and which adapters produce and consume it. This is external to the middleware but essential for anyone building or extending the system.
