@@ -1,140 +1,84 @@
-# Simulation-as-a-Service (Sim-aaS) Middleware
-The Sim-aaS Middleware provides the infrastructure to facilitate deployment and operations
-of federations of computational models.
+# Sim-aaS Middleware
+
+**Turn computational models into managed, interoperable simulation services.**
+
+Sim-aaS (Simulation-as-a-Service) Middleware is a runtime infrastructure for containerised simulation models. It handles the full lifecycle: packaging models as self-describing processors, managing input/output data with provenance tracking, executing jobs in Docker containers, and enabling models to interact at runtime.
+
+## What Makes This Different
+
+Workflow engines typically chain isolated tasks: step A finishes, step B starts. Job schedulers run your code on a cluster but know nothing about what it does. Sim-aaS occupies a different space:
+
+- **Runtime co-simulation.** Processors submitted together as a batch can discover each other and communicate directly via TCP sockets during execution. A room model and a thermostat controller run simultaneously, exchanging temperature readings and heater commands each timestep, not passing files between sequential stages.
+
+- **Dynamic child job spawning.** A running processor can discover other deployed processors, submit sub-jobs, monitor their progress, and retrieve their results, all through the Namespace runtime API. Workflows don't need to be fully defined upfront; a processor can decompose its problem at runtime based on the data it sees.
+
+- **Self-describing processors with provenance.** Every processor declares its inputs and outputs with types, formats, and optional JSON schemas. Every output produced automatically records which processor (down to the Git commit) and which inputs (by content hash) were used to produce it. Reproducibility tracking is automatic, not a separate step.
+
+- **Cryptographic identity.** No passwords, no shared secrets, no central identity provider. Each participant has a self-sovereign identity backed by a private key. Every API request is cryptographically signed and verified. Trust is established through public key exchange, not by sharing credentials.
+
+- **Pluggable backends.** The Data Object Repository (DOR) and Runtime Infrastructure (RTI) are plugins. Run locally with filesystem storage and Docker today; swap in cloud backends tomorrow, without changing a single line of processor code.
+
+## Quick Overview
+
+A typical workflow looks like this:
+
+1. **Write a processor:** a Python class with a `run()` method, a `descriptor.json` declaring its I/O interface, and a `Dockerfile`.
+2. **Start a node:** a Sim-aaS node provides data storage (DOR), job execution (RTI), and a REST API.
+3. **Upload data:** add input data objects to the DOR with type and format metadata.
+4. **Build and deploy:** build a Processor Docker Image (PDI), upload it to the DOR, and deploy it on the RTI.
+5. **Submit a job:** reference the deployed processor and input data objects; the middleware handles the rest.
+6. **Retrieve results:** outputs appear in the DOR with full provenance linking them back to their inputs and the exact processor version.
 
 ## Prerequisites
-- Python 3.13
-- Linux or MacOS operating system (not tested with Windows)
-- Docker (needed to build Processor Docker Images)
 
-## Install
+- Python 3.13+
+- Docker
+- Linux or macOS
 
-Clone the repository:
-```shell
-git clone https://github.com/sec-digital-twin-lab/sim-aas-middleware
-cd sim-aas-middleware
-```
-
-Create and activate the virtual environment:
-```shell
-python3.13 -m venv .venv
-source .venv/bin/activate
-```
-
-Install dependencies and the Sim-aaS Middleware:
-```shell
-pip install -r requirements.txt
-pip install -e .
-```
-
-The package includes built-in plugins for storage and execution:
-- `simaas/plugins/builtins/dor_fs` - Filesystem Data Object Repository (SQLite + local filesystem storage)
-- `simaas/plugins/builtins/rti_docker` - Local Docker-based job execution
-- `simaas/plugins/builtins/rti_aws` - AWS Batch-based cloud execution
-
-Plugin dependencies are included in `requirements.txt`. For AWS RTI usage, additional
-environment configuration is required - see [AWS RTI Service](docs/usage_run_simaas_node.md#aws-rti-service).
-
-Once done, you may deactivate the virtual environment - or keep it activated if you want
-to start using the Sim-aaS Middleware:
-```shell
-deactivate
-```
-
-## Usage
-The Sim-aaS Middleware can be used via a Command Line Interface (CLI) with this command: 
-```shell
-simaas-cli
-```
-
-The CLI can be used in a non-interactive manner by providing corresponding command line 
-arguments. In addition, commands also allow interactive use of the CLI in which case the 
-user is prompted for input. The following sections explain how to use the CLI for common 
-use-cases.
-
-> If you are new to using the Sim-aaS Middleware, it is recommended you work through 
-> each of the following topics in sequence. It should give you a basic understanding
-> of how to use the various commands. 
-
-The following topics should be done first: creating identities and running a node.
-- [Manage Identities](docs/usage_manage_identities.md)
-- [Running a Sim-aaS Node Instance](docs/usage_run_simaas_node.md)
-
-At this point you should have an identity set up and a node running. You can either
-proceed to learn more about how to use the Sim-aaS Middleware or proceed to look at
-some of the examples (see next section): 
-- [Adding and Removing a Data Object](docs/usage_add_remove_data_object.md)
-- [Granting/Revoking Access to Data Objects](docs/usage_grant_revoke_access.md)
-- [Managing Processor Docker Images](docs/usage_manage_processor_docker_images.md)
-- [Deploying/Undeploying of Processors](docs/usage_deploy_undeploy_processors.md)
-- [Job Submission and Monitoring](docs/usage_job_submission_and_monitoring.md)
-
-### Examples
-Learn more about building and running processors by looking at example implementations:
-- [Simple Example: Basic Input/Output Processor](examples/simple/abc/README.md)
-- [Ping Example: Network Connectivity Testing](examples/simple/ping/README.md)
-- [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
-- [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
-
-## Concepts
-Learn more about important concepts used by the Sim-aaS Middleware.
-
-- [Keystores and Identities](docs/concept_keystore_and_identities.md)
-
-## Building Processors and Processor Adapters
-In the Sim-aaS Middleware framework, **processors** and **processor adapters** serve as the 
-standardized execution interface for computational models and external applications, enabling 
-them to run as jobs within a containerized, managed runtime environment. Both are used 
-exactly the same way but differ semantically.
-
-### Processor vs Processor Adapter: What's the Difference?
-
-| Feature                    | **Processor**                                          | **Processor Adapter**                                     |
-|----------------------------|--------------------------------------------------------|-----------------------------------------------------------|
-| **Implements Logic?**      | Yes – contains the full business logic or simulation   | No – delegates to a third-party tool or executable        |
-| **Dependencies?**          | Internal Python code and libraries                     | External application (e.g., compiled binary, model suite) |
-| **Example Use Case**       | Pure Python climate model                              | Wrapper for external tool like WRF, MATLAB, or others     |
-| **Code Ownership**         | Owned and maintained in-house                          | External application, wrapped via adapter logic           |
-| **Complexity**             | Simple to complex logic in Python                      | Primarily setup, I/O handling, and CLI interfacing        |
-
-> Both types must expose a common interface to the RTI through a descriptor and standard file layout, but their internal purpose is distinct.
-> For simplicity, for the remainder of this documentation, we will use the term processor to refer to both, processors and processor adapters.
-
-### Directory Structure
-Every processor or adapter must follow a standardized folder layout, regardless of whether 
-it implements custom logic or wraps an external program.
-```
-processor/
-├── descriptor.json # Interface contract: input/output schema
-├── processor.py # Execution logic or application wrapper
-└── Dockerfile # Self-contained runtime environment
-```
-> 💡 See the examples at `/examples/...` in this repository.
-
-### Related Topics
-Learn more about related topics:
-- [Processor Descriptors (descriptor.json)](docs/processor_descriptor.md)
-- [Processor/Adapter Implementation (processor.py)](docs/processor_implementation.md)
-- [Processor Dockerfile](docs/processor_dockerfile.md)
-
-## Development
-
-For contributing to the Sim-aaS Middleware:
-
-- [Architecture Overview](docs/dev_overview.md) - Design principles, system architecture, core services
-- [Component Reference](docs/dev_components.md) - DOR, RTI, P2P, NodeDB, REST, CLI internals
-- [Plugin Development](docs/dev_plugins.md) - Creating custom DOR and RTI plugins
-- [Testing Guide](docs/dev_testing.md) - Environment setup, running tests, coverage
-
-### Quick Start
+## Installation
 
 ```bash
-# Run all tests
-.venv/bin/python -m pytest simaas/tests/ -v
-
-# Run with coverage
-.venv/bin/python -m coverage run -m pytest simaas/tests/ -v
-.venv/bin/python -m coverage report --ignore-errors --include="simaas/*" --omit="simaas/tests/*"
+git clone https://github.com/simaas/sim-aas-middleware.git
+cd sim-aas-middleware
+python -m venv .venv
+source .venv/bin/activate
+pip install .
 ```
 
-See [TEST_STATS.md](TEST_STATS.md) for test timings and coverage details.
+For development (includes test dependencies):
+
+```bash
+pip install ".[dev]"
+```
+
+## Quick Start
+
+See [Getting Started](docs/01_getting_started.md) for a complete walkthrough using the `abc` example processor.
+
+## Examples
+
+| Example | What it demonstrates | Location |
+|---------|---------------------|----------|
+| **abc** | Basic input/output, secrets, progress reporting, cancellation | `examples/simple/abc/` |
+| **ping** | Network diagnostics processor | `examples/simple/ping/` |
+| **defg** | Optional inputs and outputs | `examples/simple/defg/` |
+| **cosim** | Runtime co-simulation: room model and thermostat controller communicating via TCP sockets during execution | `examples/cosim/` |
+| **prime** | Dynamic child job spawning: factorisation processor discovers and orchestrates factor-search sub-jobs at runtime | `examples/prime/` |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/01_getting_started.md) | End-to-end walkthrough from installation to your first job |
+| [Concepts](docs/02_concepts.md) | Core concepts: processors, data objects, identities, namespaces, provenance |
+| [Writing a Processor](docs/03_writing_a_processor.md) | How to implement a processor: descriptor, Python code, Dockerfile |
+| [Managing Data](docs/04_managing_data.md) | Adding, searching, downloading, and controlling access to data objects |
+| [Running Jobs](docs/05_running_jobs.md) | Building images, deploying processors, submitting and monitoring jobs |
+| [Identities and Security](docs/06_identities_and_security.md) | Keystores, identities, credentials, and the security model |
+| [Plugin Development](docs/07_plugin_development.md) | Creating custom DOR and RTI backends |
+| [Architecture](docs/08_architecture.md) | System design, modules, and communication layers |
+| [Testing](docs/09_testing.md) | Test setup, structure, and running the test suite |
+
+## License
+
+MIT

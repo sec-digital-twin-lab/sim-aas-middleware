@@ -1,7 +1,14 @@
 # Factorisation Example: Dynamic Child Job Submission
 
-This example demonstrates how a processor can dynamically **create and manage child jobs on-the-fly** 
-using the RTI (Runtime Interface) provided by the Sim-aaS Middleware.
+Most workflow engines require workflows to be fully defined before execution. Sim-aaS is
+different: running processors have access to the full **Namespace runtime API**, allowing
+them to discover available processors, submit new jobs, monitor their progress, and retrieve
+results — all programmatically from within a running computation. This enables dynamic
+decomposition patterns where the structure of the computation is determined at runtime based
+on intermediate results.
+
+This example demonstrates how a processor can dynamically **create and manage child jobs
+on-the-fly** using the Namespace API provided by the Sim-aaS Middleware.
 
 The example consists of two processors:
 

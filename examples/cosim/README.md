@@ -1,11 +1,16 @@
 # Co-Simulation Example: Room and Thermostat Controllers
 
-This example demonstrates a **synchronized co-simulation** between two processors - 
-a `Room` model and a `Thermostat` controller - coordinated through direct socket 
-communication, orchestrated by the Sim-aaS Middleware.
+This example demonstrates one of Sim-aaS's core capabilities: **runtime co-simulation**
+between independently containerised models. Unlike workflow engines where tasks run in
+isolation and pass data only after completion, Sim-aaS enables batch-submitted processors
+to discover each other at runtime via the RTI and communicate directly via TCP sockets
+throughout the simulation. This is the mechanism that enables coupled multi-physics
+simulations, digital twin federations, and any scenario where models must exchange data
+at each timestep.
 
-The example showcases how distributed models can interact in real-time to perform coupled 
-simulation tasks, relying on synchronized message exchange over a network connection.
+The example shows a **synchronized co-simulation** between two processors — a `Room` model
+and a `Thermostat` controller — coordinated through direct socket communication, orchestrated
+by the Sim-aaS Middleware.
 
 ## Objective
 
@@ -192,7 +197,7 @@ cat /Users/foobar/32466ed781a2783377c0f95dc5d04d6c6bc8ca92fd5aebe7f9383254c754e5
 cat /Users/foobar/c8f266a0eaf5338221acb8f241f5bca98d347f548e9b49d0d8303fed3f404e49.json 
 ```
 
-FThe room results should look like this:
+The room results should look like this:
 ```json
 {
   "temp": [
