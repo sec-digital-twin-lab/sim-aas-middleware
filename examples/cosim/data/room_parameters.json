@@ -1,0 +1,6 @@
+{
+  "initial_temp": 15.0,
+  "heating_rate": 0.5,
+  "cooling_rate": -0.2,
+  "max_steps": 50
+}

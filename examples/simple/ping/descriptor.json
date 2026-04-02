@@ -1,0 +1,20 @@
+{
+  "name": "proc-ping",
+  "input": [
+    {
+      "name": "parameters",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": null
+    }
+  ],
+  "output": [
+    {
+      "name": "result",
+      "data_type": "JSONObject",
+      "data_format": "json",
+      "data_schema": null
+    }
+  ],
+  "required_secrets": []
+}
