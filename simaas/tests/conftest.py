@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest  # noqa: F401 - used by pytest
 from dotenv import load_dotenv
 
-from simaas.core.logging import get_logger, initialise
+from simaas.core.logging import get_logger
 
 load_dotenv()
 

@@ -17,7 +17,6 @@ from simaas.core.errors import RemoteError
 from simaas.core.helpers import generate_random_string, get_timestamp_now
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
-from simaas.dor.schemas import DataObject
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.schemas import Task, Job, JobStatus
 from simaas.tests.fixture_core import BASE_DIR

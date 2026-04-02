@@ -2,19 +2,13 @@
 
 import logging
 import os
-import re
 import time
 from unittest.mock import patch
-
-import pytest
 
 from simaas.core.logging import (
     Logger,
     RateLimiter,
     get_logger,
-    ID_FIELDS,
-    SENSITIVE_KEYS,
-    REDACT_PATTERNS,
 )
 
 

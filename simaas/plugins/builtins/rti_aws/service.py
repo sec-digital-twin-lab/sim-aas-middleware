@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 
-import traceback
 from typing import Optional, Tuple, Dict, List
 
 import boto3
@@ -627,7 +626,7 @@ class AWSRTIService(RTIServiceBase):
         aws_job_id = record.runner['aws_job_id']
         try:
             await asyncio.to_thread(batch_terminate_job, aws_job_id)
-        except Exception as e:
+        except Exception:
             log.warning('purge', 'Killing AWS Batch job failed', job=record.id, aws_job=aws_job_id)
 
     async def perform_job_cleanup(self, job_id: str) -> None:

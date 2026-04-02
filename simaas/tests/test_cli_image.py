@@ -14,8 +14,6 @@ from git import Repo
 from simaas.cli.cmd_image import clone_repository, build_processor_image, PDIBuildLocal, PDIBuildGithub, PDIExport, \
     PDIImport, PDIMetaInformation
 
-from simaas.core.helpers import get_timestamp_now
-
 from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
@@ -224,8 +222,6 @@ def test_cli_image_build_local(docker_available, temp_dir):
 
     # build the first time
     try:
-        t0 = get_timestamp_now()
-
         # define arguments
         args = {
             'proc_path': os.path.join(examples_path, 'simple', 'abc'),

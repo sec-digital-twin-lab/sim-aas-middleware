@@ -5,7 +5,6 @@ import shutil
 import socket
 import threading
 
-import traceback
 from typing import Optional, Tuple, Dict, List
 
 from simaas.cli.cmd_image import clone_repository, build_processor_image
@@ -305,7 +304,7 @@ class DockerRTIService(RTIServiceBase):
         try:
             container_id = record.runner['container_id']
             await asyncio.to_thread(docker_kill_job_container, container_id)
-        except Exception as e:
+        except Exception:
             log.warning('purge', 'Killing Docker container failed', job=record.id, container=record.runner.get('container_id'))
 
     async def perform_job_cleanup(self, job_id: str) -> None:

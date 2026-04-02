@@ -12,7 +12,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 
 class FunctionExtractor(ast.NodeVisitor):

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -14,6 +13,7 @@ from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
 from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
@@ -22,17 +22,15 @@ from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_i
 from simaas.core.errors import ExceptionContent
 from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
-from simaas.helpers import data_type_matches
+from simaas.core.processor import ProgressListener, ProcessorBase
+from simaas.helpers import data_type_matches, find_processors
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
-
-log = get_logger('simaas.rti', 'rti')
-from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
 from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus
-from simaas.core.processor import ProgressListener, ProcessorBase
-from simaas.helpers import find_processors
+
+log = get_logger('simaas.rti', 'rti')
 
 
 class OutputObjectHandler(threading.Thread):

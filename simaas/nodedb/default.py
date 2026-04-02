@@ -127,9 +127,9 @@ class DefaultNodeDBService(NodeDBService):
 
             for record in conflicting_records:
                 if record.last_seen >= node.last_seen:
-                    log.debug(f"Ignoring network node update, conflicting address but more recent timestamp found", record_iid=record.iid, node_iid=node.identity.id)
+                    log.debug("Ignoring network node update, conflicting address but more recent timestamp found", record_iid=record.iid, node_iid=node.identity.id)
                 else:
-                    log.debug(f"Deleting record with outdated and conflicting address", record_iid=record.iid, node_iid=node.identity.id)
+                    log.debug("Deleting record with outdated and conflicting address", record_iid=record.iid, node_iid=node.identity.id)
 
                     session.query(NodeRecord).filter_by(iid=record.iid).delete()
                     session.commit()
@@ -156,7 +156,7 @@ class DefaultNodeDBService(NodeDBService):
                 session.commit()
 
             else:
-                log.debug(f"Ignoring network node update, more recent record found", record_iid=record.iid, node_iid=node.identity.id)
+                log.debug("Ignoring network node update, more recent record found", record_iid=record.iid, node_iid=node.identity.id)
 
     async def remove_node_by_id(self, identity: Identity) -> None:
         """

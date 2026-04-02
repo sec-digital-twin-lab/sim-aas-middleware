@@ -693,7 +693,7 @@ class RTIJobSubmit(CLICommand):
         job_output = []
         for item in proc_desc.output:
             if item.optional:
-                optional_label = f" \033[2m(optional)\033[0m"
+                optional_label = " \033[2m(optional)\033[0m"
                 if not prompt_for_confirmation(f"Include optional output '{item.name}'{optional_label}?", default=True):
                     continue
 
