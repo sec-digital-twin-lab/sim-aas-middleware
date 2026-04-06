@@ -86,13 +86,13 @@ class RESTApp:
 
         @self.api.exception_handler(Exception)
         async def generic_exception_handler(_: Request, e: Exception):
-            log.error('exception', 'Unexpected exception', exc=e)
+            log.error('exception', 'Unexpected exception',
+                      trace=''.join(traceback.format_exception(None, e, e.__traceback__)))
             return JSONResponse(
                 status_code=500,
                 content={
                     'error': 'Internal Server Error',
-                    'message': f'An unexpected error occurred: {e}',
-                    'trace': ''.join(traceback.format_exception(None, e, e.__traceback__))
+                    'message': 'An unexpected error occurred.',
                 }
             )
 
