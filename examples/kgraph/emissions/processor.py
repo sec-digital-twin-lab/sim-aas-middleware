@@ -5,7 +5,7 @@ import time
 
 from typing import Any, Dict
 
-from rdflib import Graph, Literal, URIRef, ConjunctiveGraph
+from rdflib import Graph, Literal, URIRef
 
 from simaas.dor.wrappers import SPARQLWrapper
 from simaas.rti.schemas import Job
@@ -64,7 +64,7 @@ def assemble_knowledge_graph(mapping: dict, data: dict) -> Graph:
             graph_id = URIRef(uri + local_name)
 
     # Initialize the graph with identifier if available
-    g = ConjunctiveGraph(identifier=graph_id) if graph_id else Graph()
+    g = Graph(identifier=graph_id) if graph_id else Graph()
 
     # Prepare and bind all namespaces (store base URIs for term construction)
     namespaces = mapping.get("namespaces", {})

@@ -4,7 +4,7 @@ import os
 from pydantic import BaseModel
 from typing import Optional, List
 import requests
-from rdflib import ConjunctiveGraph, Graph
+from rdflib import Dataset, Graph
 
 
 class QueryWrapper(abc.ABC):
@@ -121,14 +121,14 @@ class SPARQLWrapper:
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"N-Quads file '{file_path}' not found")
 
-        g = ConjunctiveGraph()
+        g = Dataset()
         g.parse(file_path, format="nquads")
         self.import_graph(g, batch_size=batch_size)
 
     def import_graph(self, g: Graph, batch_size: int = 100):
         """
         Internal helper: generate and execute INSERT DATA statements from an rdflib graph.
-        Handles both Graph (TTL) and ConjunctiveGraph (NQ with multiple graphs).
+        Handles both Graph (TTL) and Dataset (NQ with multiple graphs).
         """
         triples_batch = []
         for t in g.quads((None, None, None, None)) if hasattr(g, 'quads') else g:
