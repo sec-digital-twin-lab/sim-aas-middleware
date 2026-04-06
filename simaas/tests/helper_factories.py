@@ -14,7 +14,7 @@ from examples.simple.abc.processor import write_value
 from simaas.cli.cmd_job_runner import JobRunner
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.core.processor import ProgressListener, ProcessorBase, ProcessorRuntimeError, Namespace
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject, ProcessorDescriptor, GitProcessorPointer
@@ -133,13 +133,14 @@ def create_abc_task(
     a: int = 1,
     b: int = 1,
     memory: int = 1024,
-    namespace: Optional[str] = None
+    namespace: Optional[str] = None,
+    target_node_iid: Optional[str] = None
 ) -> Task:
     """Factory function for creating ABC processor tasks."""
     builder = (TaskBuilder(proc_id, owner.identity.id)
                .with_input_value('a', {'v': a})
                .with_input_value('b', {'v': b})
-               .with_output('c', owner.identity.id)
+               .with_output('c', owner.identity.id, target_node_iid=target_node_iid)
                .with_budget(memory=memory))
 
     if namespace:
@@ -316,6 +317,9 @@ async def execute_job(
         if runner_identity is None or runner_address is None:
             assert False
 
+        # Simulate RTI cancel flow: mark cancelled in DB first, then send interrupt
+        rti.mark_job_cancelled(job_id)
+
         await P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             curve_secret_key=custodian.keystore.curve_secret_key(),
@@ -327,7 +331,7 @@ async def execute_job(
     timeout = 60  # seconds
     elapsed = 0
     while elapsed < timeout:
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = await rti.get_job_status(job.id)
 
         if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             return status
@@ -356,7 +360,7 @@ class ProcessorRunner(threading.Thread, ProgressListener):
         self._interrupted = False
 
         log_path = os.path.join(wd_path, 'job.log')
-        self._logger = Logging.get('cli.job_runner', level=log_level, custom_log_path=log_path)
+        self._logger = get_logger('cli.job_runner', 'runner', level=log_level, custom_log_path=log_path)
 
         self._job_status = JobStatus(state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={},
                                      errors=[], message=None)

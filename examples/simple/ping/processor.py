@@ -123,7 +123,7 @@ class ProcessorPing(ProcessorBase):
         # Read the parameters file
         with open(os.path.join(wd_path, 'parameters'), 'r') as f:
             parameters = json.load(f)
-        print(f"using parameters: {parameters}")
+        logger.info(f"Using parameters: {parameters}")
 
         # Get the address
         address: str = parameters['address']
@@ -132,26 +132,26 @@ class ProcessorPing(ProcessorBase):
         if parameters['do_ping']:
             # Do the ping
             stdout: str = ping_address(address)
-            print(f"ping stdout: {stdout}")
+            logger.info(f"Ping stdout: {stdout}")
             result['ping_stdout'] = stdout.split('\n')
 
         if parameters['do_traceroute']:
             stdout: str = traceroute_address(address, max_hops=5)
-            print(f"traceroute stdout: {stdout}")
+            logger.info(f"Traceroute stdout: {stdout}")
             result['traceroute_stdout'] = stdout.split('\n')
 
         if parameters.get('do_tcp_test', False):
             tcp_port = parameters.get('tcp_port', 80)
             tcp_timeout = parameters.get('tcp_timeout', 5)
             tcp_result = tcp_connect(address, tcp_port, tcp_timeout)
-            print(f"TCP connection test result: {tcp_result}")
+            logger.info(f"TCP connection test result: {tcp_result}")
             result['tcp_test'] = tcp_result
 
         if parameters.get('do_udp_test', False):
             udp_port = parameters.get('udp_port', 53)
             udp_timeout = parameters.get('udp_timeout', 5)
             udp_result = udp_connect(address, udp_port, udp_timeout)
-            print(f"UDP connection test result: {udp_result}")
+            logger.info(f"UDP connection test result: {udp_result}")
             result['udp_test'] = udp_result
 
         # Write result

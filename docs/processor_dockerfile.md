@@ -11,7 +11,7 @@ A valid Dockerfile must follow the required conventions below:
 ### Entrypoint
 Each processor container must use the following CLI-based entry point:
 ```
-ENTRYPOINT ["/venv/bin/simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--service-address", "tcp://0.0.0.0:6000"]
+ENTRYPOINT ["simaas-cli", "--log-console", "run", "--job-path", "/job", "--proc-path", "/processor", "--service-address", "tcp://0.0.0.0:6000"]
 ```
 This runs the job runner, which initializes the processor, handles communication with the 
 RTI (via P2P protocols), validates input/output data, and coordinates the execution lifecycle.

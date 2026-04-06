@@ -6,10 +6,12 @@ verification patterns used across tests.
 
 import json
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from simaas.core.keystore import Keystore
 from simaas.dor.api import DORProxy
+from simaas.nodedb.api import NodeDBProxy
 from simaas.rti.schemas import JobStatus
 
 
@@ -95,3 +97,32 @@ def assert_data_object_exists(
             f"Expected data type '{expected_data_type}', "
             f"got '{obj.data_type}'"
         )
+
+
+def count_runner_identities(db_proxy: NodeDBProxy) -> int:
+    """Count the number of runner identities in the node database."""
+    identities = db_proxy.get_identities()
+    return sum(1 for identity in identities.values() if identity.name == 'runner')
+
+
+def assert_runner_identities_cleaned_up(
+    db_proxy: NodeDBProxy,
+    expected_count: int,
+    timeout: float = 10.0
+) -> None:
+    """Assert that runner identities have been cleaned up after job completion.
+
+    Waits for cleanup to complete (with timeout) since cleanup is asynchronous.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        current_count = count_runner_identities(db_proxy)
+        if current_count <= expected_count:
+            return
+        time.sleep(0.5)
+
+    current_count = count_runner_identities(db_proxy)
+    assert current_count <= expected_count, (
+        f"Runner identities not cleaned up. "
+        f"Expected at most {expected_count}, found {current_count}"
+    )

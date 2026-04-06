@@ -6,19 +6,21 @@ from typing import List
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.cli.cmd_image import PDIBuildLocal, PDIImport
 
 from simaas.core.helpers import get_timestamp_now
 
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcList, RTIProcShow, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, \
     RTIJobList, RTIJobCancel, RTIVolumeCreateFSRef, RTIVolumeList, RTIVolumeDelete, RTIVolumeCreateEFSRef
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.schemas import DataObject
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 
-logger = Logging.get(__name__)
+log = get_logger(__name__, 'test')
 repo_root_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 examples_path = os.path.join(repo_root_path, 'examples')
 
@@ -40,7 +42,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert result is not None
         assert len(result) == 0
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -51,7 +53,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
             'path': os.path.join(temp_dir, 'does_not_exist')
         })
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     try:
@@ -63,7 +65,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         })
         assert result is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -74,7 +76,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert result is not None
         assert len(result) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -86,7 +88,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         })
         assert result is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -97,7 +99,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert result is not None
         assert len(result) == 2
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -109,7 +111,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert result is not None
         assert len(result) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     try:
@@ -120,7 +122,7 @@ def test_cli_rti_volumes_list_add_delete(temp_dir):
         assert result is not None
         assert len(result) == 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -138,7 +140,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -158,7 +160,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert 'pdi_path' in result
         assert 'pdi_meta' in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # import the PDI
@@ -178,12 +180,12 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = session_node.dor.get_meta(pdi.obj_id)
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # get list of deployed processors
@@ -201,7 +203,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         n = len(result['deployed'])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # deploy the processor
@@ -221,7 +223,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert 'proc' in result
         assert result['proc'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # get list of deployed processors
@@ -239,7 +241,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         assert len(result['deployed']) == n + 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     while True:
@@ -261,7 +263,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
             assert result['processor'] is not None
             assert len(result['jobs']) == 0
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
         proc: Processor = result['processor']
@@ -286,7 +288,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert result is not None
         assert obj.obj_id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     time.sleep(1)
@@ -306,7 +308,7 @@ def test_cli_rti_proc_lifecycle(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         assert len(result['deployed']) == n
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -332,11 +334,11 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
             'path': temp_dir
         })
 
-    except CLIRuntimeError:
+    except CLIError:
         assert True
 
     # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -356,7 +358,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert 'pdi_path' in result
         assert 'pdi_meta' in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # import the PDI
@@ -376,12 +378,12 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = session_node.dor.get_meta(pdi.obj_id)
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # get list of deployed processors
@@ -399,7 +401,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         n = len(result['deployed'])
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # deploy the processor
@@ -422,7 +424,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert 'proc' in result
         assert result['proc'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # get list of deployed processors
@@ -440,7 +442,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         assert len(result['deployed']) == n + 1
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     while True:
@@ -462,7 +464,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
             assert result['processor'] is not None
             assert len(result['jobs']) == 0
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
         proc: Processor = result['processor']
@@ -487,7 +489,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert result is not None
         assert obj.obj_id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     time.sleep(1)
@@ -507,7 +509,7 @@ def test_cli_rti_proc_volume(docker_available, session_node, temp_dir):
         assert 'deployed' in result
         assert len(result['deployed']) == n
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -525,7 +527,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -545,7 +547,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert 'pdi_path' in result
         assert 'pdi_meta' in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # import the PDI
@@ -565,12 +567,12 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = session_node.dor.get_meta(pdi.obj_id)
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # deploy the processor
@@ -589,7 +591,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert 'proc' in result
         assert result['proc'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # wait for processor to be deployed
@@ -614,7 +616,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
 
             time.sleep(1)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # create task
@@ -652,7 +654,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert result['job'] is not None
         job = result['job']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     def get_job_list() -> List[Job]:
@@ -672,7 +674,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
             assert result['jobs'] is not None
             return result['jobs']
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
     def get_job_status(job_id: str) -> JobStatus:
@@ -692,7 +694,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
             assert result['status'] is not None
             return result['status']
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
     def wait_for_job_to_be_initialised(job_id: str, max_attempts: int = 20):
@@ -745,7 +747,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert 'status' in result
         assert result['status'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     wait_for_job_to_be_cancelled(job.id)
@@ -768,7 +770,7 @@ def test_cli_rti_job_single(docker_available, session_node, temp_dir):
         assert result is not None
         assert obj.obj_id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 
@@ -786,7 +788,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
     keystore = Keystore.new('name', 'email', path=temp_dir, password=password)
 
     # ensure the node knows about this identity
-    session_node.db.update_identity(keystore.identity)
+    run_coro_safely(session_node.db.update_identity(keystore.identity))
 
     # build the PDI
     pdi_path = os.path.join(temp_dir, f"{get_timestamp_now()}.pdi")
@@ -806,7 +808,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert 'pdi_path' in result
         assert 'pdi_meta' in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # import the PDI
@@ -826,12 +828,12 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert result['pdi'] is not None
         pdi: DataObject = result['pdi']
 
-        obj = session_node.dor.get_meta(pdi.obj_id)
+        obj = run_coro_safely(session_node.dor.get_meta(pdi.obj_id))
         assert obj is not None
         assert obj.data_type == 'ProcessorDockerImage'
         assert obj.data_format == 'tar'
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # deploy the processor
@@ -850,7 +852,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert 'proc' in result
         assert result['proc'] is not None
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # wait for processor to be deployed
@@ -875,7 +877,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
 
             time.sleep(1)
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     # create tasks
@@ -917,7 +919,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert len(result['jobs']) == n
         jobs = result['jobs']
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
     def get_job_list() -> List[Job]:
@@ -937,7 +939,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
             assert result['jobs'] is not None
             return result['jobs']
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
     def get_job_status(job_id: str) -> JobStatus:
@@ -957,7 +959,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
             assert result['status'] is not None
             return result['status']
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
     def wait_for_job_to_be_initialised(job_id: str, max_attempts: int = 20):
@@ -1012,7 +1014,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
             assert 'status' in result
             assert result['status'] is not None
 
-        except CLIRuntimeError:
+        except CLIError:
             assert False
 
     # wait for all jobs to be cancelled
@@ -1038,7 +1040,7 @@ def test_cli_rti_job_batch(docker_available, session_node, temp_dir, n=2):
         assert result is not None
         assert obj.obj_id in result
 
-    except CLIRuntimeError:
+    except CLIError:
         assert False
 
 

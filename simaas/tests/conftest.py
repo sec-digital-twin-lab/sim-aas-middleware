@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest  # noqa: F401 - used by pytest
 from dotenv import load_dotenv
 
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
 load_dotenv()
 
@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
 logging.getLogger('python_multipart.multipart').setLevel(logging.WARNING)
 
-logger = Logging.get('tests.conftest')
+log = get_logger('tests.conftest', 'test')
 
 # Core fixtures: TestContext, environment checks, keystores
 # noqa: F401, E402 - fixtures must be imported here for pytest discovery
@@ -30,7 +30,7 @@ from simaas.tests.fixture_core import (  # noqa: E402, F401
     temp_directory,
     extra_keystores,
     REPOSITORY_URL,
-    REPOSITORY_COMMIT_ID,
+    CURRENT_COMMIT_ID,
 )
 
 # Mock classes for testing
@@ -53,6 +53,8 @@ from simaas.tests.fixture_rti import (  # noqa: E402, F401
     RTIBackend,
     RTIBackendConfig,
     RTIContext,
+    ProcessorDeployment,
+    check_docker_image_exists,
     add_test_processor,
     wait_for_processor_ready,
     wait_for_processor_undeployed,
@@ -84,6 +86,27 @@ from simaas.tests.fixture_rti import (  # noqa: E402, F401
     PROC_THERMOSTAT_PATH,
     PROC_FACTORISATION_PATH,
     PROC_FACTOR_SEARCH_PATH,
+    PROC_EMISSIONS_PATH,
+    deployed_emissions_processor,
+)
+
+# RTI 2-Node fixtures: separated storage and execution nodes for P2P testing
+from simaas.tests.fixture_rti_2node import (  # noqa: E402, F401
+    RTI2NodeContext,
+    ProcessorDeployment2Node,
+    session_keystore_storage,
+    session_keystore_execution,
+    storage_node,
+    execution_node,
+    storage_dor_proxy,
+    storage_nodedb_proxy,
+    execution_rti_proxy,
+    execution_nodedb_proxy,
+    session_data_dir_2node,
+    deployed_abc_processor_2node,
+    deployed_room_processor_2node,
+    deployed_thermostat_processor_2node,
+    rti_2node_context,
 )
 
 

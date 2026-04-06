@@ -11,12 +11,12 @@ import requests
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 
-from simaas.core.exceptions import ExceptionContent
+from simaas.core.errors import (
+    ExceptionContent, AuthorisationError, RemoteError, NetworkError, OperationError, ValidationError
+)
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.dor.schemas import DORFilePartInfo
-from simaas.rest.exceptions import UnexpectedHTTPError, UnsuccessfulRequestError, UnexpectedContentType, \
-    UnsuccessfulConnectionError, AuthorisationFailedError
 from simaas.rest.schemas import Token
 
 
@@ -25,13 +25,25 @@ def get_proxy_prefix(endpoint_prefix: str) -> Tuple[str, str]:
     return endpoint_split[0], endpoint_split[1]
 
 
+def _raise_for_error_status(response: requests.Response) -> None:
+    """Parse an error response as ExceptionContent and raise the appropriate exception."""
+    try:
+        content = response.json()
+        content = ExceptionContent.model_validate(content)
+        raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
+    except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
+        if response.status_code == 403:
+            raise AuthorisationError(operation='http_request', hint='HTTP 403 Forbidden')
+        raise RemoteError(response.reason, status_code=response.status_code)
+
+
 def extract_response(response: requests.Response) -> Optional[Union[dict, list]]:
     """
     Extracts the response content in case of an 'Ok' response envelope or raises an exception in case
     of an 'Error' envelope.
     :param response: the response message
     :return: extracted response content (if any)
-    :raise UnsuccessfulRequestError
+    :raise RemoteError
     """
 
     if response.status_code == 200:
@@ -42,39 +54,34 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
             # try to parse the response as JSON and then the JSON as ExceptionContent
             content = response.json()
             content = ExceptionContent.model_validate(content)
-            exception = UnsuccessfulRequestError(content.reason, exception_id=content.id, details=content.details)
+            exception = RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
 
         # the content is not even JSON...
         except requests.exceptions.JSONDecodeError:
-            exception = UnsuccessfulRequestError(response.reason, details={
-                'status_code': 500,
-            })
+            exception = RemoteError(response.reason, status_code=500)
 
         # the content is JSON but not of ExceptionContent type
         except pydantic.ValidationError:
-            exception = UnsuccessfulRequestError(response.reason, details={
-                'content': response.json(),
-                'status_code': 500,
-            })
+            exception = RemoteError(response.reason, remote_details={'content': response.json()}, status_code=500)
 
         # something unexpected went wrong
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            exception = UnsuccessfulRequestError(response.reason, details={
-                'trace': trace,
-                'status_code': 500,
-            })
+            exception = RemoteError(response.reason, remote_details={'trace': trace}, status_code=500)
 
         raise exception
 
     elif response.status_code == 401:
-        raise AuthorisationFailedError()
+        raise AuthorisationError(operation='http_request', hint='HTTP 401 Unauthorized')
+
+    elif response.status_code in (403, 404, 422, 502):
+        _raise_for_error_status(response)
 
     else:
-        raise UnexpectedHTTPError({
-            'reason': response.reason,
-            'status_code': response.status_code
-        })
+        raise OperationError(
+            operation='http_request',
+            cause=f"HTTP {response.status_code} {response.reason}"
+        )
 
 
 def generate_authorisation_token(authority: Keystore, url: str, body: dict = None) -> str:
@@ -147,7 +154,7 @@ class Session:
             return self._token
 
         except requests.exceptions.ConnectionError:
-            raise UnsuccessfulConnectionError(url)
+            raise NetworkError(peer_address=url, operation='http_connect')
 
     @property
     def token(self) -> Token:
@@ -196,16 +203,18 @@ class EndpointProxy:
                         return header
 
                     else:
-                        raise UnexpectedContentType({
-                            'header': header
-                        })
+                        raise ValidationError(
+                            field='content-type',
+                            expected='application/json or application/octet-stream',
+                            actual=header.get('content-type')
+                        )
 
             else:
                 response = requests.get(url, headers=headers, json=body)
                 return extract_response(response)
 
         except requests.exceptions.ConnectionError:
-            raise UnsuccessfulConnectionError(url)
+            raise NetworkError(peer_address=url, operation='http_get')
 
     def put(self, endpoint: str, body: Union[dict, list] = None, parameters: dict = None, attachment_path: str = None,
             with_authorisation_by: Keystore = None) -> Union[dict, list]:
@@ -230,7 +239,7 @@ class EndpointProxy:
                 return extract_response(response)
 
         except requests.exceptions.ConnectionError:
-            raise UnsuccessfulConnectionError(url)
+            raise NetworkError(peer_address=url, operation='http_put')
 
     def post(self, endpoint: str, body: Union[dict, list, str] = None, data=None, parameters: dict = None,
              attachment_path: str = None, with_authorisation_by: Keystore = None,
@@ -284,9 +293,7 @@ class EndpointProxy:
 
         except requests.exceptions.ConnectionError as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            raise UnsuccessfulConnectionError(url, details={
-                'trace': trace
-            })
+            raise NetworkError(peer_address=url, operation='http_post', trace=trace)
 
     def delete(self, endpoint: str, body: Union[dict, list] = None, parameters: dict = None,
                with_authorisation_by: Keystore = None) -> Union[dict, list]:
@@ -300,7 +307,7 @@ class EndpointProxy:
             return extract_response(response)
 
         except requests.exceptions.ConnectionError:
-            raise UnsuccessfulConnectionError(url)
+            raise NetworkError(peer_address=url, operation='http_delete')
 
     def _make_url(self, endpoint: str, parameters: dict = None) -> str:
         # create base URL

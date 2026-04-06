@@ -12,9 +12,9 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from typing import Union, List
 
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'core')
 
 
 def get_timestamp_now() -> int:
@@ -31,11 +31,11 @@ def validate_json(content: dict, schema: dict) -> bool:
         return True
 
     except jsonschema.exceptions.ValidationError as e:
-        logger.error(e.message)
+        log.error('validation', 'JSON validation error', error=e.message)
         return False
 
     except jsonschema.exceptions.SchemaError as e:
-        logger.error(e.message)
+        log.error('validation', 'JSON schema error', error=e.message)
         return False
 
 

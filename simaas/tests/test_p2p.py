@@ -12,9 +12,9 @@ import pytest
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
-from simaas.dor.exceptions import FetchDataObjectFailedError
+from simaas.core.errors import NetworkError
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
@@ -25,11 +25,11 @@ from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PAddress
-from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.core.errors import NetworkError as PeerUnavailableError  # Alias for backwards compat in tests
 from simaas.p2p.protocol import P2PLatency, P2PThroughput
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================
@@ -46,7 +46,7 @@ def p2p_server(test_context) -> Node:
 
     yield _node
 
-    _node.shutdown(leave_network=False)
+    _node.shutdown()
 
 
 @pytest.fixture(scope="session")
@@ -57,7 +57,7 @@ def p2p_client(test_context) -> Node:
 
     yield _node
 
-    _node.shutdown(leave_network=False)
+    _node.shutdown()
 
 
 # ==============================================================================
@@ -140,8 +140,8 @@ async def test_p2p_update_identity(p2p_server, p2p_client):
 @pytest.mark.asyncio
 async def test_p2p_join_leave_network(p2p_server, p2p_client):
     """Test P2P network join and leave operations."""
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 1
 
@@ -152,16 +152,16 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
     result: NodeInfo = await protocol.perform(boot_node)
     assert result.identity.id == p2p_server.identity.id
 
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 2
     assert len(networkC) == 2
 
     protocol = P2PLeaveNetwork(p2p_client)
     await protocol.perform(blocking=True)
 
-    networkS: List[NodeInfo] = p2p_server.db.get_network()
-    networkC: List[NodeInfo] = p2p_client.db.get_network()
+    networkS: List[NodeInfo] = await p2p_server.db.get_network()
+    networkC: List[NodeInfo] = await p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 2
 
@@ -211,7 +211,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
         try:
             await protocol.perform(p2p_server.info, '01234', meta_path, content_path)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'data object not found' in e.details['reason']
         except Exception:
             assert False
@@ -230,7 +230,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         )
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()
-        client.startup(p2p_address, rest_address=rest_address)
+        await client.startup(p2p_address, rest_address=rest_address)
         await asyncio.sleep(1)
 
         # create an owner for the data object -> make the server aware of the identity
@@ -257,7 +257,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             fake_obj_id = 'abcdef'
             await protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'data object not found' in e.details['reason']
         except Exception:
             assert False
@@ -266,19 +266,19 @@ async def test_p2p_fetch_restricted(p2p_server):
         try:
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'user id not found' in e.details['reason']
         except Exception:
             assert False
 
         # update the server with the client identity
-        p2p_server.db.update_identity(client.identity)
+        await p2p_server.db.update_identity(client.identity)
 
         # the client does not have permission at this point to receive the data object
         try:
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'user does not have access' in e.details['reason']
         except Exception:
             assert False
@@ -296,7 +296,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
                                    user_signature=invalid_signature)
             assert False
-        except FetchDataObjectFailedError as e:
+        except NetworkError as e:
             assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
@@ -312,7 +312,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
             assert os.path.isfile(content_path)
-        except FetchDataObjectFailedError:
+        except NetworkError:
             assert False
         except Exception:
             assert False

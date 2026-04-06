@@ -1,0 +1,50 @@
+{
+    "name": "proc-emissions",
+    "input": [
+      {
+        "name": "electricity_consumption",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {"type": "number"}
+          },
+          "required": ["v"]
+        }
+      },
+      {
+        "name": "emission_rate",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {"type": "number"}
+          },
+          "required": ["v"]
+        }
+      },
+      {
+        "name": "kgdb_config",
+        "data_type": "SPARQLWrapper.Config",
+        "data_format": "json",
+        "data_schema": null
+      }
+    ],
+    "output": [
+      {
+        "name": "calculated_emissions",
+        "data_type": "JSONObject",
+        "data_format": "json",
+        "data_schema": {
+          "type": "object",
+          "properties": {
+            "v": {"type": "number"}
+          },
+          "required": ["v"]
+        }
+      }
+    ],
+    "required_secrets": []
+  }

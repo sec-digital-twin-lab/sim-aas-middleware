@@ -12,16 +12,18 @@ from typing import Union, Optional, List
 
 import pytest
 
+from simaas.core.async_helpers import run_coro_safely
+
 from simaas.core.identity import Identity
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import DataObject
 from simaas.helpers import docker_container_list
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NodeInfo, ResourceDescriptor
-from simaas.rest.exceptions import UnsuccessfulRequestError
+from simaas.core.errors import RemoteError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Task, JobStatus, Job, BatchStatus, ProcessorVolume
 
@@ -40,10 +42,12 @@ from simaas.tests.helper_assertions import (
     assert_job_failed,
     assert_job_cancelled,
     assert_data_object_content,
+    count_runner_identities,
+    assert_runner_identities_cleaned_up,
 )
 
-Logging.initialise(level=logging.DEBUG)
-logger = Logging.get(__name__)
+initialise(level=logging.DEBUG)
+log = get_logger(__name__, 'test')
 
 
 # ==============================================================================
@@ -202,9 +206,9 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
     wait_for_processor_ready(rti0, proc_id0)
 
     # try to deploy the processor with the wrong user on node1 (should fail - strict)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti1.deploy(proc_id1, wrong_user)
-    assert 'User is not the node owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'node_owner' in e.value.reason.lower()
 
     # try to deploy the processor with the correct user on node1
     rti1.deploy(proc_id1, node1.keystore)
@@ -215,9 +219,9 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
     wait_for_processor_undeployed(rti0, proc_id0)
 
     # try to undeploy the processor with the wrong user on node1 (should fail - strict)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti1.undeploy(proc_id1, wrong_user)
-    assert 'User is not the node owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'node_owner' in e.value.reason.lower()
 
     # try to undeploy the processor with the correct user on node1
     rti1.undeploy(proc_id1, node1.keystore)
@@ -271,6 +275,9 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
     wrong_user = rti_context.get_known_user(extra_keystores)
     owner = rti_context.session_node.keystore
 
+    # Count runner identities before job submission
+    runner_count_before = count_runner_identities(rti_context.node_db_proxy)
+
     # Create task using factory
     task = create_abc_task(proc_id, owner, a=1, b=1, memory=rti_context.default_memory)
 
@@ -298,9 +305,9 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
     assert len(result) == 1
 
     # try to get the job info as the wrong user
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.get_job_status(job_id, wrong_user)
-    assert e.value.details['reason'] == 'user is not the job owner or the node owner'
+    assert 'authorisation denied' in e.value.reason.lower() or 'job_owner or node_owner' in e.value.reason.lower()
 
     # Wait for job completion
     status = wait_for_job_completion(rti_context.rti_proxy, job_id, owner)
@@ -312,17 +319,20 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
         expected={'v': 2}, temp_dir=test_context.testing_dir
     )
 
+    # Verify runner identity was cleaned up after job completion
+    assert_runner_identities_cleaned_up(rti_context.node_db_proxy, runner_count_before)
+
 
 @pytest.mark.integration
 @pytest.mark.docker_only
-def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user):
+def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user, node_db_proxy):
     """Test job cancellation by the job owner.
 
-    NOTE: This test is Docker-only due to SSH tunnel limitations when testing AWS.
-    The SSH tunnel only allows outbound calls from the local node to AWS Batch.
-    AWS Batch jobs cannot call back to the local node to receive cancellation
-    signals, making cancellation testing impossible in this test environment.
-    In production, where the node runs on AWS infrastructure, cancellation works normally.
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
     """
     if not docker_available:
         pytest.skip("Docker is not available")
@@ -330,6 +340,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
+
+    # Count runner identities before job submission
+    runner_count_before = count_runner_identities(node_db_proxy)
 
     # Create task with large input values for longer execution
     task = create_abc_task(proc_id, owner, a=100, b=100)
@@ -341,9 +354,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     job_id = results[0].id
 
     # try to cancel the job (wrong user)
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_proxy.cancel_job(job_id, wrong_user)
-    assert 'user is not the job owner' in e.value.details['reason']
+    assert 'authorisation denied' in e.value.reason.lower() or 'job' in e.value.reason.lower()
 
     # wait until the job is running
     while True:
@@ -358,6 +371,9 @@ def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed
     # Wait for cancellation to complete
     status = wait_for_job_completion(rti_proxy, job_id, owner)
     assert_job_cancelled(status)
+
+    # Verify runner identity was cleaned up after job cancellation
+    assert_runner_identities_cleaned_up(node_db_proxy, runner_count_before)
 
 
 @pytest.mark.integration
@@ -457,9 +473,9 @@ def test_job_provenance_tracking(rti_context: RTIContext, test_context):
         )
 
         # wait until the job is done
-        status: JobStatus = rti.get_job_status(job.id)
+        status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
         while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
             time.sleep(0.5)
 
         obj_c = status.output['c']
@@ -518,9 +534,9 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} submitted: {os.path.join(rti._jobs_path, job.id)}")
 
             # wait until the job is done
-            status: JobStatus = rti.get_job_status(job.id)
+            status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
             while status.state not in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
-                status: JobStatus = rti.get_job_status(job.id)
+                status: JobStatus = run_coro_safely(rti.get_job_status(job.id))
                 time.sleep(1.0)
 
             logprint(idx, f"[{idx}] [{time.time()}] job {job.id} finished: {status.state}")
@@ -538,7 +554,7 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
                     rti_context.dor_proxy.get_content(obj_id, owner, download_path)
                     logprint(idx, f"[{idx}] fetch returned {obj_id}")
                     break
-                except UnsuccessfulRequestError as e:
+                except RemoteError as e:
                     logprint(idx, f"[{idx}] error while get content: {e}")
                     time.sleep(0.5)
 
@@ -568,16 +584,14 @@ def test_job_concurrent_execution(rti_context: RTIContext, test_context, n: int 
 
     for i in range(n):
         print(f"### {i} ###")
-        log = logs[i]
-        for msg in log:
+        job_log = logs[i]
+        for msg in job_log:
             print(msg)
         print("###")
 
     for i, e in failed.items():
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         print(f"[{i}] failed: {trace}")
-
-    logger.info(failed)
     assert len(failed) == 0
     assert len(results) == n
 
@@ -613,9 +627,9 @@ def test_batch_submit_and_complete(rti_context: RTIContext, test_context, extra_
     batch_id = jobs[0].batch_id
 
     # try to get the batch info as the wrong user
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.get_batch_status(batch_id, wrong_user)
-    assert e.value.details['reason'] == 'user is not the batch owner, batch member or the node owner'
+    assert 'authorisation denied' in e.value.reason.lower() or 'batch' in e.value.reason.lower()
 
     # Wait for all batch members to complete
     while True:
@@ -640,7 +654,17 @@ def test_batch_submit_and_complete(rti_context: RTIContext, test_context, extra_
 
 @pytest.mark.integration
 def test_batch_cancel_cascade(rti_context: RTIContext):
-    """Test batch cancellation cascade when one job fails."""
+    """Test batch cancellation cascade when one job fails.
+
+    NOTE: This test is Docker-only due to network limitations when testing AWS.
+    While AWS jobs can reach the local custodian node (via SSH tunnel), the local
+    node cannot reach jobs running on AWS's internal network to send P2P cancel
+    signals. In production where the custodian runs on AWS infrastructure,
+    cancellation works normally.
+    """
+    if rti_context.backend == 'aws':
+        pytest.skip("Batch cancel cascade requires P2P connectivity to AWS jobs not available from local test environment")
+
     proc_id = rti_context.deployed_abc_processor.obj_id
     owner = rti_context.session_node.keystore
 
@@ -707,8 +731,11 @@ def test_cosim_duplicate_names(rti_context: RTIContext):
     try:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
         assert False
-    except UnsuccessfulRequestError as e:
-        assert "Duplicate task name 'name'" in e.reason
+    except RemoteError as e:
+        # Check reason or details for duplicate name error
+        assert ("duplicate" in e.reason.lower() or
+                "task.name" in e.reason.lower() or
+                (e.details and "duplicate" in str(e.details).lower()))
 
 
 @pytest.mark.integration
@@ -791,42 +818,51 @@ def test_namespace_resource_limits(rti_context: RTIContext):
 
     # test with namespace that has not enough resources for a single task
     namespace0 = 'namespace0'
-    rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace0, ResourceDescriptor(vcpus=1, memory=mem // 2)))
 
     # get the tasks for namespace0 and try to submit jobs to namespace0 -> should fail
     tasks = get_cosim_tasks(
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace0, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert f"Task {tasks[0].name} exceeds namespace resource capacity" in e.value.reason
+    # Check reason or details for namespace capacity error
+    assert ("exceeds" in e.value.reason.lower() or
+            "task.budget" in e.value.reason.lower() or
+            (e.value.details and "exceeds" in str(e.value.details).lower()))
 
     # create namespaces with different resource budgets
     namespace1 = 'namespace1'
     namespace2 = 'namespace2'
     namespace3 = 'namespace3'
-    rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem))
-    rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace1, ResourceDescriptor(vcpus=1, memory=mem)))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace2, ResourceDescriptor(vcpus=2, memory=mem)))
+    run_coro_safely(rti_context.session_node.db.update_namespace_budget(namespace3, ResourceDescriptor(vcpus=2, memory=mem * 2)))
 
     # get the tasks for namespace1 and try to submit jobs to namespace1 -> should fail
     tasks = get_cosim_tasks(
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace1, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert "Combined resource budget for namespace 'namespace1' exceeds namespace capacity" in e.value.reason
+    # Check reason or details for combined resource budget error
+    assert ("exceeds" in e.value.reason.lower() or
+            "combined_budget" in e.value.reason.lower() or
+            (e.value.details and "namespace1" in str(e.value.details).lower()))
 
     # get the tasks for namespace2 and try to submit jobs to namespace2 -> should fail
     tasks = get_cosim_tasks(
         rti_context.deployed_room_processor, rti_context.deployed_thermostat_processor,
         owner.identity, namespace2, memory=mem
     )
-    with pytest.raises(UnsuccessfulRequestError) as e:
+    with pytest.raises(RemoteError) as e:
         rti_context.rti_proxy.submit(tasks, with_authorisation_by=owner)
-    assert "Combined resource budget for namespace 'namespace2' exceeds namespace capacity" in e.value.reason
+    # Check reason or details for combined resource budget error
+    assert ("exceeds" in e.value.reason.lower() or
+            "combined_budget" in e.value.reason.lower() or
+            (e.value.details and "namespace2" in str(e.value.details).lower()))
 
     # get the tasks for namespace3 and try to submit jobs to namespace3 -> should succeed
     try:

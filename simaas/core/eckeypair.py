@@ -7,9 +7,9 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from simaas.core.keypair import KeyPair
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'core')
 
 
 class ECKeyPair(KeyPair):

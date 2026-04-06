@@ -2,30 +2,27 @@ import getpass
 import hashlib
 import json
 import os
-import shutil
 import struct
-import subprocess
 import tempfile
-import traceback
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, List, Dict
 
 from InquirerPy.base import Choice
 from dotenv import load_dotenv
 from git import Repo, InvalidGitRepositoryError, NoSuchPathError
 from pydantic import BaseModel
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, load_keystore, \
     default_if_missing, use_env_or_prompt_if_missing, label_data_object, prompt_for_selection
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
-from simaas.helpers import docker_export_image, determine_default_rest_address, docker_local_arch, docker_client, \
-    is_valid_new_file
+from simaas.core.image import clone_repository, build_processor_image
+from simaas.helpers import docker_export_image, determine_default_rest_address, is_valid_new_file
 from simaas.nodedb.api import NodeDBProxy
 
-logger = Logging.get('cli')
+log = get_logger('simaas.cli', 'cli')
 
 
 class PDIMetaInformation(BaseModel):
@@ -52,7 +49,7 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
             missing.append(required)
 
     if missing:
-        raise CLIRuntimeError(f"Processor folder is missing files: {missing}")
+        raise CLIError(f"Processor folder is missing files: {missing}")
 
     # ------------------------------------------------------
     # 2) Read descriptor
@@ -62,7 +59,7 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
         try:
             descriptor = ProcessorDescriptor.model_validate(json.load(f))
         except Exception as e:
-            raise CLIRuntimeError(f"Cannot read processor descriptor at {descriptor_path}: {e}")
+            raise CLIError(f"Cannot read processor descriptor at {descriptor_path}: {e}")
 
     # ------------------------------------------------------
     # 3) Calculate content hash
@@ -145,128 +142,6 @@ def inspect_processor_path(proc_path: str) -> PDIMetaInformation:
         )
 
 
-def clone_repository(repository_url: str, repository_path: str, commit_id: str = None,
-                     credentials: Optional[Tuple[str, str]] = None, simulate_only: bool = False) -> int:
-    # if we don't simulate, we may to delete and actually clone the repo
-    if not simulate_only:
-        original_url = repository_url
-
-        # do we have credentials? inject it into the repo URL
-        if credentials:
-            idx = repository_url.index('github.com')
-            url0 = repository_url[:idx]
-            url1 = repository_url[idx:]
-            repository_url = f"{url0}{credentials[0]}:{credentials[1]}@{url1}"
-
-        try:
-            # does the destination already exist?
-            try:
-                shutil.rmtree(repository_path)
-            except OSError as e:
-                logger.warning(f"Failed to remove directory {repository_path}: {e}")
-
-            # clone the repo
-            Repo.clone_from(repository_url, repository_path)
-
-        except Exception as e:
-            raise CLIRuntimeError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
-
-    try:
-        # checkout a specific commit
-        repo = Repo(repository_path)
-        repo.git.checkout(commit_id)
-
-        # determine the commit timestamp
-        commit = repo.commit(commit_id)
-        commit_timestamp = commit.authored_datetime.timestamp()
-
-        return int(commit_timestamp)
-
-    except Exception as e:
-        raise CLIRuntimeError(reason=f"Failed to checkout '{commit_id}'", details={'exception': str(e)})
-
-
-def build_processor_image(processor_path: str, simaas_path: str, image_name: str, credentials: Tuple[str, str] = None,
-                          force_build: bool = False, platform: Optional[str] = None) -> bool:
-    # does the processor path exist?
-    if not os.path.isdir(processor_path):
-        raise CLIRuntimeError(f"Processor path {processor_path} does not exist or not a directory")
-
-    # check if the image already exists
-    with docker_client() as client:
-        image_existed = False
-        try:
-            # get a list of all images and check if it has the name.
-            for image in client.images.list():
-                if image_name in image.tags:
-                    # if we are forced to build a new image, delete the existing one first
-                    if force_build:
-                        client.images.remove(image.id, force=True)
-
-                    image_existed = True
-                    break
-
-        except Exception as e:
-            raise CLIRuntimeError("Deleting existing docker image failed.", details={
-                'exception': e
-            })
-
-    # build the processor docker image
-    if force_build or not image_existed:
-        with tempfile.TemporaryDirectory() as tempdir:
-            # copy the processor to the temp location
-            context_name = os.path.basename(os.path.normpath(processor_path))
-            context_path = os.path.join(tempdir, context_name)
-            shutil.copytree(processor_path, context_path)
-
-            # copy the sim-aas-middleware repo into the temp context location
-            simaas_dst_path = os.path.join(context_path, 'sim-aas-middleware')
-            shutil.copytree(simaas_path, simaas_dst_path)
-
-            credentials_path = os.path.join(tempdir, "credentials")
-            try:
-                # assemble the command
-                command: List[str] = ['docker', 'build', '--no-cache']
-                if platform:
-                    command.extend(['--platform', platform])
-                if credentials:
-                    # write the credentials to file (temporarily)
-                    with open(credentials_path, 'w') as f:
-                        f.write(f"{credentials[0]}:{credentials[1]}")
-
-                    command.extend(['--secret', f'id=git_credentials,src={credentials_path}'])
-                command.extend(['-t', image_name, '.'])
-
-                env = os.environ.copy()
-                env['DOCKER_BUILDKIT'] = '1'
-
-                subprocess.run(command, cwd=context_path, check=True, capture_output=True, text=True, env=env)
-
-            except subprocess.CalledProcessError as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(e.stderr)
-                raise CLIRuntimeError("Creating docker image failed", details={
-                    'stdout': e.stdout,
-                    'stderr': e.stderr,
-                    'exception': str(e),
-                    'trace': trace
-                })
-
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(trace)
-                raise CLIRuntimeError(f"Creating docker image failed: {e}", details={
-                    'exception': str(e),
-                    'trace': trace
-                })
-
-            finally:
-                if os.path.isfile(credentials_path):
-                    os.remove(credentials_path)
-
-    return image_existed
-
-
 def build_pdi_file(args: dict) -> dict:
     # inspect the processor path
     pdi_meta: PDIMetaInformation = inspect_processor_path(args['proc_path'])
@@ -331,7 +206,7 @@ def build_pdi_file(args: dict) -> dict:
 class PDIBuildLocal(CLICommand):
     default_force_build = False
     default_keep_image = True
-    default_arch = docker_local_arch()
+    default_arch = 'linux/amd64'
 
     def __init__(self):
         super().__init__('build-local', 'build a PDI file from local source', arguments=[
@@ -369,9 +244,9 @@ class PDIBuildLocal(CLICommand):
         if isinstance(args['proc_path'], list) and args['proc_path']:
             args['proc_path'] = args['proc_path'][0]
         if not args['proc_path']:
-            raise CLIRuntimeError("Processor path missing")
+            raise CLIError("Processor path missing")
         elif not os.path.isdir(args['proc_path']):
-            raise CLIRuntimeError(f"Processor path not found or not a directory: {args['proc_path']}")
+            raise CLIError(f"Processor path not found or not a directory: {args['proc_path']}")
 
         # check the pdi_path
         pdi_path = args['pdi_path'][0] if isinstance(args['pdi_path'], list) and args['pdi_path'] else args['pdi_path']
@@ -379,11 +254,11 @@ class PDIBuildLocal(CLICommand):
         if pdi_path.is_dir():
             pdi_path = pdi_path.resolve()
         elif pdi_path.is_file():
-            raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (file already exists at this location)")
+            raise CLIError(f"PDI path invalid: {pdi_path} (file already exists at this location)")
         elif is_valid_new_file(pdi_path):
             pdi_path = pdi_path.parent.resolve() / pdi_path.name
         else:
-            raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
+            raise CLIError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
         args['pdi_path'] = str(pdi_path)
 
         return build_pdi_file(args)
@@ -392,7 +267,7 @@ class PDIBuildLocal(CLICommand):
 class PDIBuildGithub(CLICommand):
     default_force_build = False
     default_keep_image = True
-    default_arch = docker_local_arch()
+    default_arch = 'linux/amd64'
 
     def __init__(self):
         super().__init__('build-github', 'build a PDI file from Github source', arguments=[
@@ -435,11 +310,11 @@ class PDIBuildGithub(CLICommand):
         if pdi_path.is_dir():
             pdi_path = pdi_path.resolve()
         elif pdi_path.is_file():
-            raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (file already exists at this location)")
+            raise CLIError(f"PDI path invalid: {pdi_path} (file already exists at this location)")
         elif is_valid_new_file(pdi_path):
             pdi_path = pdi_path.parent.resolve() / pdi_path.name
         else:
-            raise CLIRuntimeError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
+            raise CLIError(f"PDI path invalid: {pdi_path} (invalid file name or location)")
         args['pdi_path'] = str(pdi_path)
 
         prompt_if_missing(args, 'repository', prompt_for_string, message="Enter URL of the repository:")
@@ -468,7 +343,7 @@ class PDIBuildGithub(CLICommand):
             # check the proc_path
             args['proc_path'] = os.path.join(repo_path, args['proc_path'])
             if not os.path.isdir(args['proc_path']):
-                raise CLIRuntimeError(f"Processor path not found or not a directory: {args['proc_path']}")
+                raise CLIError(f"Processor path not found or not a directory: {args['proc_path']}")
 
             return build_pdi_file(args)
 
@@ -502,13 +377,13 @@ class PDIImport(CLICommand):
         node_db = NodeDBProxy(args['address'])
         node_info = node_db.get_node()
         if not node_info.dor_service:
-            raise CLIRuntimeError(f"Node at {args['address']} does not support DOR capabilities")
+            raise CLIError(f"Node at {args['address']} does not support DOR capabilities")
 
         # check if the pdi_path exists
         if isinstance(args['pdi_path'], list) and args['pdi_path']:
             args['pdi_path'] = args['pdi_path'][0]
         if not os.path.isfile(args['pdi_path']):
-            raise CLIRuntimeError(f"Invalid pdi_path ('{args['pdi_path']}' does not exist or not a file)")
+            raise CLIError(f"Invalid pdi_path ('{args['pdi_path']}' does not exist or not a file)")
 
         path = Path(args['pdi_path'])
         tmp_file = tempfile.NamedTemporaryFile(delete=False)
@@ -522,7 +397,7 @@ class PDIImport(CLICommand):
             f.seek(-(LEN_SIZE + MARKER_LEN), 2)
             marker = f.read(MARKER_LEN)
             if marker != MARKER:
-                raise CLIRuntimeError("Invalid PDI file (no marker found)")
+                raise CLIError("Invalid PDI file (no marker found)")
 
             # read metadata
             f.seek(-(LEN_SIZE + MARKER_LEN + length), 2)
@@ -531,7 +406,7 @@ class PDIImport(CLICommand):
             try:
                 PDIMetaInformation.model_validate(meta)
             except Exception:
-                raise CLIRuntimeError(f"Invalid PDI meta information: {json.dumps(meta, indent=2)}")
+                raise CLIError(f"Invalid PDI meta information: {json.dumps(meta, indent=2)}")
 
             # create temp file with only the original data
             data_size = path.stat().st_size - (length + MARKER_LEN + LEN_SIZE)
@@ -589,13 +464,13 @@ class PDIExport(CLICommand):
         node_db = NodeDBProxy(args['address'])
         node_info = node_db.get_node()
         if not node_info.dor_service:
-            raise CLIRuntimeError(f"Node at {args['address']} does not support DOR capabilities")
+            raise CLIError(f"Node at {args['address']} does not support DOR capabilities")
 
         # get a list of all PDIs for that DOR
         dor = DORProxy(args['address'])
         result: List[DataObject] = dor.search(data_type='ProcessorDockerImage', data_format='tar')
         if not result:
-            raise CLIRuntimeError(f"No PDI objects found in DOR at {args['address']}")
+            raise CLIError(f"No PDI objects found in DOR at {args['address']}")
 
         # allow the user to select a PDI if non specified
         if not args.get('obj_id'):
@@ -605,7 +480,7 @@ class PDIExport(CLICommand):
         # check if the obj id is valid / can be found in DOR
         result: Dict[str, DataObject] = {item.obj_id: item for item in result}
         if args['obj_id'] not in result:
-            raise CLIRuntimeError(f"PDI object '{args['obj_id']}' not found.")
+            raise CLIError(f"PDI object '{args['obj_id']}' not found.")
         meta: DataObject = result[args['obj_id']]
 
         # check if the destination already is a valid directory or file path
@@ -615,9 +490,9 @@ class PDIExport(CLICommand):
         if os.path.isdir(pdi_path):
             pdi_path = os.path.join(pdi_path, f"{meta.tags['proc_descriptor']['name']}_{meta.tags['content_hash']}.pdi")
         elif os.path.isfile(pdi_path):
-            raise CLIRuntimeError(f"Invalid pdi_path '{args['pdi_path']}' (file already exists)")
+            raise CLIError(f"Invalid pdi_path '{args['pdi_path']}' (file already exists)")
         elif not is_valid_new_file(pdi_path):
-            raise CLIRuntimeError(f"Invalid pdi_path '{args['pdi_path']}'")
+            raise CLIError(f"Invalid pdi_path '{args['pdi_path']}'")
 
         # download the PDI
         dor.get_content(args['obj_id'], with_authorisation_by=keystore, download_path=pdi_path)

@@ -19,6 +19,7 @@ from simaas.core.processor import ProcessorBase, ProgressListener
 from simaas.dor.api import DORInterface
 from simaas.dor.schemas import DataObject, DataObjectProvenance, DataObjectRecipe, DORStatistics, TagValueType
 from simaas.namespace.api import Namespace
+from simaas.namespace.sync import SyncNamespaceDOR, SyncNamespaceRTI
 from simaas.nodedb.schemas import NodeInfo
 from simaas.rti.api import RTIInterface
 from simaas.rti.schemas import Processor, JobStatus, Task, Job, Severity, BatchStatus
@@ -30,7 +31,7 @@ class DummyProgressListener(ProgressListener):
     """Progress listener for testing processor execution."""
 
     def __init__(
-            self, job_path: str, status: JobStatus, dor: DORInterface, expected_messages: Optional[List[str]] = None
+            self, job_path: str, status: JobStatus, dor: SyncNamespaceDOR, expected_messages: Optional[List[str]] = None
     ):
         self._job_path = job_path
         self._status = status
@@ -71,15 +72,15 @@ class DummyNamespace(Namespace):
         def type(self) -> str:
             return 'dummy'
 
-        def search(self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
+        async def search(self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
                    data_type: Optional[str] = None, data_format: Optional[str] = None,
                    c_hashes: Optional[List[str]] = None) -> List[DataObject]:
             pass
 
-        def statistics(self) -> DORStatistics:
+        async def statistics(self) -> DORStatistics:
             pass
 
-        def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
+        async def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
                 creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
                 content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
                 tags: Optional[Dict[str, TagValueType]] = None,
@@ -114,32 +115,32 @@ class DummyNamespace(Namespace):
             self._meta[obj_id] = meta
             return meta
 
-        def remove(self, obj_id: str) -> Optional[DataObject]:
+        async def remove(self, obj_id: str) -> Optional[DataObject]:
             pass
 
-        def get_meta(self, obj_id: str) -> Optional[DataObject]:
+        async def get_meta(self, obj_id: str) -> Optional[DataObject]:
             return self._meta[obj_id]
 
-        def get_content(self, obj_id: str, content_path: str) -> None:
+        async def get_content(self, obj_id: str, content_path: str) -> None:
             with open(content_path, 'w') as f:
                 json.dump(self._content[obj_id], f, indent=2)
 
-        def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
+        async def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
             pass
 
-        def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
+        async def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
             pass
 
-        def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
+        async def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
             pass
 
-        def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
+        async def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
             pass
 
-        def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
+        async def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
             pass
 
-        def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
+        async def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
             pass
 
     class DummyRTI(RTIInterface):
@@ -201,13 +202,13 @@ class DummyNamespace(Namespace):
         def type(self) -> str:
             return 'dummy'
 
-        def get_all_procs(self) -> List[Processor]:
+        async def get_all_procs(self) -> List[Processor]:
             return list(self._procs.values())
 
-        def get_proc(self, proc_id: str) -> Optional[Processor]:
+        async def get_proc(self, proc_id: str) -> Optional[Processor]:
             return self._procs.get(proc_id, None)
 
-        def submit(self, tasks: List[Task]) -> List[Job]:
+        async def submit(self, tasks: List[Task]) -> List[Job]:
             def execute() -> None:
                 try:
                     with tempfile.TemporaryDirectory() as wd_path:
@@ -275,24 +276,30 @@ class DummyNamespace(Namespace):
 
             return result
 
-        def get_job_status(self, job_id: str) -> JobStatus:
+        async def get_job_status(self, job_id: str) -> JobStatus:
             return self._status[job_id]
 
         def put_batch_status(self, batch_status: BatchStatus):
             self._batch[batch_status.batch_id] = batch_status
 
-        def get_batch_status(self, batch_id: str) -> BatchStatus:
+        async def get_batch_status(self, batch_id: str) -> BatchStatus:
             return self._batch.get(batch_id)
 
-        def job_cancel(self, job_id: str) -> JobStatus:
+        async def job_cancel(self, job_id: str) -> JobStatus:
             self._instances[job_id].interrupt()
             self._status[job_id].state = JobStatus.State.CANCELLED
 
-        def job_purge(self, job_id: str) -> JobStatus:
+        async def job_purge(self, job_id: str) -> JobStatus:
             pass
 
     def __init__(self):
-        super().__init__(DummyNamespace.DummyDOR(), DummyNamespace.DummyRTI(self))
+        async_dor = DummyNamespace.DummyDOR()
+        async_rti = DummyNamespace.DummyRTI(self)
+        super().__init__(async_dor, async_rti)
+        self._async_dor = async_dor
+        self._async_rti = async_rti
+        self._sync_dor = SyncNamespaceDOR(async_dor)
+        self._sync_rti = SyncNamespaceRTI(async_rti)
         self._keystore = Keystore.new('dummy')
 
     def id(self) -> str:
@@ -306,6 +313,19 @@ class DummyNamespace(Namespace):
 
     def keystore(self) -> Keystore:
         return self._keystore
+
+    @property
+    def dor(self) -> SyncNamespaceDOR:
+        return self._sync_dor
+
+    @property
+    def rti(self) -> SyncNamespaceRTI:
+        return self._sync_rti
+
+    @property
+    def internal_rti(self) -> 'DummyNamespace.DummyRTI':
+        """Access internal async RTI for test setup (e.g., put_batch_status)."""
+        return self._async_rti
 
     def destroy(self) -> None:
         pass

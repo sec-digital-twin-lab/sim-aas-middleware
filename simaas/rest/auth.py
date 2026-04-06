@@ -8,7 +8,7 @@ from fastapi import Request
 from simaas.rti.schemas import Task
 
 from simaas.core.identity import Identity
-from simaas.rest.exceptions import AuthorisationFailedError
+from simaas.core.errors import AuthorisationError
 
 
 def verify_authorisation_token(identity: Identity, signature: str, url: str, body: dict = None) -> bool:
@@ -29,19 +29,21 @@ class VerifyAuthorisation:
     async def __call__(self, request: Request) -> (Identity, dict):
         # check if there is the required saasauth header information
         if 'saasauth-iid' not in request.headers or 'saasauth-signature' not in request.headers:
-            raise AuthorisationFailedError({
-                'reason': 'saasauth information missing',
-                'header_keys': list(request.headers.keys())
-            })
+            raise AuthorisationError(
+                identity_id='unknown',
+                operation='authenticate',
+                hint='saasauth header information missing'
+            )
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
-        identity: Identity = self.node.db.get_identity(iid)
+        identity: Identity = await self.node.db.get_identity(iid)
         if identity is None:
-            raise AuthorisationFailedError({
-                'reason': 'unknown identity',
-                'iid': iid
-            })
+            raise AuthorisationError(
+                identity_id=iid,
+                operation='authenticate',
+                hint='unknown identity'
+            )
 
         # verify the signature
         signature = request.headers['saasauth-signature']
@@ -49,14 +51,14 @@ class VerifyAuthorisation:
         body = body.decode('utf-8')
         body = json.loads(body) if body != '' else {}
         if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", body):
-            raise AuthorisationFailedError({
-                'reason': 'invalid signature',
-                'iid': iid,
-                'signature': signature
-            })
+            raise AuthorisationError(
+                identity_id=iid,
+                operation='verify_signature',
+                hint='invalid signature'
+            )
 
         # touch the identity
-        self.node.db.touch_identity(identity)
+        await self.node.db.touch_identity(identity)
 
         return identity, body
 
@@ -67,7 +69,7 @@ class VerifyIsOwner:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-        self.node.check_dor_ownership(obj_id, identity)
+        await self.node.check_dor_ownership(obj_id, identity)
 
 
 class VerifyUserHasAccess:
@@ -76,7 +78,7 @@ class VerifyUserHasAccess:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-        self.node.check_dor_has_access(obj_id, identity)
+        await self.node.check_dor_has_access(obj_id, identity)
 
 
 class VerifyTasksSupported:
@@ -85,8 +87,8 @@ class VerifyTasksSupported:
 
     async def __call__(self, tasks: List[Task]):
         for task in tasks:
-            self.node.check_rti_is_deployed(task.proc_id)
-            self.node.check_rti_not_busy(task.proc_id)
+            await self.node.check_rti_is_deployed(task.proc_id)
+            await self.node.check_rti_not_busy(task.proc_id)
 
 
 class VerifyProcessorDeployed:
@@ -94,7 +96,7 @@ class VerifyProcessorDeployed:
         self.node = node
 
     async def __call__(self, proc_id: str):
-        self.node.check_rti_is_deployed(proc_id)
+        await self.node.check_rti_is_deployed(proc_id)
 
 
 class VerifyProcessorNotBusy:
@@ -102,7 +104,7 @@ class VerifyProcessorNotBusy:
         self.node = node
 
     async def __call__(self, proc_id: str):
-        self.node.check_rti_not_busy(proc_id)
+        await self.node.check_rti_not_busy(proc_id)
 
 
 class VerifyUserIsJobOwnerOrNodeOwner:
@@ -111,7 +113,7 @@ class VerifyUserIsJobOwnerOrNodeOwner:
 
     async def __call__(self, job_id: str, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        self.node.check_rti_job_or_node_owner(job_id, identity)
+        await self.node.check_rti_job_or_node_owner(job_id, identity)
 
 
 class VerifyUserIsBatchOwnerOrNodeOwner:
@@ -120,7 +122,7 @@ class VerifyUserIsBatchOwnerOrNodeOwner:
 
     async def __call__(self, batch_id: str, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        self.node.check_rti_batch_or_node_owner(batch_id, identity)
+        await self.node.check_rti_batch_or_node_owner(batch_id, identity)
 
 
 class VerifyUserIsNodeOwner:
@@ -129,7 +131,7 @@ class VerifyUserIsNodeOwner:
 
     async def __call__(self, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        self.node.check_rti_node_owner(identity)
+        await self.node.check_rti_node_owner(identity)
 
 
 def make_depends(method, node) -> List[Any]:

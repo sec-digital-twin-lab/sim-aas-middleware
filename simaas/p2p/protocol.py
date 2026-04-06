@@ -2,20 +2,18 @@ import asyncio
 import os.path
 import random
 import tempfile
-import traceback
 from typing import Optional, Tuple
 
 from pydantic import BaseModel
 
 from simaas.core.helpers import get_timestamp_now
-from simaas.p2p.exceptions import PeerUnavailableError
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import NetworkError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 
-logger = Logging.get('p2p.protocol')
+log = get_logger('simaas.p2p', 'p2p')
 
 
 class LatencyMessage(BaseModel):
@@ -63,14 +61,10 @@ class P2PLatency(P2PProtocol):
                 latency = reply.t_now - t0
                 return latency, attempt
 
-            except PeerUnavailableError:
+            except NetworkError:
                 await asyncio.sleep(0.5)
 
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                logger.error(f"P2P operation failed: {trace}")
-
-        raise RTIException(f"Latency test failed after {max_attempts} attempts.")
+        raise OperationError(operation='latency_test', cause=f'failed after {max_attempts} attempts')
 
     async def handle(
             self, request: LatencyMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
@@ -143,14 +137,10 @@ class P2PThroughput(P2PProtocol):
 
                     return upload, download, attempt
 
-                except PeerUnavailableError:
+                except NetworkError:
                     await asyncio.sleep(0.5)
 
-                except Exception as e:
-                    trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                    logger.error(f"P2P operation failed: {trace}")
-
-            raise RTIException(f"Throughput test failed after {max_attempts} attempts.")
+            raise OperationError(operation='throughput_test', cause=f'failed after {max_attempts} attempts')
 
     async def handle(
             self, request: ThroughputMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None

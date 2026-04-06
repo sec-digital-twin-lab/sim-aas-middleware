@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import signal
@@ -10,15 +11,12 @@ from InquirerPy.base import Choice
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_for_confirmation, prompt_if_missing, \
     default_if_missing, initialise_storage_folder, prompt_for_selection, load_keystore, extract_address, \
     use_env_or_prompt_if_missing
-from simaas.core.exceptions import SaaSRuntimeException
-from simaas.core.logging import Logging
+from simaas.core.errors import _BaseError
 from simaas.helpers import determine_default_rest_address, determine_default_p2p_address
 from simaas.node.base import Node
 from simaas.node.default import DefaultNode
 from simaas.plugins import discover_plugins, get_plugin_class
 from simaas.plugins import builtins
-
-logger = Logging.get('cli')
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
@@ -60,7 +58,7 @@ class WaitForTermination:
             print("Shutting down the node...")
             self._node.shutdown()
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             print(f"Exception while shutting down node: {e}")
 
         except Exception as e:
@@ -81,8 +79,48 @@ class Service(CLICommand):
     default_strict_deployment = True
     default_bind_all_address = False
 
+    # Profile configurations
+    PROFILES = {
+        'dev': {
+            'description': 'Local development: localhost, all plugins enabled, verbose logging',
+            'dor': 'fs',
+            'rti': 'docker',
+            'bind-all-address': False,
+            'retain-job-history': True,
+            'strict-deployment': False,
+        },
+        'prod': {
+            'description': 'Production: bind all interfaces, default plugins',
+            'dor': 'fs',
+            'rti': 'docker',
+            'bind-all-address': True,
+            'retain-job-history': False,
+            'strict-deployment': True,
+        },
+        'minimal': {
+            'description': 'Minimal: no DOR, no RTI, just P2P networking',
+            'dor': 'none',
+            'rti': 'none',
+            'bind-all-address': False,
+            'retain-job-history': False,
+            'strict-deployment': True,
+        },
+        'storage': {
+            'description': 'Storage node: DOR only, no RTI',
+            'dor': 'fs',
+            'rti': 'none',
+            'bind-all-address': False,
+            'retain-job-history': False,
+            'strict-deployment': True,
+        },
+    }
+
     def __init__(self):
         super().__init__('service', 'start a node as service provider', arguments=[
+            Argument('--profile', dest='profile', action='store',
+                     choices=list(Service.PROFILES.keys()),
+                     help="use a predefined profile: " + ", ".join(
+                         [f"'{k}' ({v['description']})" for k, v in Service.PROFILES.items()])),
             Argument('--use-defaults', dest="use-defaults", action='store_const', const=True,
                      help="use defaults in case arguments are not specified (or prompt otherwise)"),
             Argument('--datastore', dest='datastore', action='store',
@@ -124,6 +162,26 @@ class Service(CLICommand):
         if args.get('plugins'):
             plugin_paths.extend(args['plugins'])
         plugin_registry = discover_plugins(plugin_paths)
+
+        # Apply profile settings if specified
+        if args.get('profile'):
+            profile = Service.PROFILES[args['profile']]
+            print(f"Using profile '{args['profile']}': {profile['description']}")
+
+            # Apply profile defaults (but allow explicit args to override)
+            if args.get('dor') is None:
+                args['dor'] = profile['dor']
+            if args.get('rti') is None:
+                args['rti'] = profile['rti']
+            if args.get('bind-all-address') is None:
+                args['bind-all-address'] = profile['bind-all-address']
+            if args.get('retain-job-history') is None:
+                args['retain-job-history'] = profile['retain-job-history']
+            if args.get('strict-deployment') is None:
+                args['strict-deployment'] = profile['strict-deployment']
+
+            # Set use-defaults to apply remaining defaults
+            args['use-defaults'] = True
 
         if args['use-defaults']:
             if self.default_simaas_repo_path == '':
@@ -212,15 +270,18 @@ class Service(CLICommand):
             raise ValueError(f"RTI plugin '{args['rti']}' not found. Available: {list(plugin_registry['rti'].keys())}")
 
         # create a node instance
-        node = DefaultNode.create(keystore, args['datastore'],
-                                  p2p_address=p2p_service_address,
-                                  rest_address=rest_service_address,
-                                  boot_node_address=boot_node_address,
-                                  dor_plugin_class=dor_plugin_class,
-                                  rti_plugin_class=rti_plugin_class,
-                                  retain_job_history=args['retain-job-history'],
-                                  strict_deployment=args['strict-deployment'],
-                                  bind_all_address=args['bind-all-address'])
+        node = DefaultNode(keystore, args['datastore'], enable_db=True,
+                           dor_plugin_class=dor_plugin_class, rti_plugin_class=rti_plugin_class,
+                           retain_job_history=args['retain-job-history'],
+                           strict_deployment=args['strict-deployment'])
+
+        # startup and join the network using single event loop
+        async def _startup_and_join():
+            await node.startup(p2p_service_address, rest_address=rest_service_address,
+                               bind_all_address=args['bind-all-address'])
+            await node.join_network(boot_node_address)
+
+        asyncio.run(_startup_and_join())
 
         # print info message
         if args['rti'] == 'none':

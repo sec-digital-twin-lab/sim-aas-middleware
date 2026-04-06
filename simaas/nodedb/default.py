@@ -1,6 +1,5 @@
-import asyncio
 import threading
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from sqlalchemy import Column, String, BigInteger, Integer, Boolean
 from sqlalchemy import create_engine
@@ -9,15 +8,21 @@ from sqlalchemy_json import NestedMutableJson
 
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.nodedb.api import NodeDBService
-from simaas.nodedb.exceptions import InvalidIdentityError, IdentityNotFoundError, NamespaceNotFoundError, \
-    NodeDBException
+from simaas.core.errors import NotFoundError, ValidationError, OperationError
 from simaas.nodedb.protocol import NodeDBSnapshot, P2PCancelNamespaceReservation, P2PReserveNamespaceResources, \
     P2PUpdateNamespaceBudget
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
-logger = Logging.get('nodedb.service')
+log = get_logger('simaas.nodedb', 'nodedb')
+
+
+def _parse_rest_address(addr_str: str) -> Tuple[str, int]:
+    """Parse a REST address string 'host:port' into a tuple (host, port)."""
+    host, port = addr_str.split(':')
+    return (host, int(port))
+
 
 Base = declarative_base()
 
@@ -66,7 +71,7 @@ class DefaultNodeDBService(NodeDBService):
         Base.metadata.create_all(self._engine)
         self._Session = sessionmaker(bind=self._engine)
 
-    def get_node(self) -> NodeInfo:
+    async def get_node(self) -> NodeInfo:
         """
         Retrieves information about the node.
         """
@@ -78,28 +83,31 @@ class DefaultNodeDBService(NodeDBService):
                 dor_service=record.dor_service,
                 rti_service=record.rti_service,
                 p2p_address=record.p2p_address,
-                rest_address=record.rest_address.split(':') if record.rest_address else None,
+                rest_address=_parse_rest_address(record.rest_address) if record.rest_address else None,
                 retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
                 strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
             )
 
-    def get_network(self) -> List[NodeInfo]:
+    async def get_network(self) -> List[NodeInfo]:
         """
         Retrieves information about all peers known to the node.
         """
         with self._Session() as session:
-            return [NodeInfo(
-                identity=self.get_identity(record.iid, raise_if_unknown=True),
-                last_seen=record.last_seen,
-                dor_service=record.dor_service,
-                rti_service=record.rti_service,
-                p2p_address=record.p2p_address,
-                rest_address=record.rest_address.split(':') if record.rest_address else None,
-                retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
-                strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
-            ) for record in session.query(NodeRecord).all()]
+            result = []
+            for record in session.query(NodeRecord).all():
+                result.append(NodeInfo(
+                    identity=await self.get_identity(record.iid, raise_if_unknown=True),
+                    last_seen=record.last_seen,
+                    dor_service=record.dor_service,
+                    rti_service=record.rti_service,
+                    p2p_address=record.p2p_address,
+                    rest_address=_parse_rest_address(record.rest_address) if record.rest_address else None,
+                    retain_job_history=record.retain_job_history if record.retain_job_history is not None else None,
+                    strict_deployment=record.strict_deployment if record.strict_deployment is not None else None
+                ))
+            return result
 
-    def update_network(self, node: NodeInfo) -> None:
+    async def update_network(self, node: NodeInfo) -> None:
         """
         Adds information about a node to the db. If there is already information about this node in the database, the
         db is updated accordingly.
@@ -119,18 +127,9 @@ class DefaultNodeDBService(NodeDBService):
 
             for record in conflicting_records:
                 if record.last_seen >= node.last_seen:
-                    logger.debug(f"ignoring network node update -> record with conflicting address but more recent "
-                                 f"timestamp found: "
-                                 f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                                 f"\nrecord.last_seen={record.last_seen} >= {node.last_seen}"
-                                 f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                                 f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                    log.debug("Ignoring network node update, conflicting address but more recent timestamp found", record_iid=record.iid, node_iid=node.identity.id)
                 else:
-                    logger.debug(f"deleting record with outdated and conflicting address: "
-                                 f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                                 f"\nrecord.last_seen={record.last_seen} < {node.last_seen}"
-                                 f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                                 f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                    log.debug("Deleting record with outdated and conflicting address", record_iid=record.iid, node_iid=node.identity.id)
 
                     session.query(NodeRecord).filter_by(iid=record.iid).delete()
                     session.commit()
@@ -157,13 +156,9 @@ class DefaultNodeDBService(NodeDBService):
                 session.commit()
 
             else:
-                logger.debug(f"ignoring network node update -> more recent record found: "
-                             f"\nrecord.iid={record.iid} <> {node.identity.id}"
-                             f"\nrecord.last_seen={record.last_seen} >= {node.last_seen}"
-                             f"\nrecord.p2p_address={record.p2p_address} <> {p2p_address}"
-                             f"\nrecord.rest_address={record.rest_address} <> {rest_address}")
+                log.debug("Ignoring network node update, more recent record found", record_iid=record.iid, node_iid=node.identity.id)
 
-    def remove_node_by_id(self, identity: Identity) -> None:
+    async def remove_node_by_id(self, identity: Identity) -> None:
         """
         Removes a node from the db, given its identity.
         """
@@ -171,7 +166,7 @@ class DefaultNodeDBService(NodeDBService):
             session.query(NodeRecord).filter_by(iid=identity.id).delete()
             session.commit()
 
-    def remove_node_by_address(self, address: (str, int)) -> None:
+    async def remove_node_by_address(self, address: (str, int)) -> None:
         """
         Removes a node from the db, given its address (host, port).
         """
@@ -179,7 +174,7 @@ class DefaultNodeDBService(NodeDBService):
             session.query(NodeRecord).filter_by(p2p_address=f"{address[0]}:{address[1]}").delete()
             session.commit()
 
-    def reset_network(self) -> None:
+    async def reset_network(self) -> None:
         """
         Resets the db, i.e., removes the information of all nodes in the db.
         """
@@ -187,7 +182,7 @@ class DefaultNodeDBService(NodeDBService):
             session.query(NodeRecord).filter(NodeRecord.iid != self._node.identity.id).delete()
             session.commit()
 
-    def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
+    async def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
         """
         Retrieves the identity given its id (if the node db knows about it).
         """
@@ -195,7 +190,7 @@ class DefaultNodeDBService(NodeDBService):
             record = session.query(IdentityRecord).filter_by(iid=iid).first()
 
             if raise_if_unknown and record is None:
-                raise IdentityNotFoundError(iid)
+                raise NotFoundError(resource_type='identity', resource_id=iid)
 
             return Identity(
                 id=record.iid,
@@ -209,7 +204,7 @@ class DefaultNodeDBService(NodeDBService):
                 last_seen=record.last_seen
             ) if record else None
 
-    def get_identities(self) -> List[Identity]:
+    async def get_identities(self) -> List[Identity]:
         """
         Retrieves a list of all identities known to the node.
         """
@@ -229,15 +224,13 @@ class DefaultNodeDBService(NodeDBService):
                 ) for record in records
             ]
 
-    def update_identity(self, identity: Identity) -> Identity:
+    async def update_identity(self, identity: Identity) -> Identity:
         """
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
         """
         # verify the integrity of the identity
         if not identity.verify_integrity():
-            raise InvalidIdentityError({
-                'identity': identity
-            })
+            raise ValidationError(field='identity', expected='valid signature', actual='invalid signature')
 
         # update the db
         with self._Session() as session:
@@ -256,50 +249,58 @@ class DefaultNodeDBService(NodeDBService):
                 record.name = identity.name
                 record.email = identity.email
                 record.nonce = identity.nonce
-                record.s_key = identity.s_public_key
-                record.e_key = identity.e_public_key
-                record.c_key = identity.c_public_key
+                record.s_public_key = identity.s_public_key
+                record.e_public_key = identity.e_public_key
+                record.c_public_key = identity.c_public_key
                 record.signature = identity.signature
                 record.last_seen = get_timestamp_now()
                 session.commit()
 
             else:
-                logger.debug("Ignore identity update as nonce on record is more recent.")
+                log.debug("Ignoring identity update, nonce on record is more recent")
 
-        return self.get_identity(identity.id, raise_if_unknown=True)
+        return await self.get_identity(identity.id, raise_if_unknown=True)
 
-    def get_snapshot(self, exclude: List[str] = None) -> NodeDBSnapshot:
+    async def delete_identity(self, iid: str) -> None:
+        """
+        Deletes an identity from the database if it exists.
+        """
+        with self._Session() as session:
+            session.query(IdentityRecord).filter_by(iid=iid).delete()
+            session.commit()
+
+    async def get_snapshot(self, exclude: List[str] = None) -> NodeDBSnapshot:
         """
         Retrieves a snapshot of the contents stored in the db.
         """
         # get all nodes we know of (minus the ones to exclude)
         nodes = []
-        for node in self.get_network():
+        for node in await self.get_network():
             if not exclude or node.identity.id not in exclude:
                 nodes.append(node)
 
         # get all identities we know of (minus the ones to exclude)
         identities = []
-        for identity in self.get_identities():
+        for identity in await self.get_identities():
             if not exclude or identity.id not in exclude:
                 identities.append(identity)
 
         # get all namespaces we know of
-        namespaces = self.get_namespaces()
+        namespaces = await self.get_namespaces()
 
         return NodeDBSnapshot(update_identity=identities, update_network=nodes, update_namespace=namespaces)
 
-    def touch_identity(self, identity: Identity) -> None:
+    async def touch_identity(self, identity: Identity) -> None:
         with self._Session() as session:
             # do we have the identity already on record?
             record = session.get(IdentityRecord, identity.id)
             if record is None:
-                raise IdentityNotFoundError(identity.id)
+                raise NotFoundError(resource_type='identity', resource_id=identity.id)
 
             record.last_accessed = get_timestamp_now()
             session.commit()
 
-    def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
+    async def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
         """
         Returns information about a namespace (if it exists).
         """
@@ -312,7 +313,7 @@ class DefaultNodeDBService(NodeDBService):
                 jobs=[job_id for job_id in record.jobs]
             ) if record else None
 
-    def get_namespaces(self) -> List[NamespaceInfo]:
+    async def get_namespaces(self) -> List[NamespaceInfo]:
         """
         Returns a list of all namespaces.
         """
@@ -327,54 +328,50 @@ class DefaultNodeDBService(NodeDBService):
                 ) for record in records
             ]
 
-    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    async def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
-        ns_info: NamespaceInfo = self.handle_namespace_update(name, budget)
-        for peer in self._node.db.get_network():
+        ns_info: NamespaceInfo = await self.handle_namespace_update(name, budget)
+        for peer in await self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                asyncio.run(P2PUpdateNamespaceBudget.perform(self._node, peer, name, budget))
+                await P2PUpdateNamespaceBudget.perform(self._node, peer, name, budget)
 
         return ns_info
 
-    def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
+    async def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         # try to make a resource reservation
         successful = True
-        try:
-            for peer in self._node.db.get_network():
-                if peer.identity.id == self._node.identity.id:
-                    successful = self.handle_namespace_reservation(name, job_id, resources)
-                else:
-                    successful = asyncio.run(
-                        P2PReserveNamespaceResources.perform(self._node, peer, name, job_id, resources)
-                    )
+        for peer in await self._node.db.get_network():
+            if peer.identity.id == self._node.identity.id:
+                successful = await self.handle_namespace_reservation(name, job_id, resources)
+            else:
+                successful = await P2PReserveNamespaceResources.perform(
+                    self._node, peer, name, job_id, resources
+                )
 
-                # did we encounter an issue?
-                if not successful:
-                    break
-
-        except Exception:
-            successful = False
+            # did we encounter an issue?
+            if not successful:
+                break
 
         # if there was a problem at any point of the reservation process, cancel all reservations (if any)
         if not successful:
-            for peer in self._node.db.get_network():
+            for peer in await self._node.db.get_network():
                 if peer.identity.id == self._node.identity.id:
-                    self.handle_namespace_cancellation(name, job_id)
+                    await self.handle_namespace_cancellation(name, job_id)
                 else:
-                    asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id))
+                    await P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
 
-            raise NodeDBException(f"Resource reservation for {name}:{job_id} failed")
+            raise OperationError(operation='reserve_namespace', stage='reservation', cause=f'{name}:{job_id} failed')
 
-    def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
-        result = self.handle_namespace_cancellation(name, job_id)
-        for peer in self._node.db.get_network():
+    async def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
+        result = await self.handle_namespace_cancellation(name, job_id)
+        for peer in await self._node.db.get_network():
             if peer.identity.id != self._node.identity.id:
-                asyncio.run(P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id))
+                await P2PCancelNamespaceReservation.perform(self._node, peer, name, job_id)
         return result
 
-    def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:
+    async def handle_namespace_snapshot(self, ns_info: NamespaceInfo) -> None:
         with self._mutex:
             with self._Session() as session:
                 record = session.get(NamespaceRecord,ns_info.name)
@@ -393,7 +390,7 @@ class DefaultNodeDBService(NodeDBService):
                     record.jobs = [job_id for job_id in ns_info.jobs]
                     session.commit()
 
-    def handle_namespace_update(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    async def handle_namespace_update(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         with self._mutex:
             with self._Session() as session:
                 record = session.get(NamespaceRecord,name)
@@ -417,13 +414,13 @@ class DefaultNodeDBService(NodeDBService):
                     jobs=[job_id for job_id in record.jobs]
                 )
 
-    def handle_namespace_reservation(self, name: str, job_id: str, request: ResourceDescriptor) -> bool:
+    async def handle_namespace_reservation(self, name: str, job_id: str, request: ResourceDescriptor) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?
                 record: Optional[NamespaceRecord] = session.get(NamespaceRecord,name)
                 if record is None:
-                    raise NamespaceNotFoundError(name)
+                    raise NotFoundError(resource_type='namespace', resource_id=name)
 
                 # determine the total available budget for this namespace
                 budget: ResourceDescriptor = ResourceDescriptor.model_validate(record.budget)
@@ -448,7 +445,7 @@ class DefaultNodeDBService(NodeDBService):
                 else:
                     return False
 
-    def handle_namespace_cancellation(self, name: str, job_id: str) -> bool:
+    async def handle_namespace_cancellation(self, name: str, job_id: str) -> bool:
         with self._mutex:
             with self._Session() as session:
                 # does the namespace exist?

@@ -1,22 +1,23 @@
+import json
 from typing import Optional, Dict
 
 from InquirerPy.base import Choice
 from tabulate import tabulate
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, prompt_for_selection, \
     extract_address, prompt_for_integer, Argument
-from simaas.core.logging import Logging
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NamespaceInfo, ResourceDescriptor
 
-logger = Logging.get('cli')
-
 
 class NamespaceList(CLICommand):
     def __init__(self):
-        super().__init__('list', 'lists all known namespaces')
+        super().__init__('list', 'lists all known namespaces', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         prompt_if_missing(args, 'address', prompt_for_string, message="Enter address of node:",
@@ -24,7 +25,26 @@ class NamespaceList(CLICommand):
 
         proxy = NodeDBProxy(extract_address(args['address']))
         namespaces: Dict[str, NamespaceInfo] = proxy.get_namespaces()
-        if len(namespaces) == 0:
+
+        if args.get('json_output'):
+            # JSON output mode
+            output = []
+            for namespace in namespaces.values():
+                used_vcpus = sum(r.vcpus for r in namespace.reservations.values())
+                used_memory = sum(r.memory for r in namespace.reservations.values())
+                output.append({
+                    'name': namespace.name,
+                    'budget_vcpus': namespace.budget.vcpus,
+                    'budget_memory': namespace.budget.memory,
+                    'used_vcpus': used_vcpus,
+                    'used_memory': used_memory,
+                    'available_vcpus': namespace.budget.vcpus - used_vcpus,
+                    'available_memory': namespace.budget.memory - used_memory,
+                    'reservations': len(namespace.reservations),
+                    'jobs': len(namespace.jobs)
+                })
+            print(json.dumps(output, indent=2))
+        elif len(namespaces) == 0:
             print("No namespaces found.")
         else:
             print(f"Found {len(namespaces)} namespaces:")
@@ -92,16 +112,16 @@ class NamespaceUpdate(CLICommand):
         try:
             vcpus = int(args['vcpus'])
             memory = int(args['memory'])
-        except Exception:
+        except ValueError:
             print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
                   f"-> vCPUs/memory must be positive integers.")
-            raise CLIRuntimeError('Non-integer vCPUs and/or memory specification')
+            raise CLIError('Non-integer vCPUs and/or memory specification')
 
         # check resource specifications: must be positive
         if vcpus < 0 or memory < 0:
             print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
                   f"-> vCPUs/memory must be positive integers.")
-            raise CLIRuntimeError('Negative vCPUs and/or memory specification')
+            raise CLIError('Negative vCPUs and/or memory specification')
 
 
         budget = ResourceDescriptor(vcpus=int(args['vcpus']), memory=int(args['memory']))
