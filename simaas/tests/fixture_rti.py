@@ -17,7 +17,7 @@ from simaas.core.async_helpers import run_coro_safely
 
 import docker
 
-from simaas.cli.cmd_image import build_processor_image
+from simaas.core.image import build_processor_image
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger

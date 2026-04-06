@@ -10,7 +10,8 @@ from simaas.core.async_helpers import run_coro_safely
 from docker.errors import ImageNotFound
 from git import Repo
 
-from simaas.cli.cmd_image import clone_repository, build_processor_image, PDIBuildLocal, PDIBuildGithub, PDIExport, \
+from simaas.core.image import clone_repository, build_processor_image
+from simaas.cli.cmd_image import PDIBuildLocal, PDIBuildGithub, PDIExport, \
     PDIImport, PDIMetaInformation
 
 from simaas.core.helpers import get_timestamp_now

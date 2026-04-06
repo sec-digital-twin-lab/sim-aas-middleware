@@ -8,7 +8,7 @@ import threading
 import traceback
 from typing import Optional, Tuple, Dict, List
 
-from simaas.cli.cmd_image import clone_repository, build_processor_image
+from simaas.core.image import clone_repository, build_processor_image
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.logging import get_logger
 from simaas.core.schemas import GithubCredentials
