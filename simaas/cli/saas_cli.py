@@ -3,6 +3,7 @@ import os
 import sys
 import traceback
 
+from simaas.cli.cmd_image import PDIBuildLocal, PDIBuildGithub, PDIExport, PDIImport
 from simaas.cli.cmd_namespace import NamespaceList, NamespaceUpdate, NamespaceShow
 from simaas.helpers import determine_default_rest_address
 from simaas.meta import __version__
@@ -12,12 +13,13 @@ from simaas.cli.cmd_identity import IdentityCreate, IdentityRemove, IdentityShow
     IdentityDiscover, IdentityPublish, CredentialsRemove, CredentialsList, CredentialsAddSSHCredentials, \
     CredentialsAddGithubCredentials, CredentialsTestSSHCredentials, CredentialsTestGithubCredentials
 from simaas.cli.cmd_job_runner import JobRunner
-from simaas.cli.cmd_network import NetworkList
-from simaas.cli.cmd_proc_builder import ProcBuilderLocal, ProcBuilderGithub
+from simaas.cli.cmd_network import NetworkList, NetworkPing, NetworkStatus
+from simaas.cli.cmd_node import NodeStatus, NodeInfo
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
-    RTIProcShow, RTIJobList, RTIJobCancel, RTIVolumeList, RTIVolumeCreateFSRef, RTIVolumeCreateEFSRef, RTIVolumeDelete
+    RTIProcShow, RTIJobList, RTIJobCancel, RTIJobInspect, RTIJobLogs, RTIVolumeList, RTIVolumeCreateFSRef, \
+    RTIVolumeCreateEFSRef, RTIVolumeDelete
 from simaas.cli.cmd_service import Service
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
 
 # deactivate annoying DEBUG messages by multipart
@@ -26,8 +28,9 @@ logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
 
 def main():
     try:
-        default_keystore = os.path.join(os.environ['HOME'], '.keystore')
-        default_temp_dir = os.path.join(os.environ['HOME'], '.temp')
+        home_dir = os.environ.get('HOME', os.path.expanduser('~'))
+        default_keystore = os.path.join(home_dir, '.keystore')
+        default_temp_dir = os.path.join(home_dir, '.temp')
         default_log_level = 'INFO'
 
         cli = CLIParser(f'SaaS Middleware v{__version__} command line interface (CLI)', arguments=[
@@ -74,8 +77,12 @@ def main():
             ]),
             Service(),
             JobRunner(),
-            ProcBuilderLocal(),
-            ProcBuilderGithub(),
+            CLICommandGroup('image', 'manage processor docker images (PDIs)', commands=[
+                PDIBuildLocal(),
+                PDIBuildGithub(),
+                PDIExport(),
+                PDIImport()
+            ]),
             CLICommandGroup('dor', 'interact with a Data Object Repository (DOR)', arguments=[
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
@@ -115,6 +122,8 @@ def main():
                     RTIJobList(),
                     RTIJobSubmit(),
                     RTIJobStatus(),
+                    RTIJobInspect(),
+                    RTIJobLogs(),
                     RTIJobCancel()
                 ])
             ]),
@@ -130,14 +139,23 @@ def main():
                 Argument('--address', dest='address', action='store',
                          help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
             ], commands=[
-                NetworkList()
+                NetworkList(),
+                NetworkPing(),
+                NetworkStatus()
+            ]),
+            CLICommandGroup('node', 'node diagnostics and information', arguments=[
+                Argument('--address', dest='address', action='store',
+                         help=f"the REST address (host:port) of the node (e.g., '{determine_default_rest_address()}')")
+            ], commands=[
+                NodeStatus(),
+                NodeInfo()
             ])
         ])
 
         cli.execute(sys.argv[1:])
         sys.exit(0)
 
-    except CLIRuntimeError as e:
+    except CLIError as e:
         print(e.reason)
         sys.exit(-1)
 

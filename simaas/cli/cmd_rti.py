@@ -9,21 +9,20 @@ from InquirerPy.base import Choice
 from pydantic import ValidationError
 from tabulate import tabulate
 
-from simaas.cli.exceptions import CLIRuntimeError
+from simaas.core.errors import CLIError, RemoteError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, prompt_for_selection, \
     get_nodes_by_service, prompt_for_confirmation, load_keystore, extract_address, label_data_object, shorten_id, \
     label_identity, default_if_missing
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import ResourceDescriptor
-from simaas.rest.exceptions import UnsuccessfulRequestError
 from simaas.rti.api import RTIProxy
 from simaas.rti.schemas import Processor, Task, JobStatus, Job, ProcessorVolume
 from simaas.dor.schemas import ProcessorDescriptor, DataObject
 
-logger = Logging.get('cli')
+log = get_logger('simaas.cli', 'cli')
 
 
 def _require_rti(args: dict) -> RTIProxy:
@@ -32,8 +31,8 @@ def _require_rti(args: dict) -> RTIProxy:
                       default=determine_default_rest_address())
 
     db = NodeDBProxy(extract_address(args['address']))
-    if db.get_node().rti_service.lower() is 'none':
-        raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
+    if db.get_node().rti_service.lower() == 'none':
+        raise CLIError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 
     return RTIProxy(extract_address(args['address']))
@@ -46,8 +45,8 @@ def _require_rti_with_type(args: dict) -> Tuple[RTIProxy, str]:
 
     db = NodeDBProxy(extract_address(args['address']))
     rti_type = db.get_node().rti_service.lower()
-    if rti_type is 'none':
-        raise CLIRuntimeError(f"Node at {args['address'][0]}:{args['address'][1]} does "
+    if rti_type == 'none':
+        raise CLIError(f"Node at {args['address'][0]}:{args['address'][1]} does "
                               f"not provide a RTI service. Aborting.")
 
     return RTIProxy(extract_address(args['address'])), rti_type
@@ -80,6 +79,8 @@ class RTIVolumeList(CLICommand):
         super().__init__('list', 'show a list of volume references', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[List[dict]]:
@@ -88,7 +89,10 @@ class RTIVolumeList(CLICommand):
         # does the volume references file exist?
         vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
         if not os.path.isfile(vol_refs_path):
-            print("No volume references found.")
+            if args.get('json_output'):
+                print(json.dumps([], indent=2))
+            else:
+                print("No volume references found.")
             return []
 
         # load the volume reference file
@@ -97,22 +101,28 @@ class RTIVolumeList(CLICommand):
 
         # do we have any references?
         if len(vol_refs) == 0:
-            print("No volume references found.")
+            if args.get('json_output'):
+                print(json.dumps([], indent=2))
+            else:
+                print("No volume references found.")
             return []
 
-        # headers
-        lines = [
-            ['VOLUME NAME', 'TYPE', 'REFERENCE'],
-            ['-----------', '----', '---------']
-        ]
+        if args.get('json_output'):
+            print(json.dumps(vol_refs, indent=2))
+        else:
+            # headers
+            lines = [
+                ['VOLUME NAME', 'TYPE', 'REFERENCE'],
+                ['-----------', '----', '---------']
+            ]
 
-        # prepare lines unsorted
-        for item in vol_refs:
-            lines.append([item['name'], item['type'], item['reference']])
+            # prepare lines unsorted
+            for item in vol_refs:
+                lines.append([item['name'], item['type'], item['reference']])
 
-        print(f"Found {len(lines)-1} volume references:")
-        print(tabulate(lines, tablefmt="plain"))
-        print()
+            print(f"Found {len(vol_refs)} volume references:")
+            print(tabulate(lines, tablefmt="plain"))
+            print()
 
         return vol_refs
 
@@ -122,8 +132,8 @@ class RTIVolumeCreateFSRef(CLICommand):
         super().__init__('fs', 'create filesystem volume reference', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
-            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
-            Argument('--path', dest='path', action='store', help=f"the path to the local filesystem location")
+            Argument('--name', dest='name', action='store', help="the name for this volume reference"),
+            Argument('--path', dest='path', action='store', help="the path to the local filesystem location")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -143,13 +153,13 @@ class RTIVolumeCreateFSRef(CLICommand):
                           message="Enter the name of volume reference:", allow_empty=False)
         for item in vol_refs:
             if item['name'] == args['name']:
-                raise CLIRuntimeError(f"Volume reference with name '{args['name']}' already exists")
+                raise CLIError(f"Volume reference with name '{args['name']}' already exists")
 
         # get the path for the reference
         prompt_if_missing(args, 'path', prompt_for_string,
                           message="Enter the path to the local filesystem location:", allow_empty=False)
         if not os.path.isdir(args['path']):
-            raise CLIRuntimeError(f"Location '{args['path']}' does not exist or is not a directory")
+            raise CLIError(f"Location '{args['path']}' does not exist or is not a directory")
 
         reference = {
             'name': args['name'],
@@ -172,8 +182,8 @@ class RTIVolumeCreateEFSRef(CLICommand):
         super().__init__('efs', 'create AWS elastic filesystem volume reference', arguments=[
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
-            Argument('--name', dest='name', action='store', help=f"the name for this volume reference"),
-            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help=f"the AWS EFS filesystem Id")
+            Argument('--name', dest='name', action='store', help="the name for this volume reference"),
+            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help="the AWS EFS filesystem Id")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -193,7 +203,7 @@ class RTIVolumeCreateEFSRef(CLICommand):
                           message="Enter the name of volume reference:", allow_empty=False)
         for item in vol_refs:
             if item['name'] == args['name']:
-                raise CLIRuntimeError(f"Volume reference with name '{args['name']}' already exists")
+                raise CLIError(f"Volume reference with name '{args['name']}' already exists")
 
         # get the EFS FS id for the reference
         prompt_if_missing(args, 'efs_fs_id', prompt_for_string,
@@ -291,25 +301,38 @@ class RTIProcDeploy(CLICommand):
         # discover nodes by service
         nodes, _ = get_nodes_by_service(extract_address(args['address']))
         if len(nodes) == 0:
-            raise CLIRuntimeError("Could not find any nodes with DOR service in the network. Try again later.")
+            raise CLIError("Could not find any nodes with DOR service in the network. Try again later.")
 
         # lookup all the PDI data objects
         choices = []
         custodian = {}
         for node in nodes:
             dor = DORProxy(node.rest_address)
-            result = dor.search(data_type='ProcessorDockerImage')
-            for item in result:
-                pdi: DataObject = dor.get_meta(item.obj_id)
-                proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
+            try:
+                result = dor.search(data_type='ProcessorDockerImage')
+                for item in result:
+                    pdi: DataObject = dor.get_meta(item.obj_id)
+                    proc_descriptor = ProcessorDescriptor.model_validate(pdi.tags['proc_descriptor'])
 
-                choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name} <{shorten_id(pdi.obj_id)}> "
-                                                  f"{pdi.tags['repository']}:{pdi.tags['commit_id'][:6]}..."))
-                custodian[item.obj_id] = node
+                    # Handle optional commit_id (may be None for local builds)
+                    commit_id = pdi.tags.get('commit_id')
+                    commit_label = commit_id[:6] if commit_id else 'local'
+
+                    # Handle optional content_hash (may be missing for test fixtures)
+                    content_hash = pdi.tags.get('content_hash')
+                    content_hash_label = content_hash[:6] if content_hash else pdi.obj_id[:6]
+
+                    choices.append(Choice(pdi.obj_id, f"{proc_descriptor.name}:{content_hash_label} "
+                                                      f"<{shorten_id(pdi.obj_id)}> "
+                                                      f"{pdi.tags['repository']}:{commit_label}..."))
+                    custodian[item.obj_id] = node
+
+            except Exception:
+                log.warning('search', 'Failed to send DOR search request', node=node.identity.id, address=node.rest_address)
 
         # do we have any processors to choose from?
         if len(choices) == 0:
-            raise CLIRuntimeError("No processors found for deployment. Aborting.")
+            raise CLIError("No processors found for deployment. Aborting.")
 
         # do we have a processor id?
         interactive = False
@@ -321,7 +344,7 @@ class RTIProcDeploy(CLICommand):
 
         # do we have a custodian for this processor id?
         if args['proc_id'] not in custodian:
-            raise CLIRuntimeError(f"Custodian of processor {shorten_id(args['proc_id'])} not found. Aborting.")
+            raise CLIError(f"Custodian of processor {shorten_id(args['proc_id'])} not found. Aborting.")
 
         # get all the available references and filter by RTI type
         vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
@@ -367,7 +390,7 @@ class RTIProcDeploy(CLICommand):
 
                 # is this volume eligible?
                 if volume not in eligible:
-                    raise CLIRuntimeError(f"Volume '{volume}' not found or not eligible for mounting")
+                    raise CLIError(f"Volume '{volume}' not found or not eligible for mounting")
 
                 volumes.append(ProcessorVolume(
                     name=volume, mount_point=mount_point, read_only=read_only, reference=eligible[volume]
@@ -380,7 +403,7 @@ class RTIProcDeploy(CLICommand):
             result['proc'] = rti.deploy(args['proc_id'], keystore, volumes=volumes if volumes else None)
             print("Done")
 
-        except UnsuccessfulRequestError as e:
+        except RemoteError as e:
             print(f"{e.reason} details: {e.details}")
 
         return result
@@ -402,19 +425,19 @@ class RTIProcUndeploy(CLICommand):
         # get the deployed processors
         deployed = {proc.id: proc for proc in rti.get_all_procs()}
         if len(deployed) == 0:
-            raise CLIRuntimeError(f"No processors deployed at {args['address']}. Aborting.")
+            raise CLIError(f"No processors deployed at {args['address']}. Aborting.")
 
         # do we have a proc_id?
         if not args['proc_id']:
             choices = [Choice(proc.id, proc_info(proc)) for proc in rti.get_all_procs()]
             if not choices:
-                raise CLIRuntimeError(f"No processors deployed at {args['address']}")
+                raise CLIError(f"No processors deployed at {args['address']}")
 
             args['proc_id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=True)
 
         # do we have a selection?
         if len(args['proc_id']) == 0:
-            raise CLIRuntimeError("No processors selected. Aborting.")
+            raise CLIError("No processors selected. Aborting.")
 
         # are the processors deployed?
         result = {}
@@ -436,7 +459,7 @@ class RTIProcUndeploy(CLICommand):
             try:
                 result[proc_id] = rti.undeploy(proc_id, keystore)
                 print("Done")
-            except UnsuccessfulRequestError as e:
+            except RemoteError as e:
                 print(f"{e.reason} details: {e.details}")
 
         return result
@@ -444,13 +467,32 @@ class RTIProcUndeploy(CLICommand):
 
 class RTIProcList(CLICommand):
     def __init__(self) -> None:
-        super().__init__('list', 'retrieves a list of all deployed processors', arguments=[])
+        super().__init__('list', 'retrieves a list of all deployed processors', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         rti = _require_rti(args)
         deployed = rti.get_all_procs()
-        if len(deployed) == 0:
-            print(f"No processors deployed at {args['address']}")
+
+        if args.get('json_output'):
+            output = []
+            for proc in deployed:
+                item = {
+                    'id': proc.id,
+                    'state': proc.state,
+                    'image_name': proc.image_name,
+                    'error': proc.error
+                }
+                if proc.gpp:
+                    item['name'] = proc.gpp.proc_descriptor.name
+                    item['repository'] = proc.gpp.repository
+                    item['commit_id'] = proc.gpp.commit_id
+                output.append(item)
+            print(json.dumps(output, indent=2))
+        elif len(deployed) == 0:
+            print("No processors deployed.")
         else:
             print(f"Found {len(deployed)} processor(s) deployed at {args['address']}:")
             for proc in deployed:
@@ -475,7 +517,7 @@ class RTIProcShow(CLICommand):
         if not args['proc_id']:
             choices = [Choice(proc.id, proc_info(proc)) for proc in rti.get_all_procs()]
             if not choices:
-                raise CLIRuntimeError(f"No processors deployed at {args['address']}")
+                raise CLIError(f"No processors deployed at {args['address']}")
 
             args['proc_id'] = prompt_for_selection(choices, message="Select the processor:", allow_multiple=False)
 
@@ -509,7 +551,7 @@ class RTIProcShow(CLICommand):
 class RTIJobSubmit(CLICommand):
     def __init__(self) -> None:
         super().__init__('submit', 'submit a new job', arguments=[
-            Argument('task', metavar='task', type=str, nargs='?', help="path to a task descriptor")
+            Argument('task', metavar='task', type=str, nargs='*', help="path to a task descriptor")
         ])
 
     def _prepare(self, args: dict) -> None:
@@ -558,7 +600,7 @@ class RTIJobSubmit(CLICommand):
 
         # do we have processor choices?
         if not self._proc_choices:
-            raise CLIRuntimeError(f"No processors deployed at {address[0]}:{address[1]}. Aborting.")
+            raise CLIError(f"No processors deployed at {address[0]}:{address[1]}. Aborting.")
 
     def _create_job_input(self, proc_desc: ProcessorDescriptor) -> List[Union[Task.InputReference, Task.InputValue]]:
         job_input = []
@@ -588,12 +630,12 @@ class RTIJobSubmit(CLICommand):
                             jsonschema.validate(instance=content, schema=item.data_schema)
 
                         except jsonschema.exceptions.ValidationError as e:
-                            logger.error(e.message)
+                            log.error('validate', 'Input validation failed', error=e.message)
                             continue
 
                         except jsonschema.exceptions.SchemaError as e:
-                            logger.error(e.message)
-                            raise CLIRuntimeError("Schema used for input is not valid", details={
+                            log.error('validate', 'Invalid schema', error=e.message)
+                            raise CLIError("Schema used for input is not valid", details={
                                 'schema': item.data_schema
                             })
 
@@ -608,7 +650,7 @@ class RTIJobSubmit(CLICommand):
 
                 # do we have any matching objects?
                 if len(object_choices) == 0:
-                    raise CLIRuntimeError(f"No data objects found that match data type/format ({item.data_type}/"
+                    raise CLIError(f"No data objects found that match data type/format ({item.data_type}/"
                                           f"{item.data_format}) of input '{item.name}'. Aborting.")
 
                 # select an object
@@ -663,18 +705,18 @@ class RTIJobSubmit(CLICommand):
             for task_path in args['task']:
                 # does the file exist?
                 if not os.path.isfile(task_path):
-                    raise CLIRuntimeError(f"No task descriptor at '{task_path}'. Aborting.")
+                    raise CLIError(f"No task descriptor at '{task_path}'. Aborting.")
 
                 # read the job descriptor
                 try:
                     with open(task_path, 'r') as f:
                         task = Task.model_validate(json.load(f))
                 except ValidationError as e:
-                    raise CLIRuntimeError(f"Invalid task descriptor: {e.errors()}. Aborting.")
+                    raise CLIError(f"Invalid task descriptor: {e.errors()}. Aborting.")
 
                 # is the processor deployed?
                 if task.proc_id not in self._proc_choices:
-                    raise CLIRuntimeError(f"Processor {task.proc_id} is not deployed at {args['address']}. "
+                    raise CLIError(f"Processor {task.proc_id} is not deployed at {args['address']}. "
                                           f"Aborting.")
 
                 tasks.append(task)
@@ -756,33 +798,52 @@ class RTIJobList(CLICommand):
                              Argument('--period', dest='period', action='store',
                                       help="time period to consider using format <number><unit> where unit can be one "
                                            "of these ('h': hours, 'd': days, 'w': weeks). Default is '1d', i.e., one "
-                                           "day.")
+                                           "day."),
+                             Argument('--json', dest='json_output', action='store_const', const=True,
+                                      help="output results in JSON format")
                          ])
 
     def execute(self, args: dict) -> Optional[dict]:
+        from simaas.cli.helpers.time import parse_period
+
         rti = _require_rti(args)
         keystore = load_keystore(args, ensure_publication=True)
 
-        # determine time period
-        if 'period' in args and args['period'] is not None:
-            try:
-                unit = args['period'][-1:]
-                number = int(args['period'][:-1])
-                multiplier = {'h': 1, 'd': 24, 'w': 7*24}
-                period = number * multiplier[unit]
-                print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
-
-            except Exception:
-                print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
-                period = None
-        else:
+        # determine time period using the helper
+        period = None
+        if args.get('period'):
+            period = parse_period(args['period'])
+            if period is None:
+                if not args.get('json_output'):
+                    print(f"Invalid time period '{args['period']}'. Listing currently active jobs only.")
+            elif not args.get('json_output'):
+                print(f"Listing all jobs submitted within time period of {args['period']} -> {period} hours")
+        elif not args.get('json_output'):
             print("No time period provided. Listing currently active jobs only.")
-            period = None
 
         # get all jobs in that time period
         try:
             jobs = rti.get_jobs_by_user(keystore, period=period)
-            if jobs:
+
+            if args.get('json_output'):
+                # JSON output mode
+                output = []
+                deployed: dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+                for job in jobs:
+                    proc_name = deployed[job.task.proc_id].gpp.proc_descriptor.name \
+                        if job.task.proc_id in deployed else 'unknown'
+                    status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                    output.append({
+                        'id': job.id,
+                        'submitted': job.t_submitted,
+                        'owner_id': job.task.user_iid,
+                        'proc_name': proc_name,
+                        'proc_id': job.task.proc_id,
+                        'state': status.state,
+                        'description': job.task.description
+                    })
+                print(json.dumps(output, indent=2))
+            elif jobs:
                 # get all deployed procs
                 deployed: dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
 
@@ -818,7 +879,7 @@ class RTIJobList(CLICommand):
                 'jobs': jobs
             }
 
-        except UnsuccessfulRequestError as e:
+        except RemoteError as e:
             print(e.reason)
 
 
@@ -859,7 +920,7 @@ class RTIJobStatus(CLICommand):
                     period = number * multiplier[unit]
                     print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
 
-                except Exception:
+                except (ValueError, KeyError):
                     print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
                     period = None
 
@@ -870,7 +931,7 @@ class RTIJobStatus(CLICommand):
                 choices.append(Choice(job.id, job_label(job, status, deployed)))
 
             if not choices:
-                raise CLIRuntimeError("No jobs found.")
+                raise CLIError("No jobs found.")
 
             args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
 
@@ -880,8 +941,176 @@ class RTIJobStatus(CLICommand):
             result['status'] = status
             print(f"Job status:\n{json.dumps(status.model_dump(), indent=4)}")
 
-        except UnsuccessfulRequestError:
+        except RemoteError:
             print(f"No status for job {args['job-id']}.")
+
+        return result
+
+
+class RTIJobInspect(CLICommand):
+    def __init__(self):
+        super().__init__('inspect', 'show detailed information about a job', arguments=[
+            Argument('job-id', metavar='job-id', type=str, nargs='?', help="the id of the job"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        rti = _require_rti(args)
+        keystore = load_keystore(args, ensure_publication=True)
+
+        # do we have a job id?
+        if not args['job-id']:
+            # get all deployed procs
+            deployed: Dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+
+            # get all jobs by this user and select
+            choices = []
+            for job in rti.get_jobs_by_user(keystore):
+                status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                choices.append(Choice(job.id, job_label(job, status, deployed)))
+
+            if not choices:
+                raise CLIError("No jobs found.")
+
+            args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
+
+        result = {}
+        try:
+            # Get all jobs to find the one we're looking for
+            jobs = rti.get_jobs_by_user(keystore, period=24*7)  # Look back a week
+            job = None
+            for j in jobs:
+                if j.id == args['job-id']:
+                    job = j
+                    break
+
+            status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
+            result['status'] = status
+
+            if args.get('json_output'):
+                output = {
+                    'job_id': args['job-id'],
+                    'state': status.state,
+                    'progress': status.progress,
+                    'output': {k: v.model_dump() if v else None for k, v in status.output.items()},
+                    'notes': status.notes,
+                    'errors': [{'message': e.message, 'exception': e.exception.model_dump()} for e in status.errors]
+                }
+                if job:
+                    output['task'] = {
+                        'name': job.task.name,
+                        'description': job.task.description,
+                        'proc_id': job.task.proc_id,
+                        'user_iid': job.task.user_iid,
+                        'input_count': len(job.task.input),
+                        'output_count': len(job.task.output)
+                    }
+                    output['submitted'] = job.t_submitted
+                    output['processor_name'] = job.proc_name
+                print(json.dumps(output, indent=2))
+            else:
+                print("Job Details")
+                print("-----------")
+                print(f"ID: {args['job-id']}")
+                print(f"Status: {status.state}")
+                print(f"Progress: {status.progress}%")
+
+                if job:
+                    print(f"Processor: {job.proc_name} ({shorten_id(job.task.proc_id)})")
+                    submitted_time = datetime.datetime.fromtimestamp(job.t_submitted / 1000.0)
+                    print(f"Submitted: {submitted_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"Task name: {job.task.name or '(none)'}")
+                    print(f"Description: {job.task.description or '(none)'}")
+                    print(f"Inputs: {len(job.task.input)} data objects")
+                    print(f"Outputs: {len(job.task.output)} data objects")
+
+                if status.output:
+                    print("Output objects:")
+                    for name, obj in status.output.items():
+                        if obj:
+                            print(f"  - {name}: {shorten_id(obj.obj_id)} ({obj.data_type}:{obj.data_format})")
+                        else:
+                            print(f"  - {name}: (pending)")
+
+                if status.errors:
+                    print(f"Errors: {len(status.errors)}")
+                    for err in status.errors:
+                        print(f"  - {err.message}")
+
+                if status.message:
+                    print(f"Message: [{status.message.severity}] {status.message.content}")
+
+        except RemoteError:
+            print(f"Job {args['job-id']} not found.")
+
+        return result
+
+
+class RTIJobLogs(CLICommand):
+    def __init__(self):
+        super().__init__('logs', 'view job notes and messages', arguments=[
+            Argument('job-id', metavar='job-id', type=str, nargs='?', help="the id of the job"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
+
+    def execute(self, args: dict) -> Optional[dict]:
+        rti = _require_rti(args)
+        keystore = load_keystore(args, ensure_publication=True)
+
+        # do we have a job id?
+        if not args['job-id']:
+            # get all deployed procs
+            deployed: Dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
+
+            # get all jobs by this user and select
+            choices = []
+            for job in rti.get_jobs_by_user(keystore):
+                status = rti.get_job_status(job.id, with_authorisation_by=keystore)
+                choices.append(Choice(job.id, job_label(job, status, deployed)))
+
+            if not choices:
+                raise CLIError("No jobs found.")
+
+            args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
+
+        result = {}
+        try:
+            status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
+            result['status'] = status
+
+            if args.get('json_output'):
+                output = {
+                    'job_id': args['job-id'],
+                    'notes': status.notes,
+                    'errors': [{'message': e.message} for e in status.errors],
+                    'message': {'severity': status.message.severity, 'content': status.message.content} if status.message else None
+                }
+                print(json.dumps(output, indent=2))
+            else:
+                print(f"Job Logs: {args['job-id']}")
+                print("-" * 40)
+
+                if status.notes:
+                    print("Notes:")
+                    for key, value in status.notes.items():
+                        print(f"  {key}: {value}")
+                else:
+                    print("No notes.")
+
+                if status.errors:
+                    print(f"\nErrors ({len(status.errors)}):")
+                    for err in status.errors:
+                        print(f"  - {err.message}")
+                else:
+                    print("\nNo errors.")
+
+                if status.message:
+                    print(f"\nCurrent message: [{status.message.severity}] {status.message.content}")
+
+        except RemoteError:
+            print(f"Job {args['job-id']} not found.")
 
         return result
 
@@ -914,7 +1143,7 @@ class RTIJobCancel(CLICommand):
                     choices.append(Choice(job.id, job_label(job, status, deployed)))
 
             if not choices:
-                raise CLIRuntimeError("No active jobs found.")
+                raise CLIError("No active jobs found.")
 
             args['job-id'] = prompt_for_selection(choices, message="Select job:", allow_multiple=False)
 
@@ -929,7 +1158,7 @@ class RTIJobCancel(CLICommand):
 
             result['status'] = status
 
-        except UnsuccessfulRequestError:
+        except RemoteError:
             print(f"Job {args['job-id']} not found.")
 
         return result

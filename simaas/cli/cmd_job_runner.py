@@ -9,6 +9,7 @@ import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
 from simaas.namespace.default import DefaultNamespace
+from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
@@ -16,17 +17,16 @@ from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
 from simaas.p2p.service import P2PService
-from simaas.cli.exceptions import CLIRuntimeError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
-from simaas.core.exceptions import SaaSRuntimeException, ExceptionContent
+from simaas.core.errors import ExceptionContent
+from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
+
+log = get_logger('simaas.rti', 'rti')
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
-from simaas.rti.exceptions import InputDataObjectMissing, MismatchingDataTypeOrFormatError, \
-    InvalidJSONDataObjectError, DataObjectOwnerNotFoundError, DataObjectContentNotFoundError, RTIException, \
-    AccessNotPermittedError, MissingUserSignatureError, UnresolvedInputDataObjectsError
 from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier
 from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus
 from simaas.core.processor import ProgressListener, ProcessorBase
@@ -46,37 +46,44 @@ class OutputObjectHandler(threading.Thread):
         task_out = task_out_items.get(obj_name)
         output_spec = self._owner.output_interface.get(obj_name)
         if task_out is None or output_spec is None:
-            raise RTIException(f"Unexpected output '{obj_name}'", details={
-                'task_out_items': list(task_out_items.keys()),
-                'output_interface': list(self._owner.output_interface.keys())
-            })
+            raise OperationError(
+                operation='push_data_object',
+                stage='validation',
+                cause=f"Unexpected output '{obj_name}'",
+                task_out_items=list(task_out_items.keys()),
+                output_interface=list(self._owner.output_interface.keys())
+            )
 
         # check if the output data object exists
         output_content_path = os.path.join(self._owner.wd_path, obj_name)
         if not os.path.isfile(output_content_path):
-            raise DataObjectContentNotFoundError({
-                'output_name': obj_name,
-                'content_path': output_content_path
-            })
+            raise NotFoundError(
+                resource_type='data_object_content',
+                resource_id=obj_name,
+                searched_locations=[output_content_path]
+            )
 
         # get the owner
         owner = await P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
         if owner is None:
-            raise DataObjectOwnerNotFoundError({
-                'output_name': obj_name,
-                'owner_iid': task_out.owner_iid
-            })
+            raise NotFoundError(
+                resource_type='identity',
+                resource_id=task_out.owner_iid,
+                hint=f"Owner identity for output '{obj_name}' not found"
+            )
 
         # is the output a JSONObject? validate if we have a schema
         if output_spec.data_format == 'json' and output_spec.data_schema is not None:
             with open(output_content_path, 'r') as f:
                 content = json.load(f)
                 if not validate_json(content, output_spec.data_schema):
-                    raise InvalidJSONDataObjectError({
-                        'obj_name': obj_name,
-                        'content': content,
-                        'schema': output_spec.data_schema
-                    })
+                    raise ValidationError(
+                        field='json_content',
+                        expected='valid against schema',
+                        actual='schema validation failed',
+                        obj_name=obj_name,
+                        schema=output_spec.data_schema
+                    )
 
         restricted_access = task_out.restricted_access
         content_encrypted = task_out.content_encrypted
@@ -94,19 +101,19 @@ class OutputObjectHandler(threading.Thread):
             # check with the node db to see if we know about this node
             nodes_by_id: Dict[str, NodeInfo] = {node.identity.id: node for node in network}
             if task_out.target_node_iid not in nodes_by_id:
-                raise CLIRuntimeError("Target node not found in network", details={
-                    'target_node_iid': task_out.target_node_iid,
-                    'network': network
-                })
+                raise OperationError(
+                    operation='push_output', stage='validate', cause='target node not found in network',
+                    hint=f'target_node_iid={task_out.target_node_iid}'
+                )
 
             # extract the rest address from that node record
             target_node = nodes_by_id[task_out.target_node_iid]
 
         # check if the target node has DOR capabilities
         if not target_node.dor_service:
-            raise CLIRuntimeError("Target node does not support DOR capabilities", details={
-                'target_node': target_node.model_dump()
-            })
+            raise OperationError(
+                operation='push_output', stage='validate', cause='target node does not support DOR capabilities'
+            )
 
         # check if the target node is the custodian, if so override the P2P address
         if target_node.identity.id == self._owner.custodian_identity.id:
@@ -178,7 +185,7 @@ class OutputObjectHandler(threading.Thread):
             self._logger.info(f"pushing output data object '{self._obj_name}' SUCCESSFUL.")
             self._owner.remove_pending_output(self._obj_name, obj)
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e.reason}\n{trace}")
             error = JobStatus.Error(message=f"Pushing output data object '{self._obj_name}' failed.",
@@ -189,7 +196,7 @@ class OutputObjectHandler(threading.Thread):
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             self._logger.error(f"pushing output data object '{self._obj_name}' FAILED: {e}\n{trace}")
             error = JobStatus.Error(message=f"Pushing output data object '{self._obj_name}' failed.",
-                                    exception=SaaSRuntimeException(str(e)).content)
+                                    exception=InternalError(component='output_handler', state=str(e)).content)
             self._owner.remove_pending_output(self._obj_name, error)
 
 
@@ -246,7 +253,7 @@ class StatusHandler(threading.Thread):
             if is_dirty:
                 self._last_update = get_timestamp_now()
 
-    def _handle(self, last_update: int) -> None:
+    def _push_status(self, last_update: int) -> None:
         # update the last push timestamp to reflect the timestamp of the update that has been
         # attempted to pushed.
         self._last_push = last_update
@@ -257,11 +264,12 @@ class StatusHandler(threading.Thread):
                 # noinspection PyTypeChecker
                 json.dump(self._job_status.model_dump(), f, indent=2)
 
-            # push the job status to the custodian
-            asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
-            self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
+            # push the job status to the custodian (unless cancelled - custodian handles that)
+            if self._job_status.state != JobStatus.State.CANCELLED:
+                asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
+                self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             self._logger.error(f"Pushing job status {last_update} -> FAILED: {e.reason}\n{trace}")
 
@@ -284,10 +292,10 @@ class StatusHandler(threading.Thread):
 
             # push only if dirty
             if dirty:
-                self._handle(last_update)
+                self._push_status(last_update)
 
         # before ending the thread. send a final update.
-        self._handle(get_timestamp_now())
+        self._push_status(get_timestamp_now())
 
         self._logger.info("END status handler.")
 
@@ -447,13 +455,13 @@ class JobRunner(CLICommand, ProgressListener):
         # create the logger
         log_path = os.path.join(self._wd_path, 'job.log')
         print(f"Using logger with: level={log_level} path={log_path}")
-        self._logger = Logging.get('cli.job_runner', level=log_level_mapping[log_level], custom_log_path=log_path)
+        self._logger = get_logger('cli.job_runner', 'runner', level=log_level_mapping[log_level], custom_log_path=log_path)
 
     def _initialise_processor(self, proc_path: str) -> None:
         # do we have a GPP?
         gpp_path = os.path.join(proc_path, 'gpp.json')
         if not os.path.isfile(gpp_path):
-            raise CLIRuntimeError(f"No GPP descriptor found at '{gpp_path}'.")
+            raise NotFoundError(resource_type='gpp_descriptor', resource_id=gpp_path)
 
         # read the GPP
         try:
@@ -463,7 +471,7 @@ class JobRunner(CLICommand, ProgressListener):
             self._logger.info(f"Read GPP at {gpp_path}")
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            raise CLIRuntimeError(f"Reading GPP failed: {trace}")
+            raise OperationError(operation='read_gpp', cause='failed to parse GPP', trace=trace)
 
         # find processors at the given location
         procs_by_name = find_processors(proc_path)
@@ -473,7 +481,7 @@ class JobRunner(CLICommand, ProgressListener):
         proc_name = self._gpp.proc_descriptor.name
         self._proc: ProcessorBase = procs_by_name.get(proc_name, None)
         if self._proc is None:
-            raise CLIRuntimeError(f"Processor '{proc_name}' not found at '{proc_path}'.")
+            raise NotFoundError(resource_type='processor', resource_id=proc_name, searched_locations=[proc_path])
 
     def _initialise_p2p(
             self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
@@ -487,7 +495,7 @@ class JobRunner(CLICommand, ProgressListener):
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
         self._p2p.add(self._barrier)
-        self._p2p.start_service(encrypt=True)
+        self._p2p.start_service_background(encrypt=True)
         self._logger.info("P2P service interface is up.")
 
         # determine the full P2P address of the custodian
@@ -590,14 +598,20 @@ class JobRunner(CLICommand, ProgressListener):
         # wait for the barrier to be released
         self._logger.info("[barrier] waiting for barrier release 'initial_barrier'...")
         result: dict = self._barrier.wait_for_release('initial_barrier')
+        if result is None:
+            self._logger.info("[barrier] barrier wait interrupted.")
+            return
         self._logger.info("[barrier] barrier release 'initial_barrier' received.")
 
         # update batch status and extract it
         self._batch_status = BatchStatus.model_validate(result)
         if not self._extract_batch_status():
-            raise RTIException("Incomplete port mappings after barrier", details={
-                'ports': self._batch_ports
-            })
+            raise OperationError(
+                operation='batch_barrier',
+                stage='port_mapping',
+                cause='incomplete port mappings',
+                ports=self._batch_ports
+            )
 
         # log the member information
         for name in self._batch_ports.keys():
@@ -668,18 +682,21 @@ class JobRunner(CLICommand, ProgressListener):
                     if meta.access_restricted:
                         # does the user have access?
                         if self._user.id not in meta.access:
-                            raise AccessNotPermittedError({
-                                'obj_id': obj_id,
-                                'user_iid': self._user.id
-                            })
+                            raise AuthorisationError(
+                                identity_id=self._user.id,
+                                resource_id=obj_id,
+                                required_permission='access'
+                            )
 
                         # do we have a user signature?
                         signature = pending[obj_id]
                         if signature is None:
-                            raise MissingUserSignatureError({
-                                'obj_id': obj_id,
-                                'user_iid': self._user.id
-                            })
+                            raise AuthorisationError(
+                                identity_id=self._user.id,
+                                resource_id=obj_id,
+                                required_permission='signature',
+                                hint='missing user signature for access'
+                            )
 
                         # try to download it
                         loop.run_until_complete(
@@ -705,10 +722,11 @@ class JobRunner(CLICommand, ProgressListener):
 
             # do we still have pending data objects?
             if len(pending) > 0:
-                raise UnresolvedInputDataObjectsError({
-                    'pending': pending,
-                    'found': found
-                })
+                raise NotFoundError(
+                    resource_type='input_data_objects',
+                    resource_id=list(pending.keys()),
+                    hint='one or more input data object references cannot be resolved'
+                )
 
             # create symbolic links to the contents for every input AND update references with c_hash
             for name, item in relevant.items():
@@ -729,9 +747,11 @@ class JobRunner(CLICommand, ProgressListener):
 
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            raise CLIRuntimeError("Fetching reference input objects failed", details={
-                'trace': trace
-            })
+            raise OperationError(
+                operation='fetch_input_objects',
+                cause='fetching reference input objects failed',
+                trace=trace
+            )
 
         finally:
             loop.close()
@@ -743,7 +763,11 @@ class JobRunner(CLICommand, ProgressListener):
             input_path0 = os.path.join(self._wd_path, f"{i.name}.meta")
             input_path1 = os.path.join(self._wd_path, i.name)
             if not os.path.isfile(input_path0) or not os.path.isfile(input_path1):
-                raise InputDataObjectMissing(i.name, input_path0, input_path1)
+                raise NotFoundError(
+                    resource_type='input_data_object',
+                    resource_id=i.name,
+                    searched_locations=[input_path0, input_path1]
+                )
 
             # read the meta information
             with open(input_path0) as f:
@@ -751,17 +775,12 @@ class JobRunner(CLICommand, ProgressListener):
 
             # compare data types and format
             if meta['data_type'] != i.data_type or meta['data_format'] != i.data_format:
-                raise MismatchingDataTypeOrFormatError({
-                    'obj_name': i.name,
-                    'expected': {
-                        'data_type': i.data_type,
-                        'data_format': i.data_format
-                    },
-                    'actual': {
-                        'data_type': meta['data_type'],
-                        'data_format': meta['data_format']
-                    }
-                })
+                raise ValidationError(
+                    field='data_type_format',
+                    expected=f"{i.data_type}/{i.data_format}",
+                    actual=f"{meta['data_type']}/{meta['data_format']}",
+                    obj_name=i.name
+                )
 
             # in case of 'json' data format, verify using the schema (if any)
             if i.data_format == 'json' and i.data_schema is not None:
@@ -771,20 +790,23 @@ class JobRunner(CLICommand, ProgressListener):
 
                 # validate the content using the schema
                 if not validate_json(content, i.data_schema):
-                    raise InvalidJSONDataObjectError({
-                        'obj_name': i.name,
-                        'content': content,
-                        'schema': i.data_schema
-                    })
+                    raise ValidationError(
+                        field='json_content',
+                        expected='valid against schema',
+                        actual='schema validation failed',
+                        obj_name=i.name,
+                        schema=i.data_schema
+                    )
 
         # check if the owner identity exists for each output data object
         for o in self._job.task.output:
             owner = asyncio.run(P2PGetIdentity.perform(self._custodian_address, o.owner_iid))
             if owner is None:
-                raise DataObjectOwnerNotFoundError({
-                    'output_name': o.name,
-                    'owner_iid': o.owner_iid
-                })
+                raise NotFoundError(
+                    resource_type='identity',
+                    resource_id=o.owner_iid,
+                    hint=f"Owner identity for output '{o.name}' not found"
+                )
 
     def remove_pending_output(self, obj_name: str, result: Union[DataObject, JobStatus.Error]) -> None:
         with self._mutex:
@@ -815,12 +837,12 @@ class JobRunner(CLICommand, ProgressListener):
         print(f"Environment: {os.environ}")
         print(f"Arguments: {args}")
         if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            raise CLIRuntimeError("Required custodian and job arguments missing")
+            raise ValidationError(field='arguments', expected='custodian_address, custodian_pub_key, job_id', actual='missing')
 
         # determine working directory
         self._wd_path = args['job_path']
         if not os.path.isdir(self._wd_path):
-            raise CLIRuntimeError(f"Required job directory {self._wd_path} does not exist")
+            raise NotFoundError(resource_type='directory', resource_id=self._wd_path)
 
         # setup logger
         self._setup_logger(args.get('log_level'))
@@ -830,13 +852,13 @@ class JobRunner(CLICommand, ProgressListener):
 
             # determine if /scratch exists
             if os.path.exists('/scratch'):
-                self._logger.info(f"Using externally mounted scratch folder.")
+                self._logger.info("Using externally mounted scratch folder.")
             else:
                 try:
                     # if not create a symlink pointing at /tmp/scratch
                     os.makedirs('/tmp/scratch', exist_ok=True)
                     os.symlink('/tmp/scratch', '/scratch')
-                    self._logger.info(f"Using symlink to /tmp/scratch as scratch folder.")
+                    self._logger.info("Using symlink to /tmp/scratch as scratch folder.")
                 except Exception as e:
                     self._logger.warning(f"Creating symlink to /tmp/scratch as scratch folder failed: {e}")
 
@@ -850,7 +872,7 @@ class JobRunner(CLICommand, ProgressListener):
 
             # if, for some reason, we have not received a job, then we can't proceed.
             if self._job is None:
-                raise CLIRuntimeError("Handshake failed: no job received")
+                raise OperationError(operation='handshake', cause='no job received')
 
             # initialise the job
             self._initialise_job()
@@ -864,13 +886,19 @@ class JobRunner(CLICommand, ProgressListener):
             # all batch members to be initialised
             if self._batch_status is not None:
                 self._await_batch()
+                # check if interrupted during barrier wait
+                if self._interrupted:
+                    self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> INTERRUPTED (during barrier)")
+                    self._status_handler.update(state=JobStatus.State.CANCELLED)
+                    self._write_exitcode(ExitCode.INTERRUPTED)
+                    return
 
             # fetch the user identity
             self._user: Optional[Identity] = asyncio.run(
                 P2PGetIdentity.perform(self._custodian_address, self._job.task.user_iid)
             )
             if self._user is None:
-                raise CLIRuntimeError(f"User with id={self._job.task.user_iid} not known to node.")
+                raise NotFoundError(resource_type='identity', resource_id=self._job.task.user_iid)
             self._logger.info(f"Using user identity with id={self._user.id}")
 
             # store by-value input data objects (if any)
@@ -890,7 +918,7 @@ class JobRunner(CLICommand, ProgressListener):
             namespace = DefaultNamespace(
                 self._job.task.namespace, self._custodian, self.custodian_address.address, self._keystore
             )
-            self._proc.run(self._wd_path, self._job, self, namespace, self._logger)
+            self._proc.run(self._wd_path, self._job, self, SyncNamespace(namespace), self._logger)
 
             # was the processor interrupted?
             if self._interrupted:
@@ -906,14 +934,14 @@ class JobRunner(CLICommand, ProgressListener):
 
                 # do we have failed outputs?
                 if len(self._failed_output) > 0:
-                    raise CLIRuntimeError(f"Failed to upload some outputs: {self._failed_output}")
+                    raise OperationError(operation='upload_outputs', cause='failed to upload some outputs', failed_outputs=list(self._failed_output))
 
                 # wrap up
                 self._logger.info(f"END processing job {self._job.id if self._job else '?'} -> DONE")
                 self._status_handler.update(state=JobStatus.State.SUCCESSFUL)
                 self._write_exitcode(ExitCode.DONE)
 
-        except SaaSRuntimeException as e:
+        except _BaseError as e:
             # create error information
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             exception = e.content

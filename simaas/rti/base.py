@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import json
 import os
 import threading
@@ -9,14 +10,12 @@ from typing import Optional, List, Tuple, Dict, Set
 from fastapi.requests import Request
 
 from simaas.nodedb.schemas import NamespaceInfo, NodeInfo, ResourceDescriptor
-from simaas.core.exceptions import ExceptionContent
 from simaas.core.helpers import generate_random_string, get_timestamp_now
-from simaas.cli.helpers import shorten_id
 from simaas.dor.schemas import GitProcessorPointer
 from simaas.core.identity import Identity
-from simaas.rti.exceptions import RTIException
+from simaas.core.errors import ExceptionContent, NotFoundError, ValidationError, OperationError
 from simaas.rti.schemas import JobStatus, Processor, Task, Job, BatchStatus, ProcessorVolume
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
 
@@ -24,7 +23,7 @@ from sqlalchemy import Column, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy_json import NestedMutableJson
 
-logger = Logging.get('rti.service')
+log = get_logger('simaas.rti', 'rti')
 
 
 Base = declarative_base()
@@ -73,20 +72,22 @@ class RTIServiceBase(RTIRESTService):
         # initialise directories
         self._jobs_path = os.path.join(self._node.datastore, 'jobs')
         self._procs_path = os.path.join(self._node.datastore, 'procs')
-        logger.info(f"[init] using jobs path at {self._jobs_path}")
-        logger.info(f"[init] using procs path at {self._procs_path}")
+        log.info('init', 'Using jobs path', path=self._jobs_path)
+        log.info('init', 'Using procs path', path=self._procs_path)
         os.makedirs(self._jobs_path, exist_ok=True)
         os.makedirs(self._procs_path, exist_ok=True)
 
         # initialise database things
-        logger.info(f"[init] using database at {db_path}")
+        log.info('init', 'Using database', path=db_path)
         self._engine = create_engine(db_path)
         Base.metadata.create_all(self._engine)
         self._session_maker = sessionmaker(bind=self._engine)
 
-        # a map of active cancellation workers
-        self._cancellation_workers: Dict[str, Optional[threading.Thread]] = {}
-        self._cleanup_workers: Dict[str, Optional[threading.Thread]] = {}
+        # a map of active cancellation workers (async tasks)
+        self._cancellation_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._cleanup_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._deploy_workers: Dict[str, Optional[asyncio.Task]] = {}
+        self._undeploy_workers: Dict[str, Optional[asyncio.Task]] = {}
 
     def on_cancellation_worker_done(self, job_id: str) -> None:
         # we keep the dict entry but remove the thread object
@@ -96,8 +97,50 @@ class RTIServiceBase(RTIRESTService):
         # we keep the dict entry but remove the thread object
         self._cleanup_workers[job_id] = None
 
+    def on_deploy_worker_done(self, proc_id: str) -> None:
+        # we keep the dict entry but remove the task object
+        self._deploy_workers[proc_id] = None
+
+    def on_undeploy_worker_done(self, proc_id: str) -> None:
+        # we keep the dict entry but remove the task object
+        self._undeploy_workers[proc_id] = None
+
+    def mark_job_cancelled(self, job_id: str) -> None:
+        """Mark a job as cancelled in the database. Called by perform_cancel implementations
+        when the container/instance has stopped but the job may not have pushed its status.
+
+        This is a simple DB update without triggering cascade logic, since the cascade
+        was already triggered by the original failure that caused the cancellation."""
+        with self._session_maker() as session:
+            record = session.get(DBJobInfo, job_id)
+            if record is None:
+                return  # job doesn't exist, nothing to do
+
+            status = JobStatus.model_validate(record.status)
+            # only update if not already in a terminal state
+            if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
+                return  # already in terminal state, nothing to do
+
+            # Update to CANCELLED directly in DB
+            status.state = JobStatus.State.CANCELLED
+            record.status = status.model_dump()
+            session.commit()
+
+            # Also update the local status file
+            try:
+                status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                with open(status_path, 'w') as f:
+                    json.dump(status.model_dump(), f, indent=2)
+            except Exception as e:
+                log.debug(f"Failed to write local status file", job=job_id, error=str(e))
+
     def has_active_workers(self) -> bool:
-        all_workers = list(self._cancellation_workers.values()) + list(self._cleanup_workers.values())
+        all_workers = (
+            list(self._cancellation_workers.values()) +
+            list(self._cleanup_workers.values()) +
+            list(self._deploy_workers.values()) +
+            list(self._undeploy_workers.values())
+        )
         return any(
             worker is not None for worker in all_workers
         )
@@ -105,7 +148,7 @@ class RTIServiceBase(RTIRESTService):
     def update_proc_db(self, proc: Processor) -> None:
         # update or create db record
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc.id)
+            record = session.get(DBDeployedProcessor, proc.id)
             if record:
                 record.state = proc.state.value
                 record.image_name = proc.image_name
@@ -122,11 +165,11 @@ class RTIServiceBase(RTIRESTService):
             session.commit()
 
     @abc.abstractmethod
-    def perform_deploy(self, proc: Processor) -> None:
+    async def perform_deploy(self, proc: Processor) -> None:
         ...
 
     @abc.abstractmethod
-    def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
+    async def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
         ...
 
     @abc.abstractmethod
@@ -138,52 +181,55 @@ class RTIServiceBase(RTIRESTService):
         ...
 
     @abc.abstractmethod
-    def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
+    async def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         ...
 
     @abc.abstractmethod
-    def perform_purge(self, job_record: DBJobInfo) -> None:
+    async def perform_purge(self, job_record: DBJobInfo) -> None:
         ...
 
     @abc.abstractmethod
-    def perform_job_cleanup(self, job_id: str) -> None:
+    async def perform_job_cleanup(self, job_id: str) -> None:
         ...
 
     @abc.abstractmethod
     def resolve_port_mapping(self, job_id: str, runner_details: dict) -> dict:
         ...
 
-    def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Job:
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the DB record for the job (if any)
-                record = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist")
+    async def update_job(self, job_id: str, runner_identity: Identity, runner_address: str) -> Job:
+        # DB operations - no lock needed, session is per-call
+        with self._session_maker() as session:
+            # get the DB record for the job (if any)
+            record = session.get(DBJobInfo, job_id)
+            if record is None:
+                raise NotFoundError(resource_type='job', resource_id=job_id)
 
-                # update the runner information
-                record.runner['identity'] = runner_identity.model_dump()
-                record.runner['address'] = runner_address
+            # update the runner information
+            record.runner['identity'] = runner_identity.model_dump()
+            record.runner['address'] = runner_address
 
-                # resolve the port mapping
-                resolved_ports = self._node.rti.resolve_port_mapping(job_id, dict(record.runner))
-                record.runner['ports'] = resolved_ports
+            # resolve the port mapping
+            resolved_ports = self._node.rti.resolve_port_mapping(job_id, dict(record.runner))
+            record.runner['ports'] = resolved_ports
 
-                session.commit()
+            session.commit()
 
-                # make the runner identity known to the node
-                self._node.db.update_identity(runner_identity)
+            # extract job before session closes
+            job = Job.model_validate(record.job)
 
-                return Job.model_validate(record.job)
+        # async operation outside session/lock
+        await self._node.db.update_identity(runner_identity)
+
+        return job
 
     def is_deployed(self, proc_id: str) -> bool:
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
+            record = session.get(DBDeployedProcessor, proc_id)
             return record is not None
 
-    def get_all_procs(self) -> List[Processor]:
+    async def get_all_procs(self) -> List[Processor]:
         """
-        Retrieves a dict of all deployed processors by their id.
+        Retrieves a list of all deployed processors
         """
         with self._session_maker() as session:
             records = session.query(DBDeployedProcessor).all()
@@ -197,12 +243,12 @@ class RTIServiceBase(RTIRESTService):
 
             return result
 
-    def get_proc(self, proc_id: str) -> Optional[Processor]:
+    async def get_proc(self, proc_id: str) -> Optional[Processor]:
         """
         Retrieves a specific processors given its id.
         """
         with self._session_maker() as session:
-            record = session.query(DBDeployedProcessor).get(proc_id)
+            record = session.get(DBDeployedProcessor, proc_id)
             if record:
                 return Processor(id=record.id, state=Processor.State(record.state),
                                  image_name=record.image_name, ports=list(record.ports),
@@ -212,78 +258,85 @@ class RTIServiceBase(RTIRESTService):
             else:
                 return None
 
-    def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
+    async def deploy(self, proc_id: str, volumes: Optional[List[ProcessorVolume]] = None) -> Processor:
         """
         Deploys a processor.
         """
 
         # is the processor already deployed?
-        proc = self.get_proc(proc_id)
+        proc = await self.get_proc(proc_id)
         if proc is not None:
             return proc
 
-        # begin deployment
+        # create a placeholder processor object
+        proc = Processor(
+            id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None,
+            volumes=volumes if volumes else [], gpp=None, error=None
+        )
+
+        # update or create db record - no lock needed, DB handles conflicts
+        await asyncio.to_thread(self.update_proc_db, proc)
+
+        # start the deployment worker as async task with tracking
+        task = asyncio.create_task(self.perform_deploy(proc))
+        task.add_done_callback(lambda _: self.on_deploy_worker_done(proc.id))
         with self._mutex:
-            # create a placeholder processor object
-            proc = Processor(
-                id=proc_id, state=Processor.State.BUSY_DEPLOY, image_name=None, ports=None,
-                volumes=volumes if volumes else [], gpp=None, error=None
-            )
+            self._deploy_workers[proc.id] = task
 
-            # update or create db record
-            self.update_proc_db(proc)
+        return proc
 
-            # start the deployment worker
-            threading.Thread(target=self.perform_deploy, args=(proc,)).start()
-
-            return proc
-
-    def undeploy(self, proc_id: str) -> Optional[Processor]:
+    async def undeploy(self, proc_id: str) -> Optional[Processor]:
         """
         Removes a processor from the RTI (if it exists).
         """
-        with self._mutex:
-            with self._session_maker() as session:
-                # do we have a db record for this processor?
-                record = session.query(DBDeployedProcessor).get(proc_id)
-                if not record:
-                    return None
+        start_undeploy = False
 
-                # create the processor object
-                proc = Processor(id=record.id, state=Processor.State(record.state),
-                                 image_name=record.image_name, ports=list(record.ports),
-                                 volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
-                                 gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
-                                 error=record.error)
+        # DB operations - no lock needed, session is per-call
+        with self._session_maker() as session:
+            # do we have a db record for this processor?
+            record = session.get(DBDeployedProcessor, proc_id)
+            if not record:
+                return None
 
-                # is the state failed? -> delete the db record
-                if proc.state == Processor.State.FAILED:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] processor failed -> removing it. "
-                                   f"error: {record.error}")
-                    session.delete(record)
-                    session.commit()
+            # create the processor object
+            proc = Processor(id=record.id, state=Processor.State(record.state),
+                             image_name=record.image_name, ports=list(record.ports),
+                             volumes=[ProcessorVolume.model_validate(v) for v in record.volumes],
+                             gpp=GitProcessorPointer.model_validate(record.gpp) if record.gpp else None,
+                             error=record.error)
 
-                # is the state ready? -> update state to 'busy' and begin undeployment
-                elif proc.state == Processor.State.READY:
-                    # update the state to busy
-                    proc.state = Processor.State.BUSY_UNDEPLOY
-                    record.state = proc.state.value
-                    session.commit()
+            # is the state failed? -> delete the db record
+            if proc.state == Processor.State.FAILED:
+                log.warning('undeploy', 'Processor failed, removing', proc=proc_id, error=record.error)
+                session.delete(record)
+                session.commit()
 
-                    # start the worker
-                    threading.Thread(target=self.perform_undeploy, args=(proc, )).start()
+            # is the state ready? -> update state to 'busy' and begin undeployment
+            elif proc.state == Processor.State.READY:
+                # update the state to busy
+                proc.state = Processor.State.BUSY_UNDEPLOY
+                record.state = proc.state.value
+                session.commit()
+                start_undeploy = True
 
-                # is the state busy going up? -> throw error
-                elif proc.state == Processor.State.BUSY_DEPLOY:
-                    raise RTIException("Cannot undeploy a processor that is currently deploying. Try again later.")
+            # is the state busy going up? -> throw error
+            elif proc.state == Processor.State.BUSY_DEPLOY:
+                raise OperationError(operation='undeploy', stage='check', cause='processor is currently deploying')
 
-                # is the state busy going down? -> do nothing
-                elif proc.state == Processor.State.BUSY_DEPLOY:
-                    logger.warning(f"[undeploy:{shorten_id(proc_id)}] already undeploying.")
+            # is the state busy going down? -> do nothing
+            elif proc.state == Processor.State.BUSY_UNDEPLOY:
+                log.warning('undeploy', 'Processor already undeploying', proc=proc_id)
 
-                return proc
+        # start the worker as async task with tracking - outside any lock
+        if start_undeploy:
+            task = asyncio.create_task(self.perform_undeploy(proc))
+            task.add_done_callback(lambda _: self.on_undeploy_worker_done(proc.id))
+            with self._mutex:
+                self._undeploy_workers[proc.id] = task
 
-    def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
+        return proc
+
+    async def rest_submit(self, tasks: List[Task], request: Request) -> List[Job]:
         """
         Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
         coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
@@ -294,32 +347,32 @@ class RTIServiceBase(RTIRESTService):
         iid = request.headers['saasauth-iid']
         for task in tasks:
             if iid != task.user_iid:
-                raise RTIException("Mismatch between user indicated in task and user making request", details={
-                    'iid': iid,
-                    'task': task
-                })
+                raise ValidationError(
+                    field='user_iid', expected=iid, actual=task.user_iid,
+                    hint='mismatch between task user and request user'
+                )
 
-        return self.submit(tasks)
+        return await self.submit(tasks)
 
-    def cancel_resource_reservations(self, checklists: List[TaskChecklist]) -> None:
+    async def cancel_resource_reservations(self, checklists: List[TaskChecklist]) -> None:
         for checklist in checklists:
             # there MIGHT BE a reservation if we have a namespace
             if checklist.task.namespace is None:
                 continue
 
             # send the cancel message to all nodes in the network
-            self._node.db.cancel_namespace_reservation(checklist.task.namespace, checklist.job_id)
+            await self._node.db.cancel_namespace_reservation(checklist.task.namespace, checklist.job_id)
 
-    def check_submitted_tasks(self, tasks: List[Task]) -> List[TaskChecklist]:
+    async def check_submitted_tasks(self, tasks: List[Task]) -> List[TaskChecklist]:
         # create the checklists for each task
-        checklists: List[TaskChecklist] = [
-            TaskChecklist(
+        checklists: List[TaskChecklist] = []
+        for task in tasks:
+            checklists.append(TaskChecklist(
                 task=task,
-                proc=self.get_proc(task.proc_id),
+                proc=await self.get_proc(task.proc_id),
                 job_id=generate_random_string(8),
                 peers=[], job=None, status=None
-            ) for task in tasks
-        ]
+            ))
 
         unique_user_iids: Set[str] = set()
         unique_task_names: Set[str] = set()
@@ -328,26 +381,26 @@ class RTIServiceBase(RTIRESTService):
 
             # task names are mandatory for easier distinction in a batch
             if len(checklists) > 1 and checklist.task.name is None:
-                raise RTIException("Missing name for task which is member of batch")
+                raise ValidationError(field='task.name', hint='required for batch member')
 
             # check if the task name is unique
             if checklist.task.name in unique_task_names:
-                raise RTIException(f"Duplicate task name '{checklist.task.name}' (task names must be unique)")
+                raise ValidationError(field='task.name', hint=f"duplicate name '{checklist.task.name}'")
             else:
                 unique_task_names.add(checklist.task.name)
 
             # check if the required processor is deployed for each task
             if checklist.proc is None:
-                raise RTIException(f"Processor {checklist.task.proc_id} required by task but not deployed")
+                raise NotFoundError(resource_type='processor', resource_id=checklist.task.proc_id, hint='not deployed')
 
         # there should be only one user iid
         if len(unique_user_iids) > 1:
-            raise RTIException(f"Multiple users for batch job submission: {', '.join(unique_user_iids)}")
+            raise ValidationError(field='user_iid', hint=f"multiple users in batch: {', '.join(unique_user_iids)}")
 
         # check if the node knows about the user identities
-        user: Optional[Identity] = self._node.db.get_identity(tasks[0].user_iid)
+        user: Optional[Identity] = await self._node.db.get_identity(tasks[0].user_iid)
         if user is None:
-            raise RTIException(f"User identity {tasks[0].user_iid} unknown")
+            raise NotFoundError(resource_type='identity', resource_id=tasks[0].user_iid)
 
         # check if any of the tasks require resource reservations
         combined: Dict[str, Tuple[ResourceDescriptor, NamespaceInfo]] = {}
@@ -360,22 +413,19 @@ class RTIServiceBase(RTIRESTService):
 
             # if namespace is given a budget must be given as well, if not -> error
             if task.budget is None:
-                raise RTIException(f"Task {task.name} missing resource budget")
+                raise ValidationError(field='task.budget', hint=f"required for task '{task.name}'")
 
             # make sure we have a tuple in combined for this namespace
             if task.namespace not in combined:
                 combined[task.namespace] = (
-                    ResourceDescriptor(vcpus=0, memory=0), self._node.db.get_namespace(task.namespace)
+                    ResourceDescriptor(vcpus=0, memory=0), await self._node.db.get_namespace(task.namespace)
                 )
 
             ns_budget, ns_info = combined[task.namespace]
 
-            if ns_info is None:
-                print(ns_info)
-
             # can the budget of the task be satisfied by the namespace in principle?
             if task.budget.vcpus > ns_info.budget.vcpus or task.budget.memory > ns_info.budget.memory:
-                raise RTIException(f"Task {task.name} exceeds namespace resource capacity")
+                raise ValidationError(field='task.budget', hint=f"task '{task.name}' exceeds namespace capacity")
 
             # add to the combined resource budget
             ns_budget.vcpus += task.budget.vcpus
@@ -385,32 +435,23 @@ class RTIServiceBase(RTIRESTService):
         for namespace in combined.keys():
             ns_budget, ns_info = combined[namespace]
             if ns_budget.vcpus > ns_info.budget.vcpus or ns_budget.memory > ns_info.budget.memory:
-                raise RTIException(
-                    f"Combined resource budget for namespace '{namespace}' exceeds namespace capacity: "
-                    f"{ns_budget.vcpus} vCPUs + {ns_budget.memory} MB mem > "
-                    f"{ns_info.budget.vcpus} vCPUs + {ns_info.budget.memory} MB mem"
+                raise ValidationError(
+                    field='combined_budget',
+                    hint=f"combined resource budget for namespace '{namespace}' exceeds capacity: "
+                         f"{ns_budget.vcpus} vCPUs + {ns_budget.memory} MB > "
+                         f"{ns_info.budget.vcpus} vCPUs + {ns_info.budget.memory} MB"
                 )
 
         return checklists
 
-    def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
+    async def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         # try to make reservations for all tasks that require it
-        successful = True
-        try:
-            for checklist in checklists:
-                # does the task require a resource reservation?
-                if checklist.task.namespace is not None:
-                    self._node.db.reserve_namespace_resources(
-                        checklist.task.namespace, checklist.job_id, checklist.task.budget
-                    )
-
-        except Exception:
-            successful = False
-
-        # if there was a problem at any point of the reservation process, cancel all reservations (if any)
-        if not successful:
-            self.cancel_resource_reservations(checklists)
-            raise RTIException("Failed to reserve resources for tasks")
+        for checklist in checklists:
+            # does the task require a resource reservation?
+            if checklist.task.namespace is not None:
+                await self._node.db.reserve_namespace_resources(
+                    checklist.task.namespace, checklist.job_id, checklist.task.budget
+                )
 
         # try to prepare the job for each task
         for checklist in checklists:
@@ -436,7 +477,7 @@ class RTIServiceBase(RTIRESTService):
                 # noinspection PyTypeChecker
                 json.dump(checklist.status.model_dump(), f, indent=2)
 
-    def perform_batch_submission(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
+    async def perform_batch_submission(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:
         with self._session_maker() as session:
             # assemble the batch and create initial job DB records
             batch: List[Tuple[Job, JobStatus, Processor]] = []
@@ -473,19 +514,19 @@ class RTIServiceBase(RTIRESTService):
         except Exception as e:
             error = str(e)
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            logger.error(f"[submit] error while performing batch submission: {trace}")
+            log.error('submit', 'Error performing batch submission', exc=e, batch=batch_id)
 
         # if there was any error during batch submission, we need to clean-up whatever might be there/left
         if error and trace:
             with self._session_maker() as session:
                 for job, status, _ in batch:
                     # purge job that may already be running
-                    record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job.id)
+                    record: Optional[DBJobInfo] = session.get(DBJobInfo, job.id)
                     if record is not None:
                         try:
-                            self.perform_purge(record)
+                            await self.perform_purge(record)
                         except Exception as e:
-                            logger.warning(f"[submit] purge {job.id} failed as part of batch termination: {e}")
+                            log.warning('submit', 'Purge failed during batch termination', job=job.id)
 
                     # update the runner information
                     status.state = JobStatus.State.FAILED
@@ -495,17 +536,17 @@ class RTIServiceBase(RTIRESTService):
                             id='', reason=f"Submission of batch {batch_id} failed", details={'trace': trace}
                         )
                     ))
-                    record = session.query(DBJobInfo).get(job.id)
+                    record = session.get(DBJobInfo, job.id)
                     record.status = status
 
                 session.commit()
 
             # cancel resource reservations (if any left for whatever reason)
-            self.cancel_resource_reservations(checklists)
+            await self.cancel_resource_reservations(checklists)
 
-            raise RTIException(f"Error while submitting jobs for Batch {batch_id}")
+            raise OperationError(operation='batch_submit', stage='submission', cause=f'batch {batch_id} failed')
 
-    def submit(self, tasks: List[Task]) -> List[Job]:
+    async def submit(self, tasks: List[Task]) -> List[Job]:
         """
         Submits one or more tasks to be processed. If multiple tasks are submitted, they will be executed in a
         coupled manner, i.e., their start-up will be synchronised and they are made aware of each other in order
@@ -513,20 +554,20 @@ class RTIServiceBase(RTIRESTService):
         """
 
         # perform a series of checks
-        checklists: List[TaskChecklist] = self.check_submitted_tasks(tasks)
+        checklists: List[TaskChecklist] = await self.check_submitted_tasks(tasks)
 
         # if this is a batch, create a batch id
         batch_id: Optional[str] = generate_random_string(8) if len(tasks) > 1 else None
 
         # prepare job execution
-        self.prepare_job_execution(batch_id, checklists)
+        await self.prepare_job_execution(batch_id, checklists)
 
         # submit the prepared batch
-        self.perform_batch_submission(batch_id, checklists)
+        await self.perform_batch_submission(batch_id, checklists)
 
         return [checklist.job for checklist in checklists]
 
-    def jobs_by_proc(self, proc_id: str) -> List[Job]:
+    async def jobs_by_proc(self, proc_id: str) -> List[Job]:
         """
         Retrieves a list of active jobs processed by a processor. Any job that is pending execution or actively
         executed will be included in the list.
@@ -546,12 +587,12 @@ class RTIServiceBase(RTIRESTService):
 
         return result
 
-    def jobs_by_user(self, request: Request) -> List[Job]:
+    async def jobs_by_user(self, request: Request) -> List[Job]:
         """
         Retrieves a list of active jobs by a user. If the user is the node owner, all active jobs will be returned.
         """
         # get the records
-        user: Identity = self._node.db.get_identity(request.headers['saasauth-iid'])
+        user: Identity = await self._node.db.get_identity(request.headers['saasauth-iid'])
         with self._mutex:
             with self._session_maker() as session:
                 if self._node.identity.id == user.id:
@@ -581,85 +622,124 @@ class RTIServiceBase(RTIRESTService):
 
         return result
 
-    def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
+    async def update_job_status(self, job_id: str, job_status: JobStatus) -> None:
         """
         Updates the status of a particular job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
         """
-        with self._mutex:
-            with self._session_maker() as session:
-                # get the record
-                record: DBJobInfo = session.query(DBJobInfo).get(job_id)
-                if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+        # Collect async work to do (populated during DB operations)
+        namespace_to_cancel: Optional[Tuple[str, str]] = None  # (namespace, job_id)
+        job_to_cleanup: Optional[str] = None
+        jobs_to_cancel: List[Tuple[str, Optional[P2PAddress]]] = []  # (job_id, runner_address)
 
-                # update the status
-                record.status = job_status.model_dump()
-                session.commit()
+        # DB operations - no lock needed, session is per-call
+        with self._session_maker() as session:
+            # get the record
+            record: DBJobInfo = session.get(DBJobInfo, job_id)
+            if record is None:
+                raise NotFoundError(resource_type='job', resource_id=job_id)
 
-                # update the local status file
-                try:
-                    status_path = os.path.join(self._jobs_path, job_id, 'job.status')
-                    with open(status_path, 'w') as f:
-                        # noinspection PyTypeChecker
-                        json.dump(job_status.model_dump(), f, indent=2)
-                except Exception:
-                    logger.warning(f"Could not write job status to {status_path}")
+            # check current state - don't allow overwriting terminal states
+            current_status = JobStatus.model_validate(record.status)
+            if current_status.state in [JobStatus.State.CANCELLED, JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL]:
+                if job_status.state != current_status.state:
+                    # trying to change a terminal state - ignore
+                    log.warning('status', 'Job in terminal state, ignoring update', job=job_id, current=str(current_status.state), requested=str(job_status.state))
+                    return
 
-                # do we need to cancel a namespace reservation?
-                if job_status.state in [
-                    JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED
-                ]:
-                    # cancel resource reservation (if applicable)
-                    job: Job = Job.model_validate(record.job)
-                    if job.task.namespace is not None:
-                        self._node.db.cancel_namespace_reservation(job.task.namespace, job.id)
+            # update the status
+            record.status = job_status.model_dump()
+            session.commit()
 
-                    # initiate post-job clean-up
+            # update the local status file
+            try:
+                status_path = os.path.join(self._jobs_path, job_id, 'job.status')
+                with open(status_path, 'w') as f:
+                    # noinspection PyTypeChecker
+                    json.dump(job_status.model_dump(), f, indent=2)
+            except Exception:
+                log.warning('status', 'Could not write job status file', path=status_path)
+
+            # do we need to cancel a namespace reservation?
+            if job_status.state in [
+                JobStatus.State.FAILED, JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED
+            ]:
+                # cancel resource reservation (if applicable)
+                job: Job = Job.model_validate(record.job)
+                if job.task.namespace is not None:
+                    namespace_to_cancel = (job.task.namespace, job.id)
+
+                # check if cleanup needed (short lock for dict access)
+                with self._mutex:
                     if job.id not in self._cleanup_workers:
-                        # start the cancellation worker
-                        worker = threading.Thread(target=self.perform_job_cleanup, args=(job.id,))
-                        self._cleanup_workers[record.id] = worker
-                        worker.start()
+                        job_to_cleanup = job.id
+                        self._cleanup_workers[job.id] = None  # placeholder
 
-                # is this job part of a batch?
-                batch_records: Optional[List[DBJobInfo]] = \
-                    session.query(DBJobInfo).filter_by(
-                        batch_id=record.batch_id).all() if record.batch_id else None
+            # is this job part of a batch?
+            batch_records: Optional[List[DBJobInfo]] = \
+                session.query(DBJobInfo).filter_by(
+                    batch_id=record.batch_id).all() if record.batch_id else None
 
-                # do we need to terminate related jobs?
-                if batch_records is not None and job_status.state in [
-                    JobStatus.State.FAILED, JobStatus.State.CANCELLED
-                ]:
-                    for related in batch_records:
-                        # skip if this is the record of the just updated job
-                        if related.id == job_id:
-                            continue
+            # do we need to terminate related jobs?
+            if batch_records is not None and job_status.state in [
+                JobStatus.State.FAILED, JobStatus.State.CANCELLED
+            ]:
+                for related in batch_records:
+                    # skip if this is the record of the just updated job
+                    if related.id == job_id:
+                        continue
 
-                        # is there already a cancellation worker?
-                        if related.id in self._cancellation_workers:
-                            continue
+                    # check the status and collect jobs to cancel
+                    related_status = JobStatus.model_validate(related.status)
+                    if related_status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
+                                                JobStatus.State.RUNNING]:
+                        # short lock for dict check-then-add
+                        with self._mutex:
+                            if related.id in self._cancellation_workers:
+                                continue
+                            self._cancellation_workers[related.id] = None  # placeholder
 
-                        # check the status and initiate cancellation if necessary
-                        related_status = JobStatus.model_validate(related.status)
-                        if related_status.state in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED,
-                                                    JobStatus.State.RUNNING]:
-                            logger.info(f"Job {job_id} failed/cancelled -> "
-                                        f"related job {related.id} status {related_status.state} -> cancel")
-                            self._job_cancel_internal(related)
+                        log.info('batch', 'Job failed/cancelled, cancelling related job', job=job_id, related=related.id, state=str(related_status.state))
+
+                        # extract runner info while session is open
+                        if related.runner.get('identity') is not None and related.runner.get('address') is not None:
+                            runner = Identity.model_validate(related.runner['identity'])
+                            runner_address = P2PAddress(
+                                address=related.runner['address'],
+                                curve_secret_key=self._node.keystore.curve_secret_key(),
+                                curve_public_key=self._node.keystore.curve_public_key(),
+                                curve_server_key=runner.c_public_key
+                            )
                         else:
-                            logger.info(f"Job {job_id} failed/cancelled -> "
-                                        f"related job {related.id} status {related_status.state} -> skip")
+                            runner_address = None
 
-    def get_job_owner_iid(self, job_id: str) -> str:
+                        jobs_to_cancel.append((related.id, runner_address))
+                    else:
+                        log.info('batch', 'Job failed/cancelled, skipping related job', job=job_id, related=related.id, state=str(related_status.state))
+
+        # Async operations - outside any lock
+        if namespace_to_cancel:
+            await self._node.db.cancel_namespace_reservation(namespace_to_cancel[0], namespace_to_cancel[1])
+
+        if job_to_cleanup:
+            task = asyncio.create_task(self.perform_job_cleanup(job_to_cleanup))
+            with self._mutex:
+                self._cleanup_workers[job_to_cleanup] = task
+
+        for cancel_job_id, runner_address in jobs_to_cancel:
+            task = asyncio.create_task(self.perform_cancel(cancel_job_id, runner_address))
+            with self._mutex:
+                self._cancellation_workers[cancel_job_id] = task
+
+    async def get_job_owner_iid(self, job_id: str) -> str:
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
                 return record.user_iid
 
-    def get_job_status(self, job_id: str) -> JobStatus:
+    async def get_job_status(self, job_id: str) -> JobStatus:
         """
         Retrieves detailed information about the status of a job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
@@ -667,13 +747,13 @@ class RTIServiceBase(RTIRESTService):
         # get the record
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
         return JobStatus.model_validate(record.status)
 
-    def get_batch_status(self, batch_id: str) -> BatchStatus:
+    async def get_batch_status(self, batch_id: str) -> BatchStatus:
         """
         Retrieves detailed information about the status of a batch of jobs. Authorisation is required by the owner of
         the batch (i.e., the user that has created the batch by submitting the tasks in the first place).
@@ -684,7 +764,7 @@ class RTIServiceBase(RTIRESTService):
                 # get the records
                 records = session.query(DBJobInfo).filter_by(batch_id=batch_id).all()
                 if records is None:
-                    raise RTIException(f"Batch {batch_id} does not exist.")
+                    raise NotFoundError(resource_type='batch', resource_id=batch_id)
 
                 # determine the batch user iid (all jobs have the same user iid)
                 user_iid = records[0].user_iid
@@ -714,7 +794,7 @@ class RTIServiceBase(RTIRESTService):
         # check the status
         status = JobStatus.model_validate(record.status)
         if status.state not in [JobStatus.State.UNINITIALISED, JobStatus.State.INITIALISED, JobStatus.State.RUNNING]:
-            raise RTIException(f"Job {record.id} is not active -> job cannot be cancelled.")
+            raise OperationError(operation='cancel', stage='check', cause=f'job {record.id} not active')
 
         # if possible, determine the runner P2P address
         if record.runner.get('identity') is not None and record.runner.get('address') is not None:
@@ -728,14 +808,14 @@ class RTIServiceBase(RTIRESTService):
         else:
             runner_address = None
 
-        # start the cancellation worker
-        worker = threading.Thread(target=self.perform_cancel, args=(record.id, runner_address))
-        self._cancellation_workers[record.id] = worker
-        worker.start()
+        # start the cancellation worker as async task
+        task = asyncio.create_task(self.perform_cancel(record.id, runner_address))
+        with self._mutex:
+            self._cancellation_workers[record.id] = task
 
         return status
 
-    def job_cancel(self, job_id: str) -> JobStatus:
+    async def job_cancel(self, job_id: str) -> JobStatus:
         """
         Attempts to cancel a running job. Depending on the implementation of the processor, this may or may not be
         possible.
@@ -743,13 +823,13 @@ class RTIServiceBase(RTIRESTService):
         # get the record
         with self._mutex:
             with self._session_maker() as session:
-                record = session.query(DBJobInfo).get(job_id)
+                record = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
         return self._job_cancel_internal(record)
 
-    def job_purge(self, job_id: str) -> JobStatus:
+    async def job_purge(self, job_id: str) -> JobStatus:
         """
         Purges a running job. It will be removed regardless of its state.
         """
@@ -757,12 +837,12 @@ class RTIServiceBase(RTIRESTService):
         with self._mutex:
             with self._session_maker() as session:
                 # get the record
-                record: Optional[DBJobInfo] = session.query(DBJobInfo).get(job_id)
+                record: Optional[DBJobInfo] = session.get(DBJobInfo, job_id)
                 if record is None:
-                    raise RTIException(f"Job {job_id} does not exist.")
+                    raise NotFoundError(resource_type='job', resource_id=job_id)
 
                 # perform the purge
-                self.perform_purge(record)
+                await self.perform_purge(record)
 
                 # delete the record
                 session.delete(record)

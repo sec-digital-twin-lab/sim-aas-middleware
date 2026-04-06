@@ -1,6 +1,6 @@
 import json
 import os
-from typing import List, Optional, Dict, Tuple, Union
+from typing import List, Optional, Dict, Tuple
 
 from pydantic import BaseModel
 
@@ -8,13 +8,13 @@ from simaas.core.identity import Identity
 
 from simaas.core.keystore import Keystore
 
-from simaas.core.logging import Logging
-from simaas.dor.exceptions import FetchDataObjectFailedError, PushDataObjectFailedError
-from simaas.dor.schemas import DataObject, DataObjectRecipe
+from simaas.core.logging import get_logger
+from simaas.core.errors import NetworkError
+from simaas.dor.schemas import DataObject, DataObjectRecipe, TagValueType
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
-logger = Logging.get('dor.protocol')
+log = get_logger('simaas.dor', 'dor')
 
 
 class LookupRequest(BaseModel):
@@ -53,7 +53,7 @@ class P2PLookupDataObject(P2PProtocol):
         # search for the requested data objects and see if we have any of them
         records: Dict[str, DataObject] = {}
         for obj_id in request.obj_ids:
-            meta: Optional[DataObject] = self._node.dor.get_meta(obj_id)
+            meta: Optional[DataObject] = await self._node.dor.get_meta(obj_id)
             if meta:
                 records[obj_id] = meta
 
@@ -112,13 +112,13 @@ class P2PFetchDataObject(P2PProtocol):
             return reply.meta
 
         else:
-            raise FetchDataObjectFailedError(details=reply.details)
+            raise NetworkError(peer_address=peer.p2p_address, operation='fetch', **reply.details)
 
     async def handle(
             self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # check if we have that data object
-        meta = self._node.dor.get_meta(request.obj_id)
+        meta = await self._node.dor.get_meta(request.obj_id)
         if not meta:
             return FetchResponse(
                 successful=False, meta=None, details={
@@ -130,7 +130,7 @@ class P2PFetchDataObject(P2PProtocol):
         # check if the data object access is restricted and (if so) if the user has the required permission
         if meta.access_restricted:
             # get the identity of the user
-            user = self._node.db.get_identity(request.user_iid)
+            user = await self._node.db.get_identity(request.user_iid)
             if user is None:
                 return FetchResponse(
                     successful=False, meta=None, details={
@@ -201,7 +201,7 @@ class PushRequest(BaseModel):
     content_encrypted: bool
     license: DataObject.License
     recipe: Optional[DataObjectRecipe]
-    tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]]
+    tags: Optional[Dict[str, TagValueType]]
 
 
 class PushResponse(BaseModel):
@@ -223,7 +223,7 @@ class P2PPushDataObject(P2PProtocol):
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
             access_restricted: bool, content_encrypted: bool, license: DataObject.License,
             recipe: Optional[DataObjectRecipe] = None,
-            tags: Optional[Dict[str, Union[str, int, float, bool, List, Dict]]] = None
+            tags: Optional[Dict[str, TagValueType]] = None
     ) -> DataObject:
         peer_address = P2PAddress(
             address=p2p_address,
@@ -253,7 +253,7 @@ class P2PPushDataObject(P2PProtocol):
             return reply.meta
 
         else:
-            raise PushDataObjectFailedError(details=reply.details)
+            raise NetworkError(peer_address=p2p_address, operation='push', **reply.details)
 
     async def handle(
             self, request: PushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
@@ -262,14 +262,13 @@ class P2PPushDataObject(P2PProtocol):
         if self._node.dor is None:
             return PushResponse(
                 successful=False, meta=None, details={
-                    'reason': 'node has no DOR',
-                    'user_iid': request.user_iid,
+                    'reason': 'Target node does not support DOR capabilities',
                     'node_iid': self._node.identity.id
                 }
             ), None
 
         # add the data object
-        meta = self._node.dor.add(
+        meta = await self._node.dor.add(
             attachment_path, request.data_type, request.data_format, request.owner_iid,
             creators_iid=request.creators_iid, access_restricted=request.access_restricted,
             content_encrypted=request.content_encrypted, license=request.license,

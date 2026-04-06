@@ -1,16 +1,15 @@
 import asyncio
-import traceback
 from typing import Optional, List, Tuple, Dict
 
 from pydantic import BaseModel
 
 from simaas.core.identity import Identity
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
-from simaas.p2p.exceptions import PeerUnavailableError
+from simaas.core.errors import NetworkError
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
-logger = Logging.get('nodedb.protocol')
+log = get_logger('simaas.nodedb', 'nodedb')
 
 
 class NodeDBSnapshot(BaseModel):
@@ -66,10 +65,8 @@ class P2PUpdateIdentity(P2PProtocol):
                 reply: UpdateIdentityMessage = reply  # casting for PyCharm
 
                 result.append(reply.identity)
-            except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-                logger.error(f"Failed to send identity update to: {peer.identity.name} | {peer.identity.id}")
-                logger.error(trace)
+            except NetworkError as e:
+                log.warning('broadcast', 'Peer unavailable for identity update', peer=peer.identity.id, reason=e.reason)
 
         return result
 
@@ -77,8 +74,8 @@ class P2PUpdateIdentity(P2PProtocol):
             self, request: UpdateIdentityMessage, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        logger.info(f"Received identity update from node: {request.identity.name} | {request.identity.id}")
-        self._node.db.update_identity(request.identity)
+        log.info('identity', 'Received identity update from node', name=request.identity.name, id=request.identity.id)
+        await self._node.db.update_identity(request.identity)
         return UpdateIdentityMessage(identity=self._node.identity), None
 
     @staticmethod
@@ -118,7 +115,7 @@ class P2PGetIdentity(P2PProtocol):
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        identity: Optional[Identity] = self._node.db.get_identity(request.iid)
+        identity: Optional[Identity] = await self._node.db.get_identity(request.iid)
         return GetIdentityResponse(identity=identity), None
 
     @staticmethod
@@ -158,7 +155,7 @@ class P2PGetNetwork(P2PProtocol):
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        network: List[NodeInfo] = self._node.db.get_network()
+        network: List[NodeInfo] = await self._node.db.get_network()
         return GetNetworkResponse(network=network), None
 
     @staticmethod
@@ -185,7 +182,7 @@ class P2PJoinNetwork(P2PProtocol):
     async def perform(self, boot_node: NodeInfo) -> NodeInfo:
         # send an update to the boot node, then proceed to send updates to all peers that discovered along the way
         remaining: List[NodeInfo] = [boot_node]
-        processed: Dict[str, NodeInfo] = {self._node.identity.id: self._node.db.get_node()}
+        processed: Dict[str, NodeInfo] = {self._node.identity.id: await self._node.db.get_node()}
         while len(remaining) > 0:
             # have we already processed that peer?
             peer: NodeInfo = remaining.pop(0)
@@ -206,8 +203,8 @@ class P2PJoinNetwork(P2PProtocol):
 
                 # create update message with a snapshot of the network, excluding nodes we already know about
                 message = PeerUpdateMessage(
-                    origin=self._node.db.get_node(),
-                    snapshot=self._node.db.get_snapshot(exclude=list(processed.keys())),
+                    origin=await self._node.db.get_node(),
+                    snapshot=await self._node.db.get_snapshot(exclude=list(processed.keys())),
                 )
 
                 # send update and wait for reply
@@ -217,13 +214,13 @@ class P2PJoinNetwork(P2PProtocol):
                 reply: PeerUpdateMessage = reply  # casing for PyCharm
 
                 # update the db information about the originator
-                self._node.db.update_identity(reply.origin.identity)
-                self._node.db.update_network(reply.origin)
+                await self._node.db.update_identity(reply.origin.identity)
+                await self._node.db.update_network(reply.origin)
 
                 # process the snapshot identities (if any)
                 if reply.snapshot.update_identity:
                     for identity in reply.snapshot.update_identity:
-                        self._node.db.update_identity(identity)
+                        await self._node.db.update_identity(identity)
 
                 # process the snapshot nodes (if any)
                 if reply.snapshot.update_network:
@@ -233,16 +230,16 @@ class P2PJoinNetwork(P2PProtocol):
                 # process the namespaces (if any)
                 if reply.snapshot.update_namespace:
                     for ns_info in reply.snapshot.update_namespace:
-                        self._node.db.handle_namespace_snapshot(ns_info)
+                        await self._node.db.handle_namespace_snapshot(ns_info)
 
-                logger.debug(f"Adding peer at {peer.p2p_address} to db: {peer.identity.name} | {peer.identity.id}")
+                log.debug(f"Adding peer at {peer.p2p_address} to db", name=peer.identity.name, id=peer.identity.id)
 
-            except PeerUnavailableError:
-                logger.debug(f"Peer at {peer.p2p_address} unavailable -> Removing from NodeDB.")
-                self._node.db.remove_node_by_address(peer.p2p_address)
+            except NetworkError:
+                log.debug(f"Peer at {peer.p2p_address} unavailable, removing from NodeDB")
+                await self._node.db.remove_node_by_address(peer.p2p_address)
 
             # get all nodes in the network and add any nodes that we may not have been aware of
-            for node in self._node.db.get_network():
+            for node in await self._node.db.get_network():
                 if node.identity.id not in processed:
                     remaining.append(node)
 
@@ -252,27 +249,27 @@ class P2PJoinNetwork(P2PProtocol):
             self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # update the db information about the originator
-        self._node.db.update_identity(request.origin.identity)
-        self._node.db.update_network(request.origin)
+        await self._node.db.update_identity(request.origin.identity)
+        await self._node.db.update_network(request.origin)
 
         # process the snapshot identities (if any)
         if request.snapshot.update_identity:
             for identity in request.snapshot.update_identity:
-                self._node.db.update_identity(identity)
+                await self._node.db.update_identity(identity)
 
         # process the snapshot nodes (if any)
         if request.snapshot.update_network:
             for node in request.snapshot.update_network:
-                self._node.db.update_network(node)
+                await self._node.db.update_network(node)
 
         # process the namespaces (if any)
         if request.snapshot.update_namespace:
             for ns_info in request.snapshot.update_namespace:
-                self._node.db.handle_namespace_snapshot(ns_info)
+                await self._node.db.handle_namespace_snapshot(ns_info)
 
         return PeerUpdateMessage(
-            origin=self._node.db.get_node(),
-            snapshot=self._node.db.get_snapshot(exclude=[self._node.identity.id, request.origin.identity.id])
+            origin=await self._node.db.get_node(),
+            snapshot=await self._node.db.get_snapshot(exclude=[self._node.identity.id, request.origin.identity.id])
         ), None
 
     @staticmethod
@@ -296,8 +293,8 @@ class P2PLeaveNetwork(P2PProtocol):
         self._node = node
 
     async def perform(self, blocking: bool = False) -> None:
-        message = PeerLeaveMessage(origin=self._node.db.get_node())
-        for peer in self._node.db.get_network():
+        message = PeerLeaveMessage(origin=await self._node.db.get_node())
+        for peer in await self._node.db.get_network():
             if peer.identity.id != message.origin.identity.id:
                 peer_address = P2PAddress(
                     address=peer.p2p_address,
@@ -309,13 +306,20 @@ class P2PLeaveNetwork(P2PProtocol):
                 if blocking:
                     await p2p_request(peer_address, self.NAME, message)
                 else:
-                    asyncio.create_task(p2p_request(peer_address, self.NAME, message))
+                    def _on_leave_done(task: asyncio.Task):
+                        try:
+                            task.result()
+                        except Exception as e:
+                            log.warning('leave', 'Failed to notify peer of leave', exc=e)
+
+                    task = asyncio.create_task(p2p_request(peer_address, self.NAME, message))
+                    task.add_done_callback(_on_leave_done)
 
     async def handle(
             self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        self._node.db.update_identity(request.origin.identity)
-        self._node.db.remove_node_by_id(request.origin.identity)
+        await self._node.db.update_identity(request.origin.identity)
+        await self._node.db.remove_node_by_id(request.origin.identity)
         return None, None
 
     @staticmethod
@@ -357,24 +361,15 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
                 peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget)
             )
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send update namespace budget request for {namespace} "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            log.warning('namespace', 'Peer unavailable for namespace budget update', peer=peer.identity.id, namespace=namespace, reason=e.reason)
 
     async def handle(
             self, request: UpdateNamespaceBudgetRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            self._node.db.handle_namespace_update(request.namespace, request.budget)
-            return None, None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(trace)
-            return None, None
+        await self._node.db.handle_namespace_update(request.namespace, request.budget)
+        return None, None
 
     @staticmethod
     def request_type():
@@ -424,28 +419,18 @@ class P2PReserveNamespaceResources(P2PProtocol):
             reply: ResourceReservationReply = reply  # casting for PyCharm
             return reply.accepted
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation request for {namespace}:{job_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            log.warning('namespace', 'Peer unavailable for resource reservation', peer=peer.identity.id, namespace=namespace, job=job_id, reason=e.reason)
             return False
 
     async def handle(
             self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            accepted: bool = self._node.db.handle_namespace_reservation(
-                request.namespace, request.job_id, request.resources
-            )
-            return ResourceReservationReply(accepted=accepted), None
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to handle resource reservation request for {request.namespace}:{request.job_id}'")
-            logger.error(trace)
-            return ResourceReservationReply(accepted=False), None
+        accepted: bool = await self._node.db.handle_namespace_reservation(
+            request.namespace, request.job_id, request.resources
+        )
+        return ResourceReservationReply(accepted=accepted), None
 
     @staticmethod
     def request_type():
@@ -484,24 +469,14 @@ class P2PCancelNamespaceReservation(P2PProtocol):
                 peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id)
             )
 
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to send resource reservation cancellation for {namespace}:{job_id}' "
-                         f"to: {peer.identity.name} | {peer.identity.id}")
-            logger.error(trace)
+        except NetworkError as e:
+            log.warning('namespace', 'Peer unavailable for reservation cancellation', peer=peer.identity.id, namespace=namespace, job=job_id, reason=e.reason)
 
     async def handle(
-            self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
+            self, request: ResourceReservationCancellation, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        try:
-            self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
-
-        except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
-            logger.error(f"Failed to handle resource reservation cancellation for {request.namespace}:{request.job_id}")
-            logger.error(trace)
-
+        await self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
         return None, None
 
     @staticmethod

@@ -3,7 +3,6 @@ import logging
 import os
 import socket
 import time
-import traceback
 from typing import List, Dict, Tuple
 from pydantic import BaseModel
 
@@ -77,8 +76,8 @@ class ThermostatProcessor(ProcessorBase):
         try:
             batch_status: BatchStatus = namespace.rti.get_batch_status(job.batch_id)
         except Exception as e:
-            logger.error(f"Getting batch status from {namespace.custodian_address()}: {e}")
-            raise e
+            logger.error(f"Thermostat Controller: Failed to get batch status from {namespace.custodian_address()}: {e}")
+            raise
 
         # Get room simulator address from batch status
         members: Dict[str, BatchStatus.Member] = {member.name: member for member in batch_status.members}
@@ -95,9 +94,8 @@ class ThermostatProcessor(ProcessorBase):
             listener.on_message(Severity.INFO, "Thermostat Controller: Connected to Room Simulator")
             listener.on_progress_update(20)
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            print(trace)
-            raise e
+            logger.error(f"Thermostat Controller: Connection to room simulator failed: {e}")
+            raise
 
         # Step 4: Start simulation loop to control heater based on temperature
         state: List[Tuple[float, int]] = []
@@ -131,9 +129,8 @@ class ThermostatProcessor(ProcessorBase):
                 client.sendall(command.encode())
 
             except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(trace)
-                raise e
+                logger.error(f"Thermostat Controller: Simulation loop error: {e}")
+                raise
 
         # Step 5: Close connection and finalize results
         client.close()

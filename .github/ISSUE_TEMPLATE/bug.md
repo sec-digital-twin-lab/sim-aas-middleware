@@ -7,6 +7,11 @@ assignees: ''
 
 ---
 
+**Environment**
+- OS:
+- Python version:
+- Package version:
+
 **Bug Description**
 <!--
 A clear and concise description of what the bug is.
@@ -14,17 +19,15 @@ A clear and concise description of what the bug is.
 
 
 **Steps To Reproduce**
-<!-- 
+<!--
 Outline the steps required to reproduce the behavior.
-If applicable, add screenshots to help explain your problem.
 -->
 
-1. Go to '...'
-2. Click on '....'
-3. See error
+1. Run `...`
+2. See error
 
 **Expected behaviour**
-<!-- 
+<!--
 Description of what you expected to happen.
 -->
 
@@ -33,3 +36,13 @@ Description of what you expected to happen.
 <!--
 Description of what actually happened.
 -->
+
+
+**Logs / Error Messages**
+<!--
+Paste any relevant logs or error messages.
+Remove if not applicable.
+-->
+
+```
+```

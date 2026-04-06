@@ -1,11 +1,30 @@
 # Processor Implementation Guide
-Each processor is implemented in a file named **processor.py**, which defines a class 
-inheriting from **simaas.core.processor.ProcessorBase**. This class is executed by the job 
+Each processor is implemented in a file named **processor.py**, which defines a class
+inheriting from **simaas.core.processor.ProcessorBase**. This class is executed by the job
 runner during job execution.
 
-The processor is responsible for performing the core computation of a job using the inputs 
-provided and writing any outputs to disk. The job runner handles orchestration: preparing the 
+The processor is responsible for performing the core computation of a job using the inputs
+provided and writing any outputs to disk. The job runner handles orchestration: preparing the
 environment, managing input/output data, and invoking your processor via its `run()` method.
+
+## Processors as Use-Case Implementations
+A processor adapter is not a thin wrapper around existing modelling software. It implements a
+**specific use case** of that software. General-purpose models (e.g., WRF, PALM, CEA) offer
+enormous flexibility and many configurable parameters. A processor adapter narrows this to a
+well-defined scientific application by:
+
+- **Fixing** parameters and settings that define the use case (e.g., physics schemes, domain
+  configuration, boundary condition approach).
+- **Exposing** only the degrees of freedom relevant to the end user (e.g., simulation area,
+  resolution, scenario parameters).
+- **Embedding** domain logic such as input pre-processing, data format transformations,
+  coordinate system handling, and output post-processing.
+- **Enforcing** constraints that ensure scientifically valid usage (e.g., parameter ranges,
+  CFL conditions, spatial extent limits).
+
+The domain logic within a processor adapter is intentional and central — it encodes the
+scientific decisions made by the adapter author. This is what distinguishes a model adapter
+from a generic software API.
 
 ## Required Interface
 A valid processor must define a class that inherits from `ProcessorBase`, implementing the 
@@ -47,6 +66,7 @@ cancellation or timeout).
 Here is an example of a `processor.py` file:
 ```python
 from simaas.core.processor import ProcessorBase, ProgressListener
+from simaas.rti.schemas import Severity
 import os
 import json
 import threading
@@ -74,7 +94,8 @@ class MyProcessor(ProcessorBase):
 
         # Notify output availability
         listener.on_output_available("result")
-        listener.on_progress_update(1.0, "Processing complete.")
+        listener.on_progress_update(1.0)
+        listener.on_message(Severity.INFO, "Processing complete.")
 
     def interrupt(self):
         self._stop_requested.set()

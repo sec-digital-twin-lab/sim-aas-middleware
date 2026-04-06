@@ -36,8 +36,8 @@ Test cases with working code can be found in [test_example_abc.py](../../simaas/
 > This examples assumes you have a Sim-aaS Node instance running, read the documentation
 > [here](../../docs/usage_run_simaas_node.md) to learn how to do that.
 
-> If you have not already done so, read the documentation on the build command 
-> [here](../../docs/usage_build_processor_docker_image.md). 
+> If you have not already done so, read the documentation on the build command
+> [here](../../docs/usage_manage_processor_docker_images.md). 
 
 > Processor Docker Images depend on the sim-aas-middleware repository. At the time of writing,
 > this repository is private. Ensure the following environment variables are set with access
@@ -46,13 +46,13 @@ Test cases with working code can be found in [test_example_abc.py](../../simaas/
 The first step is to build the Processor Docker Image for the example. Use a terminal and
 navigate to the `abc` folder, then use the CLI build command:
 ```shell
-simaas-cli build-local .
+simaas-cli image build-local .
 ```
 
 You may want to specify the target platform explicitly (e.g., when planning to run it on 
 a node using AWS RTI service):
 ```shell
-simaas-cli build-local --arch linux/amd64 .
+simaas-cli image build-local --arch linux/amd64 .
 ```
 
 An example dialogue will look like this:

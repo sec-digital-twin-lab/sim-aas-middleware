@@ -1,9 +1,9 @@
 from abc import abstractmethod, ABC
 
 from simaas.core.helpers import hash_bytes_object
-from simaas.core.logging import Logging
+from simaas.core.logging import get_logger
 
-logger = Logging.get('simaas.core')
+log = get_logger('simaas.core', 'core')
 
 
 class KeyPair(ABC):

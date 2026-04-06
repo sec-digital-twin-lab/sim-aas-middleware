@@ -44,8 +44,8 @@ python3 server.py --host 0.0.0.0 --tcp-port 8080 --udp-port 8081
 ```shell
 mkdir ping_test
 cd ping_test
-python3.12 -m venv venv
-source venv/bin/activate
+python3.13 -m venv .venv
+source .venv/bin/activate
 pip install ~/Desktop/repositories/sim-aas-middleware
 ```
 
@@ -53,7 +53,7 @@ pip install ~/Desktop/repositories/sim-aas-middleware
 ## Setup the test node
 Start a new terminal and actiate the environment:
 ```
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 Create an identity for testing:
@@ -72,7 +72,7 @@ Here is sample output of the terminal for reference:
 ```
 ? Enter path to datastore: /Users/foobar/.datastore
 ? Enter the path to the sim-aas-middleware repository /Users/foobar/Desktop/repositories/sim-aas-middleware
-? Select the type of DOR service: Basic
+? Select the type of DOR service: default
 ? Select the type of RTI service: Docker
 ? Retain RTI job history? Yes
 ? Bind service to all network addresses? No
@@ -88,7 +88,7 @@ INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://192.168.50.117:5001 (Press CTRL+C to quit)
 INFO:     192.168.50.117:51605 - "GET /api/v1/db/node HTTP/1.1" 200 OK
-Created 'basic/docker' Sim-aaS node instance at 192.168.50.117:5001/tcp://192.168.50.117:4001(keep RTI job history: Yes) (strict: No) 
+Created 'default/docker' Sim-aaS node instance at 192.168.50.117:5001/tcp://192.168.50.117:4001(keep RTI job history: Yes) (strict: No) 
 ```
 
 Keep that terminal open. Don't terminate it.
@@ -97,7 +97,7 @@ Keep that terminal open. Don't terminate it.
 ## Build and deploy the ping processor
 Start a new terminal and actiate the environment:
 ```
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 Navigate to the folder where the processor is located:
@@ -107,7 +107,7 @@ cd ~/Desktop/repositories/sim-aas-middleware/examples/simple/ping
 
 Run the build command:
 ```
-simaas-cli build-local --arch=linux/amd64 .
+simaas-cli image build-local --arch=linux/amd64 .
 ```
 
 Here is sample output of the terminal for reference:
@@ -143,7 +143,7 @@ Deploying processor 299a...ad5b...Done
 ## Run a job
 Start a new terminal and actiate the environment if necessary:
 ```
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 Submit a job:

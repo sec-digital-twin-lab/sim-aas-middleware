@@ -2,7 +2,6 @@ import json
 import logging
 import os
 import socket
-import traceback
 from typing import List
 from pydantic import BaseModel
 
@@ -84,15 +83,27 @@ class RoomProcessor(ProcessorBase):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.bind(('0.0.0.0', 7001))
         server.listen(1)
+        server.settimeout(1.0)  # Set timeout to allow periodic cancellation checks
         try:
             listener.on_message(Severity.INFO, "Room Simulator: Waiting for connection...")
-            conn, _ = server.accept()
+            conn = None
+            while conn is None and not self._is_cancelled:
+                try:
+                    conn, _ = server.accept()
+                except socket.timeout:
+                    # Timeout allows us to check _is_cancelled flag
+                    continue
+
+            if self._is_cancelled:
+                server.close()
+                listener.on_message(Severity.INFO, "Room Simulator: Cancelled while waiting for connection.")
+                return
+
             listener.on_message(Severity.INFO, "Room Simulator: Connected to Thermostat Controller")
             listener.on_progress_update(20)
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-            print(trace)
-            raise e
+            logger.error(f"Room Simulator: Connection failed: {e}")
+            raise
 
         # Step 3: Start simulation loop to control room temperature based on received commands
         step = 0
@@ -103,12 +114,12 @@ class RoomProcessor(ProcessorBase):
                 # Send current temperature and step number to thermostat controller
                 message = f"STEP:{step},TEMP:{temp[-1]}"
                 conn.sendall(message.encode())
-                print(f"Room Simulator: Sent -> {message}")
+                logger.info(f"Room Simulator: Sent -> {message}")
 
                 # Receive command from thermostat controller
                 data = conn.recv(1024).decode().strip()
                 if data == "NO_CHANGE":
-                    print("Room Simulator: No command received, assuming no change.")
+                    logger.info("Room Simulator: No command received, assuming no change.")
                 elif data == "HEATER_ON":
                     heater_on = True
                 elif data == "HEATER_OFF":
@@ -121,9 +132,8 @@ class RoomProcessor(ProcessorBase):
                 step += 1
 
             except Exception as e:
-                trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(trace)
-                raise e
+                logger.error(f"Room Simulator: Simulation loop error: {e}")
+                raise
 
         # Step 4: Wrap up the co-simulation
         conn.sendall("TERMINATE".encode())
