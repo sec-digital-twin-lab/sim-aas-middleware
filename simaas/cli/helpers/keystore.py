@@ -15,7 +15,6 @@ from simaas.core.keystore import Keystore
 from simaas.core.schemas import KeystoreContent
 from simaas.core.logging import get_logger
 from simaas.cli.helpers.prompts import prompt_for_string, prompt_for_selection, prompt_for_password, prompt_if_missing
-from simaas.cli.helpers.address import extract_address
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 

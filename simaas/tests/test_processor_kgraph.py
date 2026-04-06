@@ -17,7 +17,7 @@ import docker
 import pytest
 import requests
 
-from examples.kgraph.emissions.processor import ProcessorEmissions, write_value
+from examples.kgraph.emissions.processor import ProcessorEmissions
 from simaas.core.logging import get_logger, initialise
 from simaas.dor.wrappers import SPARQLWrapper
 from simaas.helpers import determine_local_ip

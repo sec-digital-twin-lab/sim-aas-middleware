@@ -7,7 +7,6 @@ This module provides fixtures for testing RTI with a 2-node setup where:
 This forces all data to flow through P2P, exposing issues single-node tests cannot detect.
 """
 
-import os
 import tempfile
 from dataclasses import dataclass
 

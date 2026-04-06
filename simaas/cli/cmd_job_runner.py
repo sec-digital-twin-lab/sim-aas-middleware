@@ -26,11 +26,11 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 
 log = get_logger('simaas.rti', 'rti')
-from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode
-from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier
-from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus
-from simaas.core.processor import ProgressListener, ProcessorBase
-from simaas.helpers import find_processors
+from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer, DataObjectRecipe, CObjectNode  # noqa: E402
+from simaas.rti.protocol import P2PRunnerPerformHandshake, P2PPushJobStatus, P2PInterruptJob, BatchBarrier  # noqa: E402
+from simaas.rti.schemas import JobStatus, Severity, JobResult, ExitCode, Job, Task, BatchStatus  # noqa: E402
+from simaas.core.processor import ProgressListener, ProcessorBase  # noqa: E402
+from simaas.helpers import find_processors  # noqa: E402
 
 
 class OutputObjectHandler(threading.Thread):

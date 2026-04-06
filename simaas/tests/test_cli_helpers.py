@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from simaas.cli.helpers.address import extract_address, ensure_address
+from simaas.cli.helpers.address import extract_address
 from simaas.cli.helpers.output import shorten_id, table, print_result
 from simaas.cli.helpers.time import parse_period
 from simaas.cli.helpers.prompts import default_if_missing, deserialise_tag_value

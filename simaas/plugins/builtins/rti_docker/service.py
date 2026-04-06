@@ -5,7 +5,6 @@ import shutil
 import socket
 import threading
 
-import traceback
 from typing import Optional, Tuple, Dict, List
 
 from simaas.core.image import clone_repository, build_processor_image
@@ -222,7 +221,7 @@ class DockerRTIService(RTIServiceBase):
             container_id = self._perform_submit(job, proc)
             log.info('submit', 'Single job submitted', proc=proc.id, job=job.id, container=container_id)
 
-        except Exception as e:
+        except Exception:
             if container_id:
                 log.error('submit', 'Submission failed, terminating container', proc=proc.id, job=job.id, container=container_id)
                 docker_kill_job_container(container_id)
@@ -238,7 +237,7 @@ class DockerRTIService(RTIServiceBase):
                 container_id = self._perform_submit(job, proc, submitted=submitted)
                 log.info('submit', 'Batch job submitted', batch=batch_id, proc=proc.id, job=job.id, container=container_id)
 
-            except Exception as e:
+            except Exception:
                 log.error('submit', 'Batch job submission failed', batch=batch_id, proc=proc.id, job=job.id)
 
                 # Something went wrong, kill already existing containers so there are no zombies from this batch.
@@ -305,7 +304,7 @@ class DockerRTIService(RTIServiceBase):
         try:
             container_id = record.runner['container_id']
             await asyncio.to_thread(docker_kill_job_container, container_id)
-        except Exception as e:
+        except Exception:
             log.warning('purge', 'Killing Docker container failed', job=record.id, container=record.runner.get('container_id'))
 
     async def perform_job_cleanup(self, job_id: str) -> None:

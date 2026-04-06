@@ -5,7 +5,7 @@ import os
 import struct
 import tempfile
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, List, Dict
 
 from InquirerPy.base import Choice
 from dotenv import load_dotenv
@@ -19,7 +19,7 @@ from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.dor.schemas import ProcessorDescriptor, DataObject, GitProcessorPointer
 from simaas.core.image import clone_repository, build_processor_image
-from simaas.helpers import docker_export_image, determine_default_rest_address, docker_client, is_valid_new_file
+from simaas.helpers import docker_export_image, determine_default_rest_address, is_valid_new_file
 from simaas.nodedb.api import NodeDBProxy
 
 log = get_logger('simaas.cli', 'cli')

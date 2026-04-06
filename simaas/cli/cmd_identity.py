@@ -60,7 +60,7 @@ class IdentityRemove(CLICommand):
             # delete the keystore
             keystore_path = os.path.join(args['keystore'], f"{args['keystore-id']}.json")
             os.remove(keystore_path)
-            print(f"Keystore deleted.")
+            print("Keystore deleted.")
 
         else:
             print("Operation cancelled.")

@@ -1,7 +1,6 @@
 import asyncio
 import os
 import time
-import traceback
 from typing import Optional, Tuple, Dict, Any
 
 from pydantic import BaseModel

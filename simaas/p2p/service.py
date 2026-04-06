@@ -4,8 +4,6 @@ import os
 import socket
 import tempfile
 import threading
-import traceback
-
 import zmq
 
 from threading import Lock

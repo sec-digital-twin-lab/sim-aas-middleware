@@ -132,7 +132,7 @@ class RTIServiceBase(RTIRESTService):
                 with open(status_path, 'w') as f:
                     json.dump(status.model_dump(), f, indent=2)
             except Exception as e:
-                log.debug(f"Failed to write local status file", job=job_id, error=str(e))
+                log.debug("Failed to write local status file", job=job_id, error=str(e))
 
     def has_active_workers(self) -> bool:
         all_workers = (
@@ -525,7 +525,7 @@ class RTIServiceBase(RTIRESTService):
                     if record is not None:
                         try:
                             await self.perform_purge(record)
-                        except Exception as e:
+                        except Exception:
                             log.warning('submit', 'Purge failed during batch termination', job=job.id)
 
                     # update the runner information
