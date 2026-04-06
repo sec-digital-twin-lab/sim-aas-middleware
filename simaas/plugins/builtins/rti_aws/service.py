@@ -129,8 +129,10 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     username, password = auth_token.split(":")
 
     # Perform ECR login
-    login_cmd = f"echo {password} | docker login --username AWS --password-stdin {ecr_url}"
-    result = subprocess.run(login_cmd, shell=True, capture_output=True)
+    result = subprocess.run(
+        ['docker', 'login', '--username', 'AWS', '--password-stdin', ecr_url],
+        input=password.encode(), capture_output=True
+    )
     if result.returncode != 0:
         raise OperationError(
             operation='ecr_login', stage='authentication', cause='login failed',
@@ -140,7 +142,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     # Tag the local image for ECR
     # docker tag <local-image> <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     ecr_image = get_ecr_image_name(repository_uri, get_ecr_tag(image_name))
-    result = subprocess.run(f"docker tag {image_name} {ecr_image}", shell=True, capture_output=True)
+    result = subprocess.run(['docker', 'tag', image_name, ecr_image], capture_output=True)
     if result.returncode != 0:
         raise OperationError(
             operation='tag_image', stage='tagging', cause='failed',
@@ -149,7 +151,7 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
 
     # Push the image to ECR
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
-    result = subprocess.run(f"docker push --platform linux/amd64 {ecr_image}", shell=True, capture_output=True)
+    result = subprocess.run(['docker', 'push', '--platform', 'linux/amd64', ecr_image], capture_output=True)
     if result.returncode != 0:
         raise NetworkError(
             operation='ecr_push',
@@ -180,7 +182,7 @@ def ecr_delete_image(repository_name: str, image_name: str, config: Optional[AWS
             for failure in failures:
                 print(f"Failed to delete image: {failure['imageId']} - Reason: {failure['failureReason']}")
     except Exception as e:
-        print(f"Error deleting image: {e}")
+        log.error('ecr', 'Failed to delete ECR image', exc=e)
 
 
 def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
@@ -558,7 +560,7 @@ class AWSRTIService(RTIServiceBase):
             else:
                 log.error('submit', 'Submission failed', proc=proc.id, job=job.id)
 
-            raise e
+            raise
 
     def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> Dict[str, dict]:
         submitted: List[Tuple[Job, str]] = []
@@ -575,7 +577,7 @@ class AWSRTIService(RTIServiceBase):
                     log.info('submit', 'Killing zombie AWS job', batch=batch_id, job=job.id, aws_job=aws_job_id)
                     batch_terminate_job(aws_job_id, config=self._aws_config, reason=f"Issue during submit_single: {e}")
 
-                raise e
+                raise
 
     async def perform_cancel(self, job_id: str, peer_address: Optional[P2PAddress], grace_period: int = 30) -> None:
         runner_iid: str = None
