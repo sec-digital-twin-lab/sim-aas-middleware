@@ -25,6 +25,18 @@ def get_proxy_prefix(endpoint_prefix: str) -> Tuple[str, str]:
     return endpoint_split[0], endpoint_split[1]
 
 
+def _raise_for_error_status(response: requests.Response) -> None:
+    """Parse an error response as ExceptionContent and raise the appropriate exception."""
+    try:
+        content = response.json()
+        content = ExceptionContent.model_validate(content)
+        raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
+    except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
+        if response.status_code == 403:
+            raise AuthorisationError(operation='http_request', hint='HTTP 403 Forbidden')
+        raise RemoteError(response.reason, status_code=response.status_code)
+
+
 def extract_response(response: requests.Response) -> Optional[Union[dict, list]]:
     """
     Extracts the response content in case of an 'Ok' response envelope or raises an exception in case
@@ -62,41 +74,8 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
     elif response.status_code == 401:
         raise AuthorisationError(operation='http_request', hint='HTTP 401 Unauthorized')
 
-    elif response.status_code == 403:
-        # try to parse the response as JSON and then the JSON as ExceptionContent
-        try:
-            content = response.json()
-            content = ExceptionContent.model_validate(content)
-            raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
-        except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
-            raise AuthorisationError(operation='http_request', hint='HTTP 403 Forbidden')
-
-    elif response.status_code == 404:
-        # NotFoundError from remote - parse as ExceptionContent
-        try:
-            content = response.json()
-            content = ExceptionContent.model_validate(content)
-            raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
-        except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
-            raise RemoteError(response.reason, status_code=404)
-
-    elif response.status_code == 422:
-        # ValidationError from remote - parse as ExceptionContent
-        try:
-            content = response.json()
-            content = ExceptionContent.model_validate(content)
-            raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
-        except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
-            raise RemoteError(response.reason, status_code=422)
-
-    elif response.status_code == 502:
-        # NetworkError from remote - parse as ExceptionContent
-        try:
-            content = response.json()
-            content = ExceptionContent.model_validate(content)
-            raise RemoteError(content.reason, remote_id=content.id, remote_details=content.details)
-        except (requests.exceptions.JSONDecodeError, pydantic.ValidationError):
-            raise RemoteError(response.reason, status_code=502)
+    elif response.status_code in (403, 404, 422, 502):
+        _raise_for_error_status(response)
 
     else:
         raise OperationError(

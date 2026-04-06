@@ -229,7 +229,7 @@ class DockerRTIService(RTIServiceBase):
             else:
                 log.error('submit', 'Submission failed', proc=proc.id, job=job.id)
 
-            raise e
+            raise
 
     def perform_submit_batch(self, batch: List[Tuple[Job, JobStatus, Processor]], batch_id: str) -> None:
         submitted: List[Tuple[Job, str]] = []
@@ -246,7 +246,7 @@ class DockerRTIService(RTIServiceBase):
                     log.info('submit', 'Killing zombie container', batch=batch_id, job=job.id, container=container_id)
                     docker_kill_job_container(container_id)
 
-                raise e
+                raise
 
     async def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         runner_iid: str = None
