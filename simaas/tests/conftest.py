@@ -86,6 +86,8 @@ from simaas.tests.fixture_rti import (  # noqa: E402, F401
     PROC_THERMOSTAT_PATH,
     PROC_FACTORISATION_PATH,
     PROC_FACTOR_SEARCH_PATH,
+    PROC_EMISSIONS_PATH,
+    deployed_emissions_processor,
 )
 
 # RTI 2-Node fixtures: separated storage and execution nodes for P2P testing

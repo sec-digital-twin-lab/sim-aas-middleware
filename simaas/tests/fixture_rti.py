@@ -49,6 +49,7 @@ PROC_ROOM_PATH = "examples/cosim/room"
 PROC_THERMOSTAT_PATH = "examples/cosim/thermostat"
 PROC_FACTORISATION_PATH = "examples/prime/factorisation"
 PROC_FACTOR_SEARCH_PATH = "examples/prime/factor_search"
+PROC_EMISSIONS_PATH = "examples/kgraph/emissions"
 
 
 class RTIBackend(Enum):
@@ -391,6 +392,16 @@ def deployed_factor_search_processor(
     """Session-scoped fixture that deploys the Factor Search processor."""
     with ProcessorDeployment(
         'proc-factor-search', PROC_FACTOR_SEARCH_PATH, dor_proxy, rti_proxy, session_node,
+        docker_available
+    ) as meta:
+        yield meta
+
+
+@pytest.fixture(scope="session")
+def deployed_emissions_processor(docker_available, rti_proxy, dor_proxy, session_node) -> DataObject:
+    """Session-scoped fixture that deploys the Emissions (kgraph) processor."""
+    with ProcessorDeployment(
+        'proc-emissions', PROC_EMISSIONS_PATH, dor_proxy, rti_proxy, session_node,
         docker_available
     ) as meta:
         yield meta

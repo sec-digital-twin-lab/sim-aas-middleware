@@ -1,17 +1,17 @@
 # Co-Simulation Example: Room and Thermostat Controllers
 
-This example demonstrates a **synchronized co-simulation** between two processors - 
-a `Room` model and a `Thermostat` controller - coordinated through direct socket 
+This example demonstrates a **synchronized co-simulation** between two processors -
+a `Room` model and a `Thermostat` controller - coordinated through direct socket
 communication, orchestrated by the Sim-aaS Middleware.
 
-The example showcases how distributed models can interact in real-time to perform coupled 
+The example showcases how distributed models can interact in real-time to perform coupled
 simulation tasks, relying on synchronized message exchange over a network connection.
 
 ## Objective
 
 Simulate the thermal dynamics of a room under thermostat control:
 - The **Room** model tracks temperature based on heating and cooling rates.
-- The **Thermostat** model observes the room's temperature and decides whether to 
+- The **Thermostat** model observes the room's temperature and decides whether to
 turn the heater on or off based on configured thresholds.
 
 This setup demonstrates how to:
@@ -50,174 +50,91 @@ from the RTI and connects to it.
 Test cases with working code can be found in [test_example_cosim.py](../../simaas/tests/test_example_cosim.py).
 
 ## Running the Example using the CLI
-> This examples assumes you have a Sim-aaS Node instance running, read the documentation
+> This example assumes you have a Sim-aaS Node instance running, read the documentation
 > [here](../../docs/usage_run_simaas_node.md) to learn how to do that.
 
 > If you have not already done so, read the documentation on the build command
-> [here](../../docs/usage_manage_processor_docker_images.md). 
+> [here](../../docs/usage_manage_processor_docker_images.md).
 
 > Processor Docker Images depend on the sim-aas-middleware repository. At the time of writing,
 > this repository is private. Ensure the following environment variables are set with access
 > to this repository: `GITHUB_USERNAME` and `GITHUB_TOKEN`.
 
-The first step is to build the Processor Docker Images for the example. Use a terminal and
-navigate to the `room` and `thermostat` folders, then use the CLI build command
-for each:
+### Build the Processor Docker Images
+Navigate to the `room` and `thermostat` folders and run the build command for each:
 ```shell
-simaas-cli build-local --arch linux/amd64 .
+simaas-cli image build-local --arch linux/amd64 .
 ```
 
-Note that in this example we build the processors for `linux/amd64` so they are compatible
-with AWS Batch. They can also be run locally by a Docker RTI if needed.
+The `--arch linux/amd64` flag ensures compatibility with AWS Batch. It can be omitted
+when running locally with a Docker RTI on the same platform. The command outputs the
+path to the generated PDI file.
 
-If successful, the build output will look like this:
-```
-...
-Building image 'foobar/proc-room:78da09dc6f956edbca8efca8541ca161959c37ca5cba911819baafc01ad465e6' for platform 'linux/amd64'. This may take a while...
-Done building image 'foobar/proc-room:78da09dc6f956edbca8efca8541ca161959c37ca5cba911819baafc01ad465e6'.
-Done exporting image to '/var/folders/p3/yjbdnj8n69d_dmzpw51dmtj40000gp/T/tmpat7lgcbl/image.tar'.
-Done uploading image to DOR -> object id: 2198252b9a30cf0c50957bd02c3813d0c7f334f17cb4017a40ca1872faecab30
-```
-```
-...
-Building image 'foobar/proc-thermostat:e881f76ce18d93055401e55625cb4b205f4158b072fab072acc158b4cc864207' for platform 'linux/amd64'. This may take a while...
-Done building image 'foobar/proc-thermostat:e881f76ce18d93055401e55625cb4b205f4158b072fab072acc158b4cc864207'.
-Done exporting image to '/var/folders/p3/yjbdnj8n69d_dmzpw51dmtj40000gp/T/tmpszeldqiy/image.tar'.
-Done uploading image to DOR -> object id: e8512063fc99be4b52936a1e2f83f34415a32dfa498abe418ab263e2e52c0e28
-```
-
-The command will ask for the target Sim-aaS node to which the images should be uploaded to. Once
-the images have been uploaded, they should show up as a deployment option:
+### Import the PDIs to the DOR
+The build command creates a PDI file locally for each processor. Import both to the
+node's DOR:
 ```shell
-simaas-cli rti proc deploy
+simaas-cli image import --address <node_address> <path_to_room_pdi>
+simaas-cli image import --address <node_address> <path_to_thermostat_pdi>
 ```
-```
-? Select the processor you would like to deploy: 
-  proc-room <2198...ab30> local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim:78da09...
-  proc-thermostat <e851...0e28> local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim:e881f7...
-```
-Note that in order for this example to work, **both** processors need to be deployed.
 
-You can check the deployment status:
+### Deploy the Processors
+Once the PDIs have been imported, deploy both processors using the object ids returned
+by the import commands:
 ```shell
-simaas-cli rti proc list
+simaas-cli rti --address <node_address> proc deploy --proc-id <room_pdi_object_id>
+simaas-cli rti --address <node_address> proc deploy --proc-id <thermostat_pdi_object_id>
 ```
 
-If deployment was successful, both processors should show up in the list.
-```
-? Enter the node's REST address 192.168.50.126:5001
-Found 2 processor(s) deployed at 192.168.50.126:5001:
-- 2198...ab30: proc-room [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim@78da09...
-- e851...0e28: proc-thermostat [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim@e881f7...
-```
-
-For this example, we need to submit a **batch job** for `room` and `thermostat`. The reason
-is that these two processor jointly perform a co-simulation. Batch submission ensures they
-are executed at the same time and are provided with discovery information at runtime so they
-can connect to each other. Both processors require parameters. Example data can be found in 
-`cosim/data`. In order to use it, it needs to be added to the DOR. Navigate to the `data` 
-folder and use the CLI command to add the files to the DOR:
+In order for this example to work, **both** processors need to be deployed. Verify the
+deployment:
 ```shell
-simaas-cli dor add --data-type JSONObject --data-format json room_parameters.json 
-simaas-cli dor add --data-type JSONObject --data-format json thermostat_parameters.json 
+simaas-cli rti --address <node_address> proc list
 ```
 
-We can now use the data object as input for running a batch job with both, `room` and 
-`thermostat`, processors that have been deployed earlier:  
+### Add Input Data to the DOR
+Both processors require parameters. Example data can be found in `cosim/data`. Add them
+to the DOR:
 ```shell
-simaas-cli rti job submit
+simaas-cli dor --address <node_address> add --data-type JSONObject --data-format json --assume-creator room_parameters.json
+simaas-cli dor --address <node_address> add --data-type JSONObject --data-format json --assume-creator thermostat_parameters.json
 ```
 
-The dialogue for job submission looks as follows:
-```
-? Select the keystore: test/test@test.com/ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw
-? Enter password: ****
-? Enter the node's REST address 192.168.50.126:5001
-? Select the processor for this task: 2198...ab30: proc-room [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim@78da09...
-Specify input interface item 'parameters' with data type/format JSONObject/json
-? How to specify? by-reference
-? Select the data object to be used for input 'parameters': 3fb6...af95 [JSONObject:json] name=room_parameters.json
-? Select the owner for the output data objects: ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw - test <test@test.com>
-? Select the destination node for the output data objects: ztus...1bqw: test at 192.168.50.126:5001
-? Should access to output data objects be restricted? No
-? Give the task a name: room
-? Select a budget for this task: 1 vCPUs, 2048 GB RAM memory
-? Add another task? Note: multiple tasks submitted together will be executed as batch. Yes
-? Select the processor for this task: e851...0e28: proc-thermostat [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/cosim@e881f7...
-Specify input interface item 'parameters' with data type/format JSONObject/json
-? How to specify? by-reference
-? Select the data object to be used for input 'parameters': 36a6...d80e [JSONObject:json] name=thermostat_parameters.json
-? Select the owner for the output data objects: ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw - test <test@test.com>
-? Select the destination node for the output data objects: ztus...1bqw: test at 192.168.50.126:5001
-? Should access to output data objects be restricted? No
-? Give the task a name: thermostat
-? Select a budget for this task: 1 vCPUs, 2048 GB RAM memory
-? Add another task? Note: multiple tasks submitted together will be executed as batch. No
-Batch submitted: xjiu2cID
-- Task 'room' executed by job vlgLyykd
-- Task 'thermostat' executed by job GWzrZBzz
-```
-
-Note that multiple tasks have been submitted together to form a batch of jobs. The job id 
-for each task is displayed at the end of the dialogue. Use the following to check the
-status of the job:
+### Submit a Batch Job
+This example requires a **batch job** for `room` and `thermostat`. Batch submission ensures
+they are executed at the same time and are provided with discovery information at runtime
+so they can connect to each other.
 ```shell
-simaas-cli rti job status vlgLyykd
-simaas-cli rti job status GWzrZBzz
+simaas-cli rti --address <node_address> job submit
 ```
 
-Both job status outputs should look like this:
+When prompted, select the `proc-room` processor first and assign its parameters by-reference.
+When asked "Add another task?", select **Yes** and add `proc-thermostat` with its parameters.
+This creates a batch of two jobs.
+
+### Check Job Status and Retrieve Results
+The batch submission returns a job id for each task. Check the status of both jobs:
+```shell
+simaas-cli rti --address <node_address> job status <room_job_id>
+simaas-cli rti --address <node_address> job status <thermostat_job_id>
+```
+
+Once both jobs are `successful`, download the output data objects:
+```shell
+simaas-cli dor --address <node_address> download <room_obj_id>
+simaas-cli dor --address <node_address> download <thermostat_obj_id>
+```
+
+The room result contains the temperature history:
 ```json
 {
-  "state": "successful",
-  "progress": 100,
-  "output": {
-    "result": {
-      "obj_id": "..."
-      // remaining information truncated
-    }
-    // remaining information truncated
+  "temp": [15.0, 15.5, 16.0, 16.5]
 }
 ```
 
-The result output data object can be downloaded by using their object id:
-```shell
-simaas-cli dor download 32466ed781a2783377c0f95dc5d04d6c6bc8ca92fd5aebe7f9383254c754e5cd  # for the room results
-simaas-cli dor download c8f266a0eaf5338221acb8f241f5bca98d347f548e9b49d0d8303fed3f404e49  # for the thermostat results
-```
-
-The content of the file can be viewed in the shell:
-```shell
-cat /Users/foobar/32466ed781a2783377c0f95dc5d04d6c6bc8ca92fd5aebe7f9383254c754e5cd.json 
-cat /Users/foobar/c8f266a0eaf5338221acb8f241f5bca98d347f548e9b49d0d8303fed3f404e49.json 
-```
-
-FThe room results should look like this:
+The thermostat result contains the heater state at each step as `[temperature, state]` tuples:
 ```json
 {
-  "temp": [
-    15.0,
-    15.5,
-    16.0,
-    16.5
-    // truncated
-  ]
-}
-```
-
-The thermostat results should look like this:
-```json
-{
-  "state": [
-    [
-      15.0,
-      1
-    ],
-    [
-      15.5,
-      1
-    ]
-    // truncated
-  ]
+  "state": [[15.0, 1], [15.5, 1]]
 }
 ```
