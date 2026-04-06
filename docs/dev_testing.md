@@ -135,6 +135,24 @@ For current test timings, coverage details, and recommended timeouts, see `TEST_
 - **Total runtime**: ~19 minutes
 - **Coverage**: 82% (target: 80%)
 
+## Processor Docker Images (PDIs)
+
+Tests that execute processors inside Docker containers use cached Processor Docker Images (PDIs).
+These images bake in parts of the middleware source code (e.g., `job_runner`, `sync.py`, P2P
+service code).
+
+If you modify any of these files, **the cached images contain the old code** and tests will fail
+with confusing errors even though your fix is correct.
+
+To fix this, remove stale images and rebuild:
+```bash
+# Remove cached processor images
+docker images --format "{{.Repository}}:{{.Tag}}" | grep "^proc-" | xargs -r docker rmi -f
+
+# Rebuild all PDIs
+.venv/bin/python -m pytest simaas/tests/test_cli_image.py -v
+```
+
 ## Notes
 
 - **Docker Requirement**: RTI-related tests require Docker to be running

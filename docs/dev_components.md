@@ -252,14 +252,53 @@ HTTP-based API layer for external system integration using FastAPI with cryptogr
 
 ### Authentication
 
-Signature-based authentication:
+Requests are authenticated using cryptographic signatures derived from the caller's keystore.
+There are no sessions, cookies, or JWTs — every request is independently verifiable.
+
+**Required Headers**:
+
+| Header | Value |
+|--------|-------|
+| `saasauth-iid` | The caller's identity ID |
+| `saasauth-signature` | Signature over the request (see below) |
+
+**Signature Generation**:
+
+The signature covers both the request target and the body, preventing replay across different
+endpoints or with modified payloads.
 
 ```python
-# Request headers
-X-Identity-ID: <identity_id>
-X-Timestamp: <unix_timestamp>
-X-Signature: <signature_of_request_data>
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+import canonicaljson
+
+# 1. Build the digest: SHA-256 of "METHOD:URL" + canonical JSON body
+digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+digest.update(f"{method}:{full_url}".encode('utf-8'))
+if body:
+    digest.update(canonicaljson.encode_canonical_json(body))
+token = digest.finalize()
+
+# 2. Sign the digest with the keystore's EC signing key
+signature = keystore.sign(token)
+
+# 3. Set headers
+headers = {
+    'saasauth-iid': keystore.identity.id,
+    'saasauth-signature': signature,
+}
 ```
+
+**Server-Side Verification** (`simaas/rest/auth.py`):
+
+1. Look up the identity by `saasauth-iid` in the node database
+2. Recompute the digest from `METHOD:URL` + body
+3. Verify the signature against the identity's public signing key
+4. Reject with 403 if the identity is unknown or the signature is invalid
+
+**Using Proxy Classes**: The `DORProxy`, `RTIProxy`, and `NodeDBProxy` classes handle signature
+generation automatically — pass a `Keystore` instance and authentication is transparent.
+See `simaas/rest/proxy.py` for the implementation.
 
 ### Key Endpoints
 

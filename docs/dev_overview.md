@@ -96,3 +96,11 @@ Data Objects ← DOR ← Database ← Processing Results ← RTI ← Processors
 | **Core** | Identity, keystore, processor framework | `simaas/core/` |
 
 For detailed component documentation, see [Component Reference](dev_components.md).
+
+## Further Reading
+
+- [Security Architecture](dev_security.md) - Deployment model, threat assumptions, cryptographic identity
+- [Async Patterns](dev_async_patterns.md) - Async/sync boundaries, thread model, common pitfalls
+- [Logging Guide](dev_logging.md) - Smart logging features: ID shortening, redaction, rate limiting
+- [Testing Guide](dev_testing.md) - Environment setup, test categories, PDI rebuilds
+- [Plugin Development](dev_plugins.md) - Extending DOR and RTI with custom backends
