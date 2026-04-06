@@ -66,6 +66,7 @@ cancellation or timeout).
 Here is an example of a `processor.py` file:
 ```python
 from simaas.core.processor import ProcessorBase, ProgressListener
+from simaas.rti.schemas import Severity
 import os
 import json
 import threading
@@ -93,7 +94,8 @@ class MyProcessor(ProcessorBase):
 
         # Notify output availability
         listener.on_output_available("result")
-        listener.on_progress_update(1.0, "Processing complete.")
+        listener.on_progress_update(1.0)
+        listener.on_message(Severity.INFO, "Processing complete.")
 
     def interrupt(self):
         self._stop_requested.set()
