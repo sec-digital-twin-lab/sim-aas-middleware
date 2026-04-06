@@ -1,11 +1,24 @@
 # Ping Example: Processor Testing Outbound Connectivity
 
-This example demonstrates a comprehensive connectivity testing processor that tests various types of network connectivity to an external host. The processor can perform ping, traceroute, TCP connection tests, and UDP connection tests.
+This example demonstrates a connectivity testing processor that tests various types of
+network connectivity to an external host. The processor can perform ping, traceroute,
+TCP connection tests, and UDP connection tests.
 
 The example consists of:
 
 - **`ProcessorPing`** - a processor that takes one input, `parameters`, and produces an output `result`
 - **`test_server.py`** - combined TCP/UDP test server for connectivity testing
+
+## Objective
+
+Test outbound network connectivity from a running processor container to an external host
+using multiple protocols.
+
+This setup demonstrates how to:
+- Execute system commands (`ping`, `traceroute`) from within a processor.
+- Test TCP and UDP connectivity to specified ports.
+- Conditionally run tests based on input parameters.
+- Aggregate results from multiple connectivity tests into a single output.
 
 ## Connectivity Tests Supported
 
@@ -40,204 +53,83 @@ For testing TCP/UDP connectivity, run the test server on the target machine:
 python3 server.py --host 0.0.0.0 --tcp-port 8080 --udp-port 8081
 ```
 
-## Install Sim-aaS Middleware
+## Running the Example using Python
+Test cases with working code can be found in [test_processor_ping.py](../../simaas/tests/test_processor_ping.py).
+
+## Running the Example using the CLI
+> This examples assumes you have a Sim-aaS Node instance running, read the documentation
+> [here](../../docs/usage_run_simaas_node.md) to learn how to do that.
+
+> If you have not already done so, read the documentation on the build command
+> [here](../../docs/usage_manage_processor_docker_images.md).
+
+> Processor Docker Images depend on the sim-aas-middleware repository. At the time of writing,
+> this repository is private. Ensure the following environment variables are set with access
+> to this repository: `GITHUB_USERNAME` and `GITHUB_TOKEN`.
+
+### Build the Processor Docker Image
+Navigate to the `ping` folder and run the build command:
 ```shell
-mkdir ping_test
-cd ping_test
-python3.13 -m venv .venv
-source .venv/bin/activate
-pip install ~/Desktop/repositories/sim-aas-middleware
+simaas-cli image build-local --arch linux/amd64 .
 ```
 
+The `--arch linux/amd64` flag ensures compatibility with AWS Batch. It can be omitted
+when running locally with a Docker RTI on the same platform. The command outputs the
+path to the generated PDI file.
 
-## Setup the test node
-Start a new terminal and actiate the environment:
-```
-source .venv/bin/activate
-```
-
-Create an identity for testing:
-```
-simaas-cli identity create
+### Import the PDI to the DOR
+The build command creates a PDI file locally. Import it to the node's DOR:
+```shell
+simaas-cli image import --address <node_address> <path_to_pdi_file>
 ```
 
-Make sure Docker is running before starting the node.
-
-Run a simple node instance:
-```
-simaas-cli service
-```
-
-Here is sample output of the terminal for reference:
-```
-? Enter path to datastore: /Users/foobar/.datastore
-? Enter the path to the sim-aas-middleware repository /Users/foobar/Desktop/repositories/sim-aas-middleware
-? Select the type of DOR service: default
-? Select the type of RTI service: Docker
-? Retain RTI job history? Yes
-? Bind service to all network addresses? No
-? Strict processor deployment? No
-AWS SSH Tunneling information found? NO
-? Enter address for REST service: 192.168.50.117:5001
-? Enter address for P2P service: tcp://192.168.50.117:4001
-? Enter REST address of boot node: 192.168.50.117:5001
-? Select the keystore: ping_test/email/iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn
-? Enter password: ****
-INFO:     Started server process [76459]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://192.168.50.117:5001 (Press CTRL+C to quit)
-INFO:     192.168.50.117:51605 - "GET /api/v1/db/node HTTP/1.1" 200 OK
-Created 'default/docker' Sim-aaS node instance at 192.168.50.117:5001/tcp://192.168.50.117:4001(keep RTI job history: Yes) (strict: No) 
+### Deploy the Processor
+Once the PDI has been imported, deploy it using the object id returned by the import
+command:
+```shell
+simaas-cli rti --address <node_address> proc deploy --proc-id <pdi_object_id>
 ```
 
-Keep that terminal open. Don't terminate it.
-
-
-## Build and deploy the ping processor
-Start a new terminal and actiate the environment:
-```
-source .venv/bin/activate
+Verify the deployment:
+```shell
+simaas-cli rti --address <node_address> proc list
 ```
 
-Navigate to the folder where the processor is located:
-```
-cd ~/Desktop/repositories/sim-aas-middleware/examples/simple/ping
-```
-
-Run the build command:
-```
-simaas-cli image build-local --arch=linux/amd64 .
+### Submit a Job
+The processor takes a single `parameters` input. Submit a job:
+```shell
+simaas-cli rti --address <node_address> job submit
 ```
 
-Here is sample output of the terminal for reference:
-```
-? Enter the target node's REST address 192.168.50.117:5001
-? Select the keystore: ping_test/email/iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn
-? Enter password: ****
-? Enter the path to the sim-aas-middleware repository /Users/foobar/Desktop/repositories/sim-aas-middleware
-Using processor path '/Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple/ping'.
-Not using any GitHub credentials.
-Processor content hash: e8c8ce1102ffc23ff0af8bcd63c8cff67f150fd6056b74d5b218fa40611f97ee
-Building image 'foobar/proc-ping:e8c8ce1102ffc23ff0af8bcd63c8cff67f150fd6056b74d5b218fa40611f97ee' for platform 'linux/amd64'. This may take a while...
-Done building image 'foobar/proc-ping:e8c8ce1102ffc23ff0af8bcd63c8cff67f150fd6056b74d5b218fa40611f97ee'.
-Done exporting image to '/var/folders/p3/yjbdnj8n69d_dmzpw51dmtj40000gp/T/tmpywhk04_0/image.tar'.
-Done uploading image to DOR -> object id: 299acc4b2bcd58c28c32bde1749d0d02e15abd8c392d89476eb89f79837fad5b
+The CLI will prompt you to select the processor (`proc-ping`) and specify the input.
+When prompted for the `parameters` input, select `by-value` and enter a JSON object like:
+```json
+{"address": "192.168.50.113", "do_ping": true, "do_traceroute": true, "do_tcp_test": true, "tcp_port": 8080, "tcp_timeout": 5, "do_udp_test": true, "udp_port": 8081, "udp_timeout": 5}
 ```
 
-Deploy the processor:
-```
-simaas-cli rti proc deploy
+Adjust the `address` field to match your target host.
+
+### Check Job Status and Retrieve Results
+Check the status of the job using the job id:
+```shell
+simaas-cli rti --address <node_address> job status <job_id>
 ```
 
-Here is sample output of the terminal for reference:
-```
-? Enter the node's REST address 192.168.50.117:5001
-? Select the keystore: ping_test/email/iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn
-? Enter password: ****
-? Select the processor you would like to deploy: proc-ping <299a...ad5b> local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple:e8c8ce...
-Deploying processor 299a...ad5b...Done
+Once the job state is `successful`, download the output data object:
+```shell
+simaas-cli dor --address <node_address> download <obj_id>
 ```
 
-
-## Run a job
-Start a new terminal and actiate the environment if necessary:
-```
-source .venv/bin/activate
-```
-
-Submit a job:
-```
-simaas-cli rti job submit
-```
-
-Note the inputs for the interactive command, in particular the "address" field in the input JSON object. Change the address as required.
-
-Here is sample output of the terminal for reference:
-```
-? Select the keystore: ping_test/email/iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn
-? Enter password: ****
-? Enter the node's REST address 192.168.50.117:5001
-? Select the processor for this task: 299a...ad5b: proc-ping [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple@e8c8ce..
-.
-Specify input interface item 'parameters' with data type/format JSONObject/json
-? How to specify? by-value
-JSON schema available:  no
-? Enter a valid JSON object: {"address": "192.168.50.113", "do_ping": true, "do_traceroute": true, "do_tcp_test": true, "tcp_port": 8080, "tcp_timeout": 5, "do_udp_test": true, "udp_port": 8081, "udp_timeout": 5}
-? Select the owner for the output data objects: iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn - ping_test <email>
-? Select the destination node for the output data objects: iq37...qdxn: ping_test at 192.168.50.117:5001
-? Should access to output data objects be restricted? No
-? Give the task a name: test1
-? Select a budget for this task: 1 vCPUs, 2048 GB RAM memory
-? Add another task? Note: multiple tasks submitted together will be executed as batch. No
-Job submitted: aoLmu4GR
-```
-
-Check if job is done:
-```
-simaas-cli rti job status aoLmu4GR
-```
-
-Here is sample output (truncated) of the terminal for reference:
-```
-Job status:
-{
-    "state": "successful",
-    "progress": 100,
-    "output": {
-        "result": {
-            "obj_id": "684ce43ed69ca440c8a20ee7ad3d44a94490c886ff1bf9f3517c6a392629125c",
-            "c_hash": "9e3b034900f4aff669b54c56d9b8e32ae518b7b26d3e566ebee2dd198af0c118",
-            "data_type": "JSONObject",
-            "data_format": "json",
-    ...
-```
-
-Look for "state" in the output. It should show "successful".
-
-Fetch the results:
-```
-simaas-cli dor download
-```
-
-Here is sample output of the terminal for reference:
-```
-? Enter the destination folder /Users/foobar/Desktop
-? Enter the node's REST address 192.168.50.117:5001
-? Select the keystore: ping_test/email/iq37rd6k47f1sgdjy1sw1lh81kjh4j0nalhrberox8srldkaid3i2b902w56qdxn
-? Enter password: ****
-? Select data object to be downloaded: ['684c...125c [JSONObject:json] name=result job_id=aoLmu4GR']
-Downloading 684c...125c to /Users/foobar/Desktop/684ce43ed69ca440c8a20ee7ad3d44a94490c886ff1bf9f3517c6a392629125c.json ...Done
-```
-
-Have a look at the results:
-```
-cat /Users/foobar/Desktop/684ce43ed69ca440c8a20ee7ad3d44a94490c886ff1bf9f3517c6a392629125c.json
-```
-
-Here is sample output of the terminal for reference:
-```
+The result contains the stdout of each test that was enabled:
+```json
 {
   "ping_stdout": [
     "PING 192.168.50.113 (192.168.50.113) 56(84) bytes of data.",
-    "64 bytes from 192.168.50.113: icmp_seq=1 ttl=63 time=9.10 ms",
-    "64 bytes from 192.168.50.113: icmp_seq=2 ttl=63 time=15.1 ms",
-    "64 bytes from 192.168.50.113: icmp_seq=3 ttl=63 time=10.6 ms",
-    "64 bytes from 192.168.50.113: icmp_seq=4 ttl=63 time=14.8 ms",
-    "",
-    "--- 192.168.50.113 ping statistics ---",
-    "4 packets transmitted, 4 received, 0% packet loss, time 3016ms",
-    "rtt min/avg/max/mdev = 9.095/12.394/15.109/2.620 ms",
-    ""
+    "..."
   ],
   "traceroute_stdout": [
     "traceroute to 192.168.50.113 (192.168.50.113), 5 hops max",
-    "  1   172.17.0.1  0.019ms  0.001ms  0.001ms ",
-    "  2   *  *  * ",
-    "  3   *  *  * ",
-    "  4   *  *  * ",
-    "  5   *  *  * ",
-    ""
+    "..."
   ]
 }
 ```

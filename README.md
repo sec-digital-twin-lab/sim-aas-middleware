@@ -75,6 +75,7 @@ Learn more about building and running processors by looking at example implement
 - [Ping Example: Network Connectivity Testing](examples/simple/ping/README.md)
 - [Factorisation Example: Dynamic Child Job Submission](examples/prime/README.md)
 - [Co-Simulation Example: Room and Thermostat Controllers](examples/cosim/README.md)
+- [Knowledge Graph Example: Emissions Calculation with SPARQL Integration](examples/kgraph/README.md)
 
 ## Concepts
 Learn more about important concepts used by the Sim-aaS Middleware.

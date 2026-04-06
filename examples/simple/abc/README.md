@@ -1,17 +1,17 @@
 # Simple Example: Basic Input/Output Processor
 
-This example demonstrates how a simple processor can be used to process two input values 
+This example demonstrates how a simple processor can be used to process two input values
 and produce an output, primarily used for testing purposes.
 
 The example consists of one processor:
 
-- **`ProcessorABC`** - a processor that takes two inputs, `a` and `b`, and produces an 
+- **`ProcessorABC`** - a processor that takes two inputs, `a` and `b`, and produces an
 output `c`.
 
 ## Objective
 
-Compute the sum of two numbers `a` and `b`, or use a predefined value if the environment 
-variable `SECRET_ABC_KEY` is set. The result is written to a file `c` in the working 
+Compute the sum of two numbers `a` and `b`, or use a predefined value if the environment
+variable `SECRET_ABC_KEY` is set. The result is written to a file `c` in the working
 directory.
 
 This setup demonstrates how to:
@@ -37,130 +37,71 @@ Test cases with working code can be found in [test_example_abc.py](../../simaas/
 > [here](../../docs/usage_run_simaas_node.md) to learn how to do that.
 
 > If you have not already done so, read the documentation on the build command
-> [here](../../docs/usage_manage_processor_docker_images.md). 
+> [here](../../docs/usage_manage_processor_docker_images.md).
 
 > Processor Docker Images depend on the sim-aas-middleware repository. At the time of writing,
 > this repository is private. Ensure the following environment variables are set with access
 > to this repository: `GITHUB_USERNAME` and `GITHUB_TOKEN`.
 
-The first step is to build the Processor Docker Image for the example. Use a terminal and
-navigate to the `abc` folder, then use the CLI build command:
-```shell
-simaas-cli image build-local .
-```
-
-You may want to specify the target platform explicitly (e.g., when planning to run it on 
-a node using AWS RTI service):
+### Build the Processor Docker Image
+Navigate to the `abc` folder and run the build command:
 ```shell
 simaas-cli image build-local --arch linux/amd64 .
 ```
 
-An example dialogue will look like this:
-```
-? Enter the target node's REST address 192.168.50.126:5001
-? Select the keystore: test/test@test.com/ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw
-? Enter password: ****
-Using processor path '/Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple/abc'.
-Using GitHub credentials from env for user 'FooBar'.
-Processor content hash: e09abdbc0a4c6d53a8b1066658f0557bed48916356e0cb94380182898fffdd8e
-Building image 'foobar/proc-abc:e09abdbc0a4c6d53a8b1066658f0557bed48916356e0cb94380182898fffdd8e' for platform 'linux/amd64'. This may take a while...
-Done building image 'foobar/proc-abc:e09abdbc0a4c6d53a8b1066658f0557bed48916356e0cb94380182898fffdd8e'.
-Done exporting image to '/var/folders/p3/yjbdnj8n69d_dmzpw51dmtj40000gp/T/tmpfinq3k0n/image.tar'.
-Done uploading image to DOR -> object id: edc2754a5baa19abf3647723404fb9d4edd76cee7c8fa7af881685c09dba0890
-```
+The `--arch linux/amd64` flag ensures compatibility with AWS Batch. It can be omitted
+when running locally with a Docker RTI on the same platform. The command outputs the
+path to the generated PDI file.
 
-The command will ask for the target Sim-aaS node to which the image should be uploaded to. Once
-the image has been uploaded, it should show up as a deployment option:
+### Import the PDI to the DOR
+The build command creates a PDI file locally. Import it to the node's DOR:
 ```shell
-simaas-cli rti proc deploy
+simaas-cli image import --address <node_address> <path_to_pdi_file>
 ```
 
-```
-? Enter the node's REST address 192.168.50.126:5001
-? Select the keystore: test/test@test.com/ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw
-? Enter password: ****
-? Select the processor you would like to deploy: proc-abc <edc2...0890> local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple:e09abd...
-Deploying processor edc2...0890...Done
-```
-
-You can check the deployment status:
+### Deploy the Processor
+Once the PDI has been imported, deploy it using the object id returned by the import
+command:
 ```shell
-simaas-cli rti proc list
+simaas-cli rti --address <node_address> proc deploy --proc-id <pdi_object_id>
 ```
 
-```
-? Enter the node's REST address 192.168.50.126:5001
-Found 1 processor(s) deployed at 192.168.50.126:5001:
-- edc2...0890: proc-abc [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple@e09abd...
-```
-
-The example processor requires two inputs: `a` and `b` - both simple JSON objects. There
-are example input files provided in the example folder under `abc/data`. In order to use 
-them, they need to be added to the DOR. Navigate to the `data` folder and use the CLI command
-to add the files to the DOR:
+Verify the deployment:
 ```shell
-simaas-cli dor add --data-type JSONObject --data-format json data_object_a.json 
-simaas-cli dor add --data-type JSONObject --data-format json data_object_b.json 
+simaas-cli rti --address <node_address> proc list
 ```
 
-We can now use these two data objects as input for running a job with the `abc` example
-processor that has been deployed earlier:
+### Add Input Data to the DOR
+The processor requires two inputs: `a` and `b` - both simple JSON objects. Example input
+files are provided under `abc/data`. Add them to the DOR:
 ```shell
-simaas-cli rti job submit   
+simaas-cli dor --address <node_address> add --data-type JSONObject --data-format json --assume-creator data_object_a.json
+simaas-cli dor --address <node_address> add --data-type JSONObject --data-format json --assume-creator data_object_b.json
 ```
 
-The dialogue for job submission looks as follows:
-```
-? Select the keystore: test/test@test.com/ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw
-? Enter password: ****
-? Enter the node's REST address 192.168.50.126:5001
-? Select the processor for this task: edc2...0890: proc-abc [State.READY] local:///Users/foobar/Desktop/repositories/sim-aas-middleware/examples/simple@e09abd...
-Specify input interface item 'a' with data type/format JSONObject/json
-? How to specify? by-reference
-? Select the data object to be used for input 'a': 1b6d...5d4e [JSONObject:json] name=data_object_a.json
-Specify input interface item 'b' with data type/format JSONObject/json
-? How to specify? by-reference
-? Select the data object to be used for input 'b': 8017...15ff [JSONObject:json] name=data_object_b.json
-? Select the owner for the output data objects: ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw - test <test@test.com>
-? Select the destination node for the output data objects: ztus...1bqw: test at 192.168.50.126:5001
-? Should access to output data objects be restricted? No
-? Give the task a name: test
-? Select a budget for this task: 1 vCPUs, 2048 GB RAM memory
-? Add another task? Note: multiple tasks submitted together will be executed as batch. No
-Job submitted: 0AK3wEyF
-```
-
-Note the job id that is displayed at the end of the dialogue. Use the following to check the
-status of the job:
+### Submit a Job
+Submit a job using the two data objects as input:
 ```shell
-simaas-cli rti job status 0AK3wEyF
+simaas-cli rti --address <node_address> job submit
 ```
 
-The output should look like this:
+The CLI will prompt you to select the processor (`proc-abc`), assign the two input data
+objects by-reference, and configure the output. Note the job id displayed at the end.
+
+### Check Job Status and Retrieve Results
+Check the status of the job using the job id:
+```shell
+simaas-cli rti --address <node_address> job status <job_id>
+```
+
+Once the job state is `successful`, download the output data object:
+```shell
+simaas-cli dor --address <node_address> download <obj_id>
+```
+
+The result should look like this:
 ```json
 {
-    "state": "successful",
-    "progress": 100,
-    "output": {
-      "c": {
-        "obj_id": "4ce5ff078eb624d46fc105b00b58e4f05f95f20e6453928900348328a6604308"
-        // remaining information truncated
-      }
-    }
-    // remaining information truncated
+    "v": 3
 }
-```
-
-The output data object can be downloaded by using its object id (see above):
-```shell
-simaas-cli dor download 4ce5ff078eb624d46fc105b00b58e4f05f95f20e6453928900348328a6604308
-```
-
-The output should look like this:
-```
-? Enter the destination folder /Users/foobar/Desktop
-? Enter the node's REST address 192.168.50.126:5001
-? Select the keystore: test/test@test.com/ztusqwpk0ht3geq2ut9g9cpxpvj7gxjq64eme2mk3eakz4gear9mtquoo5kt1bqw
-? Enter password: ****
-Downloading 4ce5...4308 to /Users/foobar/Desktop/4ce5ff078eb624d46fc105b00b58e4f05f95f20e6453928900348328a6604308.json ...Done
 ```
