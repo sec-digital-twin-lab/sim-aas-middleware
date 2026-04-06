@@ -48,7 +48,7 @@ including both URI references and typed literals.
 Test cases with working code can be found in [test_processor_kgraph.py](../../simaas/tests/test_processor_kgraph.py).
 
 ## Running the Example using the CLI
-> This examples assumes you have a Sim-aaS Node instance running, read the documentation
+> This example assumes you have a Sim-aaS Node instance running, read the documentation
 > [here](../../docs/usage_run_simaas_node.md) to learn how to do that.
 
 > If you have not already done so, read the documentation on the build command
