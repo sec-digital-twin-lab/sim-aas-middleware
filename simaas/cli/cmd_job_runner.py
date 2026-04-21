@@ -8,6 +8,7 @@ import time
 import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
+from simaas.core import shell_executor
 from simaas.namespace.default import DefaultNamespace
 from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
@@ -865,6 +866,11 @@ class JobRunner(CLICommand, ProgressListener):
             # initialise processor
             self._initialise_processor(args['proc_path'])
 
+            # start the shell executor BEFORE P2P/ZMQ so that processors can
+            # call shell_executor.run() without hitting the Rosetta fork deadlock.
+            shell_executor.start()
+            self._logger.info("Shell executor started.")
+
             # initialise P2P services
             self._initialise_p2p(
                 args['service_address'], args['custodian_address'], args['custodian_pub_key'], args['job_id']
@@ -972,3 +978,4 @@ class JobRunner(CLICommand, ProgressListener):
         finally:
             if self._status_handler:
                 self._status_handler.join(5)
+            shell_executor.stop()
