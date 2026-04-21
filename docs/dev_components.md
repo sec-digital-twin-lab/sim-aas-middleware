@@ -358,7 +358,9 @@ simaas-cli
 │       ├── add (ssh, github)
 │       ├── test (ssh, github)
 │       ├── remove, list
-├── service           # Start a Sim-aaS node instance
+├── service           # Start services
+│   ├── node          # Start a Sim-aaS node instance
+│   └── gateway       # Start a Gateway API service
 ├── run               # Job runner (used inside containers)
 ├── image             # Processor Docker Image (PDI) management
 │   ├── build-local, build-github
@@ -370,11 +372,16 @@ simaas-cli
 ├── rti               # Runtime Infrastructure
 │   ├── volume (list, create, delete)
 │   ├── proc (deploy, undeploy, list, show)
-│   └── job (list, submit, status, cancel)
+│   └── job (list, submit, status, inspect, logs, cancel)
 ├── namespace         # Namespace management
 │   └── list, update, show
-└── network           # Network operations
-    └── list
+├── network           # Network operations
+│   └── list, ping, status
+├── node              # Node diagnostics
+│   └── status, info
+└── gateway           # Gateway administration
+    ├── user (list, create, delete, enable, disable, publish)
+    └── key (list, create, delete)
 ```
 
 ### Interactive Features
