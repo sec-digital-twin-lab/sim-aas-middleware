@@ -18,7 +18,12 @@ from simaas.cli.cmd_node import NodeStatus, NodeInfo
 from simaas.cli.cmd_rti import RTIProcDeploy, RTIProcUndeploy, RTIJobSubmit, RTIJobStatus, RTIProcList, \
     RTIProcShow, RTIJobList, RTIJobCancel, RTIJobInspect, RTIJobLogs, RTIVolumeList, RTIVolumeCreateFSRef, \
     RTIVolumeCreateEFSRef, RTIVolumeDelete
-from simaas.cli.cmd_service import Service
+from simaas.cli.cmd_service_node import Service
+from simaas.cli.cmd_service_gateway import GatewayService, default_datastore as default_gateway_datastore, default_saas_address
+from simaas.cli.cmd_gateway import (
+    GatewayUserList, GatewayUserCreate, GatewayUserDelete, GatewayUserDisable, GatewayUserEnable, GatewayUserPublish,
+    GatewayKeyList, GatewayKeyCreate, GatewayKeyDelete,
+)
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
 
@@ -29,8 +34,8 @@ logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
 def main():
     try:
         home_dir = os.environ.get('HOME', os.path.expanduser('~'))
-        default_keystore = os.path.join(home_dir, '.keystore')
-        default_temp_dir = os.path.join(home_dir, '.temp')
+        default_keystore = os.path.join(home_dir, '.simaas', 'keystore')
+        default_temp_dir = os.path.join(home_dir, '.simaas', 'temp')
         default_log_level = 'INFO'
 
         cli = CLIParser(f'SaaS Middleware v{__version__} command line interface (CLI)', arguments=[
@@ -75,7 +80,10 @@ def main():
                     CredentialsList()
                 ]),
             ]),
-            Service(),
+            CLICommandGroup('service', 'start a service', commands=[
+                Service(),
+                GatewayService(),
+            ]),
             JobRunner(),
             CLICommandGroup('image', 'manage processor docker images (PDIs)', commands=[
                 PDIBuildLocal(),
@@ -149,6 +157,26 @@ def main():
             ], commands=[
                 NodeStatus(),
                 NodeInfo()
+            ]),
+            CLICommandGroup('gateway', 'manage the gateway', arguments=[
+                Argument('--datastore', dest='datastore', action='store',
+                         help=f"path to the gateway datastore (default: '{default_gateway_datastore}')"),
+                Argument('--address', dest='address', action='store',
+                         help=f"the REST address (host:port) of the SaaS node (e.g., '{default_saas_address}')"),
+            ], commands=[
+                CLICommandGroup('user', 'manage gateway user accounts', commands=[
+                    GatewayUserList(),
+                    GatewayUserCreate(),
+                    GatewayUserDelete(),
+                    GatewayUserDisable(),
+                    GatewayUserEnable(),
+                    GatewayUserPublish(),
+                ]),
+                CLICommandGroup('key', 'manage gateway API keys', commands=[
+                    GatewayKeyList(),
+                    GatewayKeyCreate(),
+                    GatewayKeyDelete(),
+                ]),
             ])
         ])
 
