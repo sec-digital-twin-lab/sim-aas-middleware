@@ -5,7 +5,6 @@ fork-isolated child process using mock processors and namespaces.
 No Docker, no ZMQ, no simaas node infrastructure required.
 """
 
-import logging
 import os
 import threading
 import time
