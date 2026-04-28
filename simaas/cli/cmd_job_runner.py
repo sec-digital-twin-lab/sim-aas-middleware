@@ -8,7 +8,7 @@ import time
 import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
-from simaas.core import shell_executor
+from simaas.core.proc_worker import ProcessorWorker
 from simaas.namespace.default import DefaultNamespace
 from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
@@ -341,6 +341,9 @@ class JobRunner(CLICommand, ProgressListener):
         self._status_handler: Optional[StatusHandler] = None
         self._user: Optional[Identity] = None
 
+        # fork-isolated processor worker (set during execute)
+        self._worker: Optional[ProcessorWorker] = None
+
         # set/used during batch sync
         self._batch_ports: Dict[str, Dict[str, Optional[str]]] = {}
         self._batch_identities: Dict[str, Identity] = {}
@@ -394,7 +397,8 @@ class JobRunner(CLICommand, ProgressListener):
         with self._mutex:
             try:
                 self._interrupted = True
-                self._proc.interrupt()
+                if self._worker:
+                    self._worker.interrupt()
                 self._logger.info("Received job cancellation notification")
 
             except Exception as e:
@@ -487,11 +491,7 @@ class JobRunner(CLICommand, ProgressListener):
     def _initialise_p2p(
             self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
     ) -> None:
-        # create the ephemeral job keystore
-        self._keystore = Keystore.new('runner')
-        self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
-
-        # start the secured P2P service
+        # start the secured P2P service (keystore already created before fork)
         self._p2p = P2PService(self._keystore, service_address)
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
@@ -866,10 +866,17 @@ class JobRunner(CLICommand, ProgressListener):
             # initialise processor
             self._initialise_processor(args['proc_path'])
 
-            # start the shell executor BEFORE P2P/ZMQ so that processors can
-            # call shell_executor.run() without hitting the Rosetta fork deadlock.
-            shell_executor.start()
-            self._logger.info("Shell executor started.")
+            # create the ephemeral keystore BEFORE forking (uses zmq.curve_public
+            # but does NOT start I/O threads).
+            self._keystore = Keystore.new('runner')
+            self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
+
+            # fork the worker process BEFORE ZMQ — the child inherits the
+            # processor and keystore but has zero ZMQ threads, so fork/subprocess
+            # is safe inside adapter code.
+            self._worker = ProcessorWorker(self._proc, self._keystore)
+            self._worker.start()
+            self._logger.info("Fork-isolated worker process started.")
 
             # initialise P2P services
             self._initialise_p2p(
@@ -919,12 +926,25 @@ class JobRunner(CLICommand, ProgressListener):
             # update state
             self._status_handler.update(state=JobStatus.State.RUNNING)
 
-            # run the processor
+            # run the processor in the fork-isolated worker
             self._logger.info(f"Using namespace: {self._job.task.namespace}")
             namespace = DefaultNamespace(
                 self._job.task.namespace, self._custodian, self.custodian_address.address, self._keystore
             )
-            self._proc.run(self._wd_path, self._job, self, SyncNamespace(namespace), self._logger)
+
+            # Collect secrets that were injected into os.environ during the
+            # P2P handshake (after the fork).  The worker needs them explicitly.
+            secrets = {
+                key: os.environ[key]
+                for key in self._gpp.proc_descriptor.required_secrets
+                if key in os.environ
+            }
+
+            self._worker.run(
+                self._wd_path, self._job, self, SyncNamespace(namespace),
+                log_level=args.get('log_level', 'info'),
+                env=secrets,
+            )
 
             # was the processor interrupted?
             if self._interrupted:
@@ -948,8 +968,9 @@ class JobRunner(CLICommand, ProgressListener):
                 self._write_exitcode(ExitCode.DONE)
 
         except _BaseError as e:
-            # create error information
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            # create error information (prefer worker trace if the error came from the child process)
+            trace = getattr(e, '__worker_trace__', None) or \
+                    (''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None)
             exception = e.content
             exception.details = exception.details if exception.details else {}
             exception.details['trace'] = trace
@@ -963,8 +984,9 @@ class JobRunner(CLICommand, ProgressListener):
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
-            # create error information
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
+            # create error information (prefer worker trace if the error came from the child process)
+            trace = getattr(e, '__worker_trace__', None) or \
+                    (''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None)
             exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
             error = JobStatus.Error(message="Job failed", exception=exception)
 
@@ -978,4 +1000,5 @@ class JobRunner(CLICommand, ProgressListener):
         finally:
             if self._status_handler:
                 self._status_handler.join(5)
-            shell_executor.stop()
+            if self._worker:
+                self._worker.stop()
