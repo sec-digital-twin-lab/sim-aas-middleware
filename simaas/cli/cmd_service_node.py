@@ -68,7 +68,7 @@ class WaitForTermination:
 
 class Service(CLICommand):
     # define the default values
-    default_datastore = os.path.join(os.environ['HOME'], '.datastore')
+    default_datastore = os.path.join(os.environ['HOME'], '.simaas', 'node')
     default_rest_address = determine_default_rest_address()
     default_p2p_address = determine_default_p2p_address()
     default_boot_node_address = determine_default_rest_address()
@@ -116,7 +116,7 @@ class Service(CLICommand):
     }
 
     def __init__(self):
-        super().__init__('service', 'start a node as service provider', arguments=[
+        super().__init__('node', 'start a node as service provider', arguments=[
             Argument('--profile', dest='profile', action='store',
                      choices=list(Service.PROFILES.keys()),
                      help="use a predefined profile: " + ", ".join(
