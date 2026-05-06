@@ -5,9 +5,8 @@ modules, respectively.
 
 ### Storage Paths
 When starting a node, the user has to specify the datastore path where a node stores all its data,
-and the ID of a keystore whose identity the node will use. By default, the datastore path will 
-be in the home directory (e.g. `$HOME/.datastore`) and the keystore path to search for the ID in 
-the home directory as well (e.g `$HOME/.keystore`). 
+and the ID of a keystore whose identity the node will use. By default, the datastore path will
+be `$HOME/.simaas/node` and the keystore path `$HOME/.simaas/keystore`. 
 
 ### Addresses and Ports
 The user has to assign the address and port for the REST and P2P service for the node. 
@@ -59,30 +58,53 @@ information about the network and known identities.
 ### Using External Plugins
 To load plugins from additional directories, use the `--plugins` argument:
 ```shell
-simaas-cli service --plugins /path/to/my-plugins --plugins /path/to/other-plugins
+simaas-cli service node --plugins /path/to/my-plugins --plugins /path/to/other-plugins
 ```
 Each plugin directory should contain subdirectories with the plugin implementations
 (e.g., `dor_custom/`, `rti_kubernetes/`). See the Developer Documentation for details
 on creating custom plugins.
 
+### Profiles
+Profiles provide predefined configurations for common use cases. Use the `--profile` flag
+to avoid specifying individual options:
+
+| Profile | DOR | RTI | Description |
+|---------|-----|-----|-------------|
+| `dev` | fs | docker | Local development: all plugins enabled, non-strict deployment, retains job history |
+| `prod` | fs | docker | Production: binds all interfaces, strict deployment |
+| `minimal` | none | none | Network node only: P2P networking, no DOR or RTI |
+| `storage` | fs | none | Storage node: DOR only, no RTI |
+
+Example:
+```shell
+simaas-cli service node --profile dev --rest-address 192.168.1.38:5001 ...
+```
+
+Profiles set defaults that can still be overridden by explicit flags. They also imply
+`--use-defaults`, so unspecified options are filled automatically.
+
 ### Other Configurations
 There are a number of options (and corresponding command line flags) that the user can specify:
 - Retain RTI job history: instructs the RTI to keep the complete job history. This option is
 useful for debugging and testing purposes.
-- Bind service to all network addresses: Binds the REST and P2P services to any address of the 
+- Bind service to all network addresses: Binds the REST and P2P services to any address of the
 machine i.e. `0.0.0.0`. This option is useful for Docker.
-- Strict processor deployment: instructs the node to only allow the node owner identity to 
+- Strict processor deployment: instructs the node to only allow the node owner identity to
 deploy/undeploy processors.
+
+> **Note:** When using the Docker RTI, the `SIMAAS_REPO_PATH` environment variable or
+> `--simaas-repo-path` flag must be set, pointing to the sim-aas-middleware repository.
+> The node uses this to build Processor Docker Images (PDIs) on demand.
 
 ### Example
 Here is an example for starting a node using the interactive CLI command:
 ```shell
-simaas-cli service
+simaas-cli service node
 ```
 
 Without specifying any arguments, the command will ask the user to input a number of settings:
 ```
-? Enter path to datastore: /Users/aydth/.datastore
+? Enter path to datastore: /Users/aydth/.simaas/node
 ? Select the type of DOR service: Default
 ? Select the type of RTI service: Docker
 ? Retain RTI job history? No
@@ -108,7 +130,7 @@ This address will be used to interact with this node using the CLI.
 Running a service can also be done non-interactively, by providing the necessary command line
 arguments. For a list of all arguments, use:
 ```shell
-simaas-cli service --help
+simaas-cli service node --help
 ```
 
 ### Path to Sim-aaS Middleware Repository

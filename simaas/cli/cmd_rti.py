@@ -71,7 +71,7 @@ def job_label(job: Job, status: JobStatus, deployed: Dict[str, Processor]) -> st
 
 
 # define the default values
-default_datastore = os.path.join(os.environ['HOME'], '.datastore')
+default_datastore = os.path.join(os.environ['HOME'], '.simaas', 'node')
 
 
 class RTIVolumeList(CLICommand):

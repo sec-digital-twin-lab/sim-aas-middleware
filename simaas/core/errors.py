@@ -61,6 +61,12 @@ class _BaseError(Exception):
         # Call parent with reason as message
         super().__init__(self._reason)
 
+    def __reduce__(self):
+        return (type(self), (), {'_kwargs': self._details})
+
+    def __setstate__(self, state):
+        self.__init__(**state['_kwargs'])
+
     @classmethod
     def _format_reason(cls, **kwargs: Any) -> str:
         """

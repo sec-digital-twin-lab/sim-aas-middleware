@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import pytest
 
 from simaas.cli.cmd_namespace import NamespaceUpdate, NamespaceList, NamespaceShow
-from simaas.cli.cmd_service import Service
+from simaas.cli.cmd_service_node import Service
 
 
 from simaas.nodedb.schemas import NamespaceInfo

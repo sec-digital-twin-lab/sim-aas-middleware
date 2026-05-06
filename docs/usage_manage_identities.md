@@ -17,8 +17,8 @@ identity. The identity would then be assigned a unique ID and be stored together
 of keys in the form of a JSON file called a keystore. The keystore can be referenced by the 
 identity ID.
 
-By default, the keystore will be created in a folder named `.keystore` in the home directory
-(e.g. `$HOME\.keystore`), and can be changed by providing the `--keystore` flag.
+By default, the keystore will be created in `$HOME/.simaas/keystore`, and can be changed
+by providing the `--keystore` flag.
 
 Identities can be created interactively by following the prompts using:
 ```shell
@@ -51,7 +51,7 @@ simaas-cli identity list
 ```
 Example dialogue:
 ```
-Found 1 keystores in '/home/foo.bar/.keystore':
+Found 1 keystores in '/home/foo.bar/.simaas/keystore':
 NAME     EMAIL              KEYSTORE/IDENTITY ID
 ----     -----              --------------------
 foo bar  foo.bar@email.com  i6vmw1hffcsf5pg6dlc4ofxl1s95czqs6uuqg8mf9hz32qdei4b8gmwu4eivtm3t

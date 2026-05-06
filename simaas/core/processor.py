@@ -24,9 +24,13 @@ class ProcessorRuntimeError(Exception):
         :param details: a dict with details about the exception. Content must be JSON serialiseable.
         :param ex_id: (optional) a unique exception id. If not provided, it will be generated automatically.
         """
+        super().__init__(reason)
         self._content = ExceptionContent(id=ex_id if ex_id else generate_random_string(16),
                                          reason=reason,
                                          details=details)
+
+    def __reduce__(self):
+        return (type(self), (self._content.reason, self._content.details, self._content.id))
 
     @property
     def id(self):
