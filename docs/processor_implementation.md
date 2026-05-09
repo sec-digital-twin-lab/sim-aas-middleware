@@ -49,10 +49,13 @@ access to the custodian or other nodes).
 logging messages.
 
 ### Output Handling
-- For each **output data object**, the processor must:
+- For each **required output data object**, the processor must:
     1. Write the file to `wd_path`, using the **exact name** as declared in the processor's descriptor.
     2. Notify the job runner using `listener.on_output_available(output_name)`.
-- The job runner will upload the output to the DOR (Data Object Repository) **only after** it receives 
+- **Optional outputs** (declared with `"optional": true` in the descriptor) may be skipped. If the
+  processor does not call `on_output_available()` for an optional output, the job runner silently
+  skips it. Missing required outputs cause the job to fail.
+- The job runner will upload the output to the DOR (Data Object Repository) **only after** it receives
 the notification.
 
 ## `interrupt()` Method

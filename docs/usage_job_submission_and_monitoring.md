@@ -1,11 +1,11 @@
 # Submit Job and Check Status
-Once a processor is deployed, it can be used to perform computational jobs. For all items 
-in the processor's input interface, a corresponding data object needs to be provided either
-by-reference (i.e., using the id of a data object stored in a DOR) or by-value (i.e., by 
-directly providing the value for the input item as `json` object). For all items in the 
-processor's output interface, a job needs to specify the future owner of the data object once
-it has been produced, whether it should have restricted access and whether it should be 
-encrypted.
+Once a processor is deployed, it can be used to perform computational jobs. For all required
+items in the processor's input interface, a corresponding data object needs to be provided
+either by-reference (i.e., using the id of a data object stored in a DOR) or by-value (i.e.,
+by directly providing the value for the input item as `json` object). Optional inputs may be
+skipped. For all required items in the processor's output interface, a job needs to specify
+the future owner of the data object once it has been produced, whether it should have
+restricted access and whether it should be encrypted. Optional outputs may be excluded.
 
 ```shell
 simaas-cli rti --address 192.168.50.126:5001 job submit

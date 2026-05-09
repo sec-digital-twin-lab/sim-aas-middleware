@@ -605,11 +605,17 @@ class RTIJobSubmit(CLICommand):
     def _create_job_input(self, proc_desc: ProcessorDescriptor) -> List[Union[Task.InputReference, Task.InputValue]]:
         job_input = []
         for item in proc_desc.input:
+            optional_label = " \033[2m(optional)\033[0m" if item.optional else ""
             print(f"Specify input interface item "
                   f"\033[1m'{item.name}'\033[0m with data type/format "
-                  f"\033[1m{item.data_type}/{item.data_format}\033[0m")
-            selection = prompt_for_selection([Choice('value', 'by-value'), Choice('reference', 'by-reference')],
-                                             "How to specify?")
+                  f"\033[1m{item.data_type}/{item.data_format}\033[0m{optional_label}")
+            choices = [Choice('value', 'by-value'), Choice('reference', 'by-reference')]
+            if item.optional:
+                choices.append(Choice('skip', 'skip'))
+            selection = prompt_for_selection(choices, "How to specify?")
+
+            if selection == 'skip':
+                continue
 
             if selection == 'value':
                 while True:
@@ -681,6 +687,11 @@ class RTIJobSubmit(CLICommand):
         # create the job output
         job_output = []
         for item in proc_desc.output:
+            if item.optional:
+                optional_label = f" \033[2m(optional)\033[0m"
+                if not prompt_for_confirmation(f"Include optional output '{item.name}'{optional_label}?", default=True):
+                    continue
+
             job_output.append(Task.Output(
                 name=item.name, owner_iid=owner.id, restricted_access=restricted_access, content_encrypted=False,
                 target_node_iid=target.identity.id
