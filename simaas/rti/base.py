@@ -442,6 +442,48 @@ class RTIServiceBase(RTIRESTService):
                          f"{ns_info.budget.vcpus} vCPUs + {ns_info.budget.memory} MB"
                 )
 
+        # validate task inputs against processor descriptor
+        for checklist in checklists:
+            descriptor_inputs = {i.name: i for i in checklist.proc.gpp.proc_descriptor.input}
+            task_input_names = {i.name for i in checklist.task.input}
+
+            # check for missing required inputs
+            for name, desc_input in descriptor_inputs.items():
+                if not desc_input.optional and name not in task_input_names:
+                    raise ValidationError(
+                        field='task.input',
+                        hint=f"missing required input '{name}' for processor '{checklist.proc.gpp.proc_descriptor.name}'"
+                    )
+
+            # check for unknown input names
+            for name in task_input_names:
+                if name not in descriptor_inputs:
+                    raise ValidationError(
+                        field='task.input',
+                        hint=f"unknown input '{name}' for processor '{checklist.proc.gpp.proc_descriptor.name}'"
+                    )
+
+        # validate task outputs against processor descriptor
+        for checklist in checklists:
+            descriptor_outputs = {o.name: o for o in checklist.proc.gpp.proc_descriptor.output}
+            task_output_names = {o.name for o in checklist.task.output}
+
+            # check for missing required outputs
+            for name, desc_output in descriptor_outputs.items():
+                if not desc_output.optional and name not in task_output_names:
+                    raise ValidationError(
+                        field='task.output',
+                        hint=f"missing required output '{name}' for processor '{checklist.proc.gpp.proc_descriptor.name}'"
+                    )
+
+            # check for unknown output names
+            for name in task_output_names:
+                if name not in descriptor_outputs:
+                    raise ValidationError(
+                        field='task.output',
+                        hint=f"unknown output '{name}' for processor '{checklist.proc.gpp.proc_descriptor.name}'"
+                    )
+
         return checklists
 
     async def prepare_job_execution(self, batch_id: Optional[str], checklists: List[TaskChecklist]) -> None:

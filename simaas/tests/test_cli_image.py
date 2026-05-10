@@ -24,6 +24,7 @@ from simaas.tests.conftest import (
     PROC_ABC_PATH, PROC_PING_PATH, PROC_ROOM_PATH,
     PROC_THERMOSTAT_PATH, PROC_FACTORISATION_PATH, PROC_FACTOR_SEARCH_PATH,
     PROC_EMISSIONS_PATH,
+    PROC_DEFG_PATH,
     check_docker_image_exists,
 )
 
@@ -40,6 +41,7 @@ ALL_PROCESSORS = [
     ('proc-factorisation', PROC_FACTORISATION_PATH),
     ('proc-factor-search', PROC_FACTOR_SEARCH_PATH),
     ('proc-emissions', PROC_EMISSIONS_PATH),
+    ('proc-defg', PROC_DEFG_PATH),
 ]
 
 

@@ -21,24 +21,26 @@ The descriptor must be a valid JSON file with the following top-level fields:
 }
 ```
 
-Each item in the input and output lists represents a data object interface and follows 
+Each item in the input and output lists represents a data object interface and follows
 this structure:
 ```json
 {
   "name": "example_input",
   "data_type": "JSONObject",
   "data_format": "json",
-  "data_schema": { /* optional JSON schema */ }
+  "data_schema": { /* optional JSON schema */ },
+  "optional": false
 }
 ```
 
 ## Input/Output Item Fields
-| Field         | Type   | Required | Description                                                                                                   |
-|---------------|--------|----------|---------------------------------------------------------------------------------------------------------------|
-| name	         | string | yes      | Name of the data object. Used as filename during execution.                                                   |
-| data_type     | string | yes      | Semantic type of the data (e.g., JSONObject, GeoTIFF, etc.).                                                  |
-| data_format   | string | yes      | File format of the data (e.g., json, tiff, csv).                                                              |
-| data_schema   | object | no       | Only used if data_type="JSONObject" and data_format="json". Enables content validation against a JSON Schema. |
+| Field         | Type   | Required | Default | Description                                                                                                   |
+|---------------|--------|----------|---------|---------------------------------------------------------------------------------------------------------------|
+| name	         | string | yes      |         | Name of the data object. Used as filename during execution.                                                   |
+| data_type     | string | yes      |         | Semantic type of the data (e.g., JSONObject, GeoTIFF, etc.).                                                  |
+| data_format   | string | yes      |         | File format of the data (e.g., json, tiff, csv).                                                              |
+| data_schema   | object | no       |         | Only used if data_type="JSONObject" and data_format="json". Enables content validation against a JSON Schema. |
+| optional      | bool   | no       | false   | When true, tasks may omit this data object. The RTI validates that all required (non-optional) items are present and rejects unknown item names. |
 
 > It's important to understand that the Sim-aaS Middleware does not actually interpret the
 > contents of data objects. The fields `data_type` and `data_format` are merely used to determine
@@ -46,6 +48,20 @@ this structure:
 > is simply done by comparing the data type/format information in the meta data of a data object
 > with the requirements specified in the descriptor.json of a processor. Both, data type and
 > format have to match.
+
+### Optional Data Objects
+When `optional` is set to `true` for an input or output item, that item can be omitted from
+a job's task definition without causing a validation error. This is useful for processors that
+can operate with a subset of their inputs or that conditionally produce certain outputs.
+
+During job submission, the RTI validates tasks against the processor descriptor:
+- All **required** (non-optional) inputs and outputs must be present in the task.
+- **Optional** inputs and outputs may be omitted.
+- Any input or output name not declared in the descriptor is rejected.
+
+During job execution:
+- The job runner skips downloading of optional inputs that were not provided.
+- The job runner verifies that all required outputs were produced and raises an error if any are missing. Optional outputs that were not produced are silently skipped.
 
 ## required_secrets
 Some processors require access to API keys, credentials, or tokens at runtime. These are 
