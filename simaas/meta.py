@@ -1,4 +1,4 @@
-__version__ = '4.1.2'
+__version__ = '4.1.3'
 __name__ = 'sim-aas-middleware'
 __title__ = 'Sim-aaS Middleware'
 __description__ = 'Simulation-as-a-Service Middleware'
