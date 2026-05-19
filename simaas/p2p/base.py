@@ -52,17 +52,27 @@ class P2PProtocol(abc.ABC):
         ...
 
 
+# Minimum assumed throughput for timeout calculation (bytes per second).
+# Conservative floor so that large-attachment transfers get adequate time.
+_THROUGHPUT_FLOOR = 10 * 1024 * 1024
+
+
 async def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
         attachment_path: Optional[str] = None, download_path: Optional[str] = None,
-        timeout: int = 5000, chunk_size: int = 1024 * 1024
+        timeout: Optional[int] = None, chunk_size: int = 1024 * 1024
 ) -> Tuple[Optional[BaseModel], Optional[str]]:
+    # compute size-aware timeout for large attachments
+    attachment_size = os.path.getsize(attachment_path) if attachment_path else 0
+    base_timeout = timeout if timeout is not None else 5000
+    effective_timeout = max(base_timeout, int(attachment_size / _THROUGHPUT_FLOOR * 1000))
+
     # create socket
     context = Context.instance()
     socket = context.socket(zmq.DEALER)
     socket.setsockopt(zmq.LINGER, 0)
-    socket.setsockopt(zmq.RCVTIMEO, timeout)
-    socket.setsockopt(zmq.SNDTIMEO, timeout)
+    socket.setsockopt(zmq.RCVTIMEO, effective_timeout)
+    socket.setsockopt(zmq.SNDTIMEO, effective_timeout)
     if peer.curve_secret_key and peer.curve_public_key and peer.curve_server_key:
         socket.curve_secretkey = peer.curve_secret_key
         socket.curve_publickey = peer.curve_public_key
@@ -75,7 +85,7 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise NetworkError(peer_address=peer.address, operation='connect', timeout_ms=timeout, trace=trace)
+        raise NetworkError(peer_address=peer.address, operation='connect', timeout_ms=effective_timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -86,7 +96,6 @@ async def p2p_request(
     try:
         # build and send request message
         rid = str(random.randint(1, 2 ** 32 - 1)).encode('utf-8')
-        attachment_size = os.path.getsize(attachment_path) if attachment_path else 0
         request: P2PMessage = P2PMessage(
             protocol=protocol, type='request', content=content.model_dump(),
             attachment_size=attachment_size
@@ -111,7 +120,7 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise NetworkError(peer_address=peer.address, operation='send', timeout_ms=timeout, trace=trace)
+        raise NetworkError(peer_address=peer.address, operation='send', timeout_ms=effective_timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
@@ -156,7 +165,7 @@ async def p2p_request(
     except Again as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
-        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=timeout, trace=trace)
+        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=effective_timeout, trace=trace)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
