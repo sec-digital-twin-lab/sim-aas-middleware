@@ -47,6 +47,7 @@ from simaas.cli.helpers.output import (
     label_data_object,
     label_identity,
     table,
+    print_json,
     print_result,
 )
 
@@ -104,6 +105,7 @@ __all__ = [
     'label_data_object',
     'label_identity',
     'table',
+    'print_json',
     'print_result',
     # Time
     'parse_period',
