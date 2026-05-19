@@ -1,6 +1,5 @@
 """Node diagnostic commands."""
 
-import json
 from typing import Optional
 
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, extract_address, print_json
