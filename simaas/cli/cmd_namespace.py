@@ -1,4 +1,3 @@
-import json
 from typing import Optional, Dict
 
 from InquirerPy.base import Choice
@@ -6,7 +5,7 @@ from tabulate import tabulate
 
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, prompt_for_selection, \
-    extract_address, prompt_for_integer, Argument
+    extract_address, prompt_for_integer, Argument, print_json
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NamespaceInfo, ResourceDescriptor
@@ -43,7 +42,7 @@ class NamespaceList(CLICommand):
                     'reservations': len(namespace.reservations),
                     'jobs': len(namespace.jobs)
                 })
-            print(json.dumps(output, indent=2))
+            print_json(result=output)
         elif len(namespaces) == 0:
             print("No namespaces found.")
         else:
@@ -80,7 +79,9 @@ class NamespaceUpdate(CLICommand):
         super().__init__('update', 'updates existing (or creates new) namespace', arguments=[
             Argument('--name', dest='name', action='store', help="the name of the namespace"),
             Argument('--vcpus', dest='vcpus', action='store', help="the number of vCPUs for this namespace (must be a positive integer"),
-            Argument('--memory', dest='memory', action='store', help="the amount of memory (in megabytes) for this namespace (must be a positive integer")
+            Argument('--memory', dest='memory', action='store', help="the amount of memory (in megabytes) for this namespace (must be a positive integer"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -113,16 +114,13 @@ class NamespaceUpdate(CLICommand):
             vcpus = int(args['vcpus'])
             memory = int(args['memory'])
         except ValueError:
-            print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
-                  f"-> vCPUs/memory must be positive integers.")
-            raise CLIError('Non-integer vCPUs and/or memory specification')
+            raise CLIError(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
+                           f"-> vCPUs/memory must be positive integers.")
 
         # check resource specifications: must be positive
         if vcpus < 0 or memory < 0:
-            print(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
-                  f"-> vCPUs/memory must be positive integers.")
-            raise CLIError('Negative vCPUs and/or memory specification')
-
+            raise CLIError(f"Invalid resource specification: {args['vcpus']}/{args['memory']} "
+                           f"-> vCPUs/memory must be positive integers.")
 
         budget = ResourceDescriptor(vcpus=int(args['vcpus']), memory=int(args['memory']))
         namespace: NamespaceInfo = proxy.update_namespace_budget(args['name'], budget)
@@ -132,18 +130,31 @@ class NamespaceUpdate(CLICommand):
             used.vcpus += r.vcpus
             used.memory += r.memory
 
-        print(f"Namespace '{namespace.name}' updated/created:")
-        print(f"- vCPUs: {used.vcpus} of {namespace.budget.vcpus} vCPUs used")
-        print(f"- Memory: {used.memory} of {namespace.budget.memory} MB used")
-        if len(namespace.reservations) > 0:
-            print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
+        if args.get('json_output'):
+            print_json(result={
+                'name': namespace.name,
+                'budget_vcpus': namespace.budget.vcpus,
+                'budget_memory': namespace.budget.memory,
+                'used_vcpus': used.vcpus,
+                'used_memory': used.memory,
+                'available_vcpus': namespace.budget.vcpus - used.vcpus,
+                'available_memory': namespace.budget.memory - used.memory,
+                'reservations': list(namespace.reservations.keys()),
+                'jobs': namespace.jobs
+            })
         else:
-            print("- No Active reservations")
+            print(f"Namespace '{namespace.name}' updated/created:")
+            print(f"- vCPUs: {used.vcpus} of {namespace.budget.vcpus} vCPUs used")
+            print(f"- Memory: {used.memory} of {namespace.budget.memory} MB used")
+            if len(namespace.reservations) > 0:
+                print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
+            else:
+                print("- No Active reservations")
 
-        if len(namespace.jobs) > 0:
-            print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
-        else:
-            print("- No Active Jobs")
+            if len(namespace.jobs) > 0:
+                print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
+            else:
+                print("- No Active Jobs")
 
         return {
             'namespace': namespace
@@ -152,7 +163,10 @@ class NamespaceUpdate(CLICommand):
 
 class NamespaceShow(CLICommand):
     def __init__(self):
-        super().__init__('show', 'show details of existing namespace')
+        super().__init__('show', 'show details of existing namespace', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         prompt_if_missing(args, 'address', prompt_for_string, message="Enter address of node:",
@@ -170,7 +184,10 @@ class NamespaceShow(CLICommand):
 
         namespace: Optional[NamespaceInfo] = proxy.get_namespace(args['name'])
         if namespace is None:
-            print(f"Namespace '{args['name']}' not found.")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"Namespace '{args['name']}' not found."))
+            else:
+                print(f"Namespace '{args['name']}' not found.")
 
         else:
             used = ResourceDescriptor(vcpus=0, memory=0)
@@ -178,18 +195,31 @@ class NamespaceShow(CLICommand):
                 used.vcpus += r.vcpus
                 used.memory += r.memory
 
-            print(f"Namespace '{namespace.name}' found:")
-            print(f"- vCPUs: {used.vcpus} of {namespace.budget.vcpus} vCPUs used")
-            print(f"- Memory: {used.memory} of {namespace.budget.memory} MB used")
-            if len(namespace.reservations) > 0:
-                print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
+            if args.get('json_output'):
+                print_json(result={
+                    'name': namespace.name,
+                    'budget_vcpus': namespace.budget.vcpus,
+                    'budget_memory': namespace.budget.memory,
+                    'used_vcpus': used.vcpus,
+                    'used_memory': used.memory,
+                    'available_vcpus': namespace.budget.vcpus - used.vcpus,
+                    'available_memory': namespace.budget.memory - used.memory,
+                    'reservations': list(namespace.reservations.keys()),
+                    'jobs': namespace.jobs
+                })
             else:
-                print("- No Active reservations")
+                print(f"Namespace '{namespace.name}' found:")
+                print(f"- vCPUs: {used.vcpus} of {namespace.budget.vcpus} vCPUs used")
+                print(f"- Memory: {used.memory} of {namespace.budget.memory} MB used")
+                if len(namespace.reservations) > 0:
+                    print(f"- Active Reservations ({len(namespace.reservations)}): {' '.join(namespace.reservations.keys())}")
+                else:
+                    print("- No Active reservations")
 
-            if len(namespace.jobs) > 0:
-                print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
-            else:
-                print("- No Active Jobs")
+                if len(namespace.jobs) > 0:
+                    print(f"- Active Jobs ({len(namespace.jobs)}): {' '.join(namespace.jobs)}")
+                else:
+                    print("- No Active Jobs")
 
         return {
             'namespace': namespace

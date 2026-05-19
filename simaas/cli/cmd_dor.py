@@ -9,7 +9,7 @@ from simaas.core.errors import CLIError, RemoteError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, \
     prompt_for_keystore_selection, prompt_for_confirmation, prompt_for_selection, prompt_for_tags, load_keystore, \
     get_nodes_by_service, extract_address, prompt_for_identity_selection, prompt_for_data_objects, \
-    deserialise_tag_value, label_data_object, shorten_id, label_identity
+    deserialise_tag_value, label_data_object, shorten_id, label_identity, print_json
 from simaas.core.helpers import encrypt_file
 from simaas.core.identity import Identity
 from simaas.dor.api import DORProxy
@@ -44,6 +44,8 @@ class DORAdd(CLICommand):
                      help="the data type of the data object"),
             Argument('--data-format', dest='data-format', action='store',
                      help="the data format of the data object"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('file', metavar='file', type=str, nargs=1,
                      help="file containing the content of the data object")
         ])
@@ -96,11 +98,15 @@ class DORAdd(CLICommand):
         # if we used encryption, store the content key
         if content_encrypted:
             keystore.content_keys.update(obj_id, content_key)
-            print(f"Content key for object {obj_id} added to keystore.")
+            if not args.get('json_output'):
+                print(f"Content key for object {obj_id} added to keystore.")
 
             os.remove(obj_path)
 
-        print(f"Data object added: {json.dumps(meta.model_dump(), indent=4)}")
+        if args.get('json_output'):
+            print_json(result=meta.model_dump())
+        else:
+            print(f"Data object added: {json.dumps(meta.model_dump(), indent=4)}")
 
         return {
             'obj': meta
@@ -110,7 +116,9 @@ class DORAdd(CLICommand):
 class DORMeta(CLICommand):
     def __init__(self):
         super().__init__('meta', 'retrieves the meta information of a data object', arguments=[
-            Argument('--obj-id', dest='obj-id', action='store', help="the id of the data object")
+            Argument('--obj-id', dest='obj-id', action='store', help="the id of the data object"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -128,7 +136,10 @@ class DORMeta(CLICommand):
         if not meta:
             raise CLIError(f"No data object with id={args['obj-id']}")
 
-        print(json.dumps(meta.model_dump(), indent=4))
+        if args.get('json_output'):
+            print_json(result=meta.model_dump())
+        else:
+            print(json.dumps(meta.model_dump(), indent=4))
 
         return {
             'obj': meta
@@ -140,9 +151,10 @@ class DORDownload(CLICommand):
         super().__init__('download', 'retrieves the contents of a data object', arguments=[
             Argument('--destination', dest='destination', action='store',
                      help="directory where to store the data object content(s)"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('obj-ids', metavar='obj-ids', type=str, nargs='*',
                      help="the ids of the data object that are to be downloaded"),
-
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -168,14 +180,19 @@ class DORDownload(CLICommand):
             result: list[DataObject] = dor.search(owner_iid=keystore.identity.id)
             result: dict[str, DataObject] = {obj.obj_id: obj for obj in result}
             downloadable = []
+            skipped = []
             for obj_id in args['obj-ids']:
                 if obj_id not in result:
-                    print(f"Ignoring data object '{shorten_id(obj_id)}': does not exist or is "
-                          f"not owned by '{label_identity(keystore.identity)}'")
+                    if not args.get('json_output'):
+                        print(f"Ignoring data object '{shorten_id(obj_id)}': does not exist or is "
+                              f"not owned by '{label_identity(keystore.identity)}'")
+                    skipped.append(obj_id)
 
                 elif result[obj_id].access_restricted and keystore.identity.id not in result[obj_id].access:
-                    print(f"Ignoring data object '{shorten_id(obj_id)}': '{label_identity(keystore.identity)}' "
-                          f"does not have access.")
+                    if not args.get('json_output'):
+                        print(f"Ignoring data object '{shorten_id(obj_id)}': '{label_identity(keystore.identity)}' "
+                              f"does not have access.")
+                    skipped.append(obj_id)
 
                 else:
                     downloadable.append(result[obj_id])
@@ -187,16 +204,27 @@ class DORDownload(CLICommand):
         # download the data objects
         dor = DORProxy(extract_address(args['address']))
         result: Dict[str, str] = {}
+        errors = []
         for obj in downloadable:
             download_path = os.path.join(args['destination'], f"{obj.obj_id}.{obj.data_format}")
-            print(f"Downloading {shorten_id(obj.obj_id)} to {download_path} ...", end='')
+            if not args.get('json_output'):
+                print(f"Downloading {shorten_id(obj.obj_id)} to {download_path} ...", end='')
             try:
                 dor.get_content(obj.obj_id, keystore, download_path)
                 result[obj.obj_id] = download_path
-                print("Done")
+                if not args.get('json_output'):
+                    print("Done")
 
             except RemoteError as e:
-                print(f"{e.reason} details: {e.details}")
+                if not args.get('json_output'):
+                    print(f"{e.reason} details: {e.details}")
+                errors.append({"obj_id": obj.obj_id, "error": e.reason, "details": e.details})
+
+        if args.get('json_output'):
+            output = {"downloaded": result}
+            if errors:
+                output["errors"] = errors
+            print_json(result=output)
 
         return result
 
@@ -206,6 +234,8 @@ class DORRemove(CLICommand):
         super().__init__('remove', 'removes a data object', arguments=[
             Argument('--confirm', dest="confirm", action='store_const', const=True,
                      help="do not require user confirmation to delete data object"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('obj-ids', metavar='obj-ids', type=str, nargs='*',
                      help="the ids of the data object that are to be deleted")
         ])
@@ -228,8 +258,9 @@ class DORRemove(CLICommand):
             removable = []
             for obj_id in args['obj-ids']:
                 if obj_id not in result:
-                    print(f"Ignoring data object '{obj_id}': does not exist or is not owned by "
-                          f"'{keystore.identity.name}/{keystore.identity.email}/{keystore.identity.id}'")
+                    if not args.get('json_output'):
+                        print(f"Ignoring data object '{obj_id}': does not exist or is not owned by "
+                              f"'{keystore.identity.name}/{keystore.identity.email}/{keystore.identity.id}'")
                 else:
                     removable.append(obj_id)
             args['obj-ids'] = removable
@@ -246,7 +277,11 @@ class DORRemove(CLICommand):
                                  message=f"Delete data object {obj_id}?", default=False):
                 dor.delete_data_object(obj_id, keystore)
                 removed.append(obj_id)
-                print(f"Deleted {obj_id}.")
+                if not args.get('json_output'):
+                    print(f"Deleted {obj_id}.")
+
+        if args.get('json_output'):
+            print_json(result={"removed": removed})
 
         return {
             'removed': removed
@@ -273,8 +308,6 @@ class DORSearch(CLICommand):
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
-        import json as json_module
-
         prompt_if_missing(args, 'address', prompt_for_string,
                           message="Enter the target node's REST address",
                           default=determine_default_rest_address())
@@ -338,13 +371,13 @@ class DORSearch(CLICommand):
                 print(tabulate(lines, tablefmt="plain"))
                 print()
 
-            else:
+            elif not args.get('json_output'):
                 print(
                     f"No data objects found at {shorten_id(node.identity.id)}/"
                     f"{node.rest_address[0]}:{node.rest_address[1]} that match the criteria.")
 
         if args.get('json_output'):
-            print(json_module.dumps(json_output, indent=2))
+            print_json(result=json_output)
 
         return result
 
@@ -354,7 +387,8 @@ class DORTag(CLICommand):
         super().__init__('tag', 'add/update tags of a data object', arguments=[
             Argument('--obj-id', dest='obj-id', action='store',
                      help="the id of the data object"),
-
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('tags', metavar='tags', type=str, nargs='*',
                      help="the tags (given as \'key=value\' pairs) to be used for the data object")
         ])
@@ -378,8 +412,9 @@ class DORTag(CLICommand):
         found = []
         for obj_id in args['obj-id']:
             if obj_id not in result:
-                print(f"Data object '{shorten_id(obj_id)}' does not exist or is not owned by "
-                      f"'{label_identity(keystore.identity)}'. Skipping.")
+                if not args.get('json_output'):
+                    print(f"Data object '{shorten_id(obj_id)}' does not exist or is not owned by "
+                          f"'{label_identity(keystore.identity)}'. Skipping.")
             else:
                 found.append(obj_id)
 
@@ -393,7 +428,8 @@ class DORTag(CLICommand):
             valid_tags = []
             for tag in args['tags']:
                 if tag.count('=') > 1:
-                    print(f"Invalid tag '{tag}'. Ignoring.")
+                    if not args.get('json_output'):
+                        print(f"Invalid tag '{tag}'. Ignoring.")
                 elif tag.count('=') == 0:
                     valid_tags.append(DataObject.Tag(key=tag))
                 else:
@@ -410,9 +446,15 @@ class DORTag(CLICommand):
         # update the tags
         result: Dict[str, DataObject] = {}
         for obj_id in found:
-            print(f"Updating tags for data object {obj_id}...", end='')
+            if not args.get('json_output'):
+                print(f"Updating tags for data object {obj_id}...", end='')
             result[obj_id] = dor.update_tags(obj_id, keystore, valid_tags)
-            print("Done")
+            if not args.get('json_output'):
+                print("Done")
+
+        if args.get('json_output'):
+            output = {obj_id: meta.model_dump() for obj_id, meta in result.items()}
+            print_json(result=output)
 
         return result
 
@@ -422,7 +464,8 @@ class DORUntag(CLICommand):
         super().__init__('untag', 'removes tags from a data object', arguments=[
             Argument('--obj-id', dest='obj-id', action='store',
                      help="the id of the data object"),
-
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('keys', metavar='keys', type=str, nargs='*',
                      help="the tags (identified by their key) to be removed from the data object")
         ])
@@ -464,7 +507,8 @@ class DORUntag(CLICommand):
         valid_keys = []
         for key in args['keys']:
             if key not in meta.tags:
-                print(f"Invalid key '{key}'. Ignoring.")
+                if not args.get('json_output'):
+                    print(f"Invalid key '{key}'. Ignoring.")
             else:
                 valid_keys.append(key)
 
@@ -473,9 +517,13 @@ class DORUntag(CLICommand):
             raise CLIError("No valid keys found. Aborting.")
 
         # update the tags
-        print(f"Removing tags for data object {shorten_id(args['obj-id'])}...", end='')
+        if not args.get('json_output'):
+            print(f"Removing tags for data object {shorten_id(args['obj-id'])}...", end='')
         obj = dor.remove_tags(args['obj-id'], keystore, valid_keys)
-        print("Done")
+        if args.get('json_output'):
+            print_json(result=obj.model_dump())
+        else:
+            print("Done")
 
         return {
             'obj': obj
@@ -487,6 +535,8 @@ class DORAccessShow(CLICommand):
         super().__init__('show', 'shows the identities who have been granted access to a data object', arguments=[
             Argument('--obj-id', dest='obj-id', action='store', required=False,
                      help="the id of the data object"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -515,25 +565,32 @@ class DORAccessShow(CLICommand):
         # get the meta information
         meta = result[args['obj-id']]
 
-        if not meta.access_restricted:
-            print("Data object is not access restricted: everyone has access.")
-
+        if args.get('json_output'):
+            if not meta.access_restricted:
+                print_json(result={"access_restricted": False, "access": []})
+            else:
+                db = NodeDBProxy(extract_address(args['address']))
+                identities = [db.get_identity(iid) for iid in meta.access]
+                output = {
+                    "access_restricted": True,
+                    "access": [{"name": i.name, "email": i.email, "id": i.id} for i in identities]
+                }
+                print_json(result=output)
         else:
-            print("The following identities have been granted access:")
-            db = NodeDBProxy(extract_address(args['address']))
-            identities = [db.get_identity(iid) for iid in meta.access]
-            # headers
-            lines = [
-                ['NAME', 'EMAIL', 'IDENTITY ID'],
-                ['----', '-----', '-----------']
-            ]
-
-            # list
-            lines += [
-                [item.name, item.email, item.id] for item in identities
-            ]
-
-            print(tabulate(lines, tablefmt="plain"))
+            if not meta.access_restricted:
+                print("Data object is not access restricted: everyone has access.")
+            else:
+                print("The following identities have been granted access:")
+                db = NodeDBProxy(extract_address(args['address']))
+                identities = [db.get_identity(iid) for iid in meta.access]
+                lines = [
+                    ['NAME', 'EMAIL', 'IDENTITY ID'],
+                    ['----', '-----', '-----------']
+                ]
+                lines += [
+                    [item.name, item.email, item.id] for item in identities
+                ]
+                print(tabulate(lines, tablefmt="plain"))
 
         return {
             'access': meta.access
@@ -545,7 +602,8 @@ class DORAccessGrant(CLICommand):
         super().__init__('grant', 'grants access to one or more data objects', arguments=[
             Argument('--iid', dest='iid', action='store',
                      help="the id of the identity who will be granted access"),
-
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('obj-ids', metavar='obj-ids', type=str, nargs='*',
                      help="the ids of the data objects to which access will be granted")
         ])
@@ -593,15 +651,26 @@ class DORAccessGrant(CLICommand):
 
         # grant access
         granted = []
+        failed = []
         for obj_id in args['obj-ids']:
-            print(f"Granting access to data object {shorten_id(obj_id)} "
-                  f"for identity {shorten_id(args['iid'])}...", end='')
+            if not args.get('json_output'):
+                print(f"Granting access to data object {shorten_id(obj_id)} "
+                      f"for identity {shorten_id(args['iid'])}...", end='')
             meta = dor.grant_access(obj_id, keystore, identities[args['iid']])
             if args['iid'] not in meta.access:
-                print("Failed")
+                if not args.get('json_output'):
+                    print("Failed")
+                failed.append(obj_id)
             else:
                 granted.append(obj_id)
-                print("Done")
+                if not args.get('json_output'):
+                    print("Done")
+
+        if args.get('json_output'):
+            output = {"granted": granted}
+            if failed:
+                output["failed"] = failed
+            print_json(result=output)
 
         return {
             'granted': granted
@@ -613,7 +682,8 @@ class DORAccessRevoke(CLICommand):
         super().__init__('revoke', 'revokes access to a data object', arguments=[
             Argument('--obj-id', dest='obj-id', action='store',
                      help="the id of the data objects to which access will be revoked"),
-
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('iids', metavar='iids', type=str, nargs='*',
                      help="the ids of the identities whose access will be revoked")
         ])
@@ -662,15 +732,26 @@ class DORAccessRevoke(CLICommand):
 
         # revoke access
         revoked = []
+        failed = []
         for iid in args['iids']:
-            print(f"Revoking access to data object {shorten_id(args['obj-id'])} "
-                  f"for identity {shorten_id(iid)}...", end='')
+            if not args.get('json_output'):
+                print(f"Revoking access to data object {shorten_id(args['obj-id'])} "
+                      f"for identity {shorten_id(iid)}...", end='')
             meta = dor.revoke_access(args['obj-id'], keystore, identities[iid])
             if iid in meta.access:
-                print("Failed")
+                if not args.get('json_output'):
+                    print("Failed")
+                failed.append(iid)
             else:
                 revoked.append(iid)
-                print("Done")
+                if not args.get('json_output'):
+                    print("Done")
+
+        if args.get('json_output'):
+            output = {"revoked": revoked}
+            if failed:
+                output["failed"] = failed
+            print_json(result=output)
 
         return {
             'revoked': revoked

@@ -3,7 +3,7 @@
 import json
 from typing import Optional
 
-from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, extract_address
+from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, extract_address, print_json
 from simaas.core.errors import RemoteError
 from simaas.helpers import determine_default_rest_address
 from simaas.meta import __version__
@@ -98,7 +98,7 @@ class NodeStatus(CLICommand):
             }
 
         if args.get('json_output'):
-            print(json.dumps(status, indent=2))
+            print_json(result=status)
         else:
             print("Service Status")
             print("--------------")
@@ -180,7 +180,7 @@ class NodeInfo(CLICommand):
             info['error'] = str(e)
 
         if args.get('json_output'):
-            print(json.dumps(info, indent=2))
+            print_json(result=info)
         else:
             print("Node Information")
             print("----------------")
