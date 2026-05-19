@@ -88,7 +88,8 @@ class P2PFetchDataObject(P2PProtocol):
         self._node = node
 
     async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
-                      user_iid: str = None, user_signature: str = None) -> DataObject:
+                      user_iid: str = None, user_signature: str = None,
+                      timeout: Optional[int] = None) -> DataObject:
         peer_address = P2PAddress(
             address=peer.p2p_address,
             curve_secret_key=self._node.keystore.curve_secret_key(),
@@ -99,7 +100,8 @@ class P2PFetchDataObject(P2PProtocol):
         message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
 
         reply, _ = await p2p_request(
-            peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path
+            peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path,
+            timeout=timeout
         )
         reply: FetchResponse = reply  # casting for PyCharm
 
@@ -223,7 +225,8 @@ class P2PPushDataObject(P2PProtocol):
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
             access_restricted: bool, content_encrypted: bool, license: DataObject.License,
             recipe: Optional[DataObjectRecipe] = None,
-            tags: Optional[Dict[str, TagValueType]] = None
+            tags: Optional[Dict[str, TagValueType]] = None,
+            timeout: Optional[int] = None
     ) -> DataObject:
         peer_address = P2PAddress(
             address=p2p_address,
@@ -245,7 +248,8 @@ class P2PPushDataObject(P2PProtocol):
         )
 
         reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
-            peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path
+            peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path,
+            timeout=timeout
         )
         reply: PushResponse = reply[0]  # casting for PyCharm
 

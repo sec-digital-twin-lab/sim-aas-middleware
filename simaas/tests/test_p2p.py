@@ -6,6 +6,7 @@ import logging
 import os
 import tempfile
 from typing import List, Dict
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +16,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.core.errors import NetworkError
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
@@ -316,3 +317,58 @@ async def test_p2p_fetch_restricted(p2p_server):
             assert False
         except Exception:
             assert False
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_p2p_push_large_attachment_timeout(p2p_server, p2p_client):
+    """Test that size-aware timeout prevents failure for large P2P pushes.
+
+    Pushes a 500 MB payload with the old hardcoded 5 s default (size-aware
+    scaling disabled via patch) and verifies the transfer fails.  Then
+    re-enables size-aware scaling and verifies the same transfer succeeds.
+    """
+    import time
+
+    owner = p2p_client.identity
+    nodedb = NodeDBProxy(p2p_server.rest.address())
+    nodedb.update_identity(owner)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'payload.bin')
+        with open(content_path, 'wb') as f:
+            f.truncate(500 * 1024 * 1024)
+
+        push_kwargs = dict(
+            p2p_address=p2p_server.p2p.address(),
+            keystore=p2p_client.keystore,
+            peer=p2p_server.identity,
+            content_path=content_path,
+            data_type='BinaryObject',
+            data_format='binary',
+            owner_iid=owner.id,
+            creators_iid=[owner.id],
+            access_restricted=False,
+            content_encrypted=False,
+            license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+        )
+
+        # disable size-aware scaling so the 5 s timeout applies directly
+        with patch('simaas.p2p.base._THROUGHPUT_FLOOR', float('inf')):
+            t0 = time.monotonic()
+            with pytest.raises(NetworkError):
+                await P2PPushDataObject.perform(**push_kwargs, timeout=5000)
+            elapsed = time.monotonic() - t0
+            print(f"push with 5 s timeout failed after {elapsed:.2f} s")
+
+        # let the server finish processing the timed-out request
+        await asyncio.sleep(2)
+
+        # with size-aware timeout (default) the same transfer succeeds
+        t0 = time.monotonic()
+        meta = await P2PPushDataObject.perform(**push_kwargs)
+        elapsed = time.monotonic() - t0
+        print(f"push with size-aware timeout succeeded in {elapsed:.2f} s")
+        assert meta is not None
+        assert meta.obj_id is not None
