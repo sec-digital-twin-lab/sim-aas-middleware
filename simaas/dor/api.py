@@ -133,11 +133,14 @@ class DORRESTService(DORInterface):
         Subclasses (including out-of-tree plugins) extend the list by overriding
         and chaining via ``super().get_p2p_protocols(node)``.
         """
-        from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+        from simaas.dor.protocol import (
+            P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject,
+        )
         return [
             P2PLookupDataObject(node),
             P2PFetchDataObject(node),
             P2PPushDataObject(node),
+            P2PRelayPushDataObject(node),
         ]
 
     @abc.abstractmethod

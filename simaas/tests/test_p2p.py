@@ -16,7 +16,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.core.errors import NetworkError
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
@@ -372,3 +372,141 @@ async def test_p2p_push_large_attachment_timeout(p2p_server, p2p_client):
         print(f"push with size-aware timeout succeeded in {elapsed:.2f} s")
         assert meta is not None
         assert meta.obj_id is not None
+
+
+# ==============================================================================
+# P2PRelayPushDataObject — runner pushes via custodian when it cannot reach the
+# actual target directly (e.g. cloud function, behind NAT). The custodian, with
+# full peer connectivity, performs the downstream push on the runner's behalf.
+# ==============================================================================
+
+
+def _relay_push_kwargs(custodian, runner_keystore, target_iid, content_path):
+    return dict(
+        custodian_p2p_address=custodian.p2p.address(),
+        keystore=runner_keystore,
+        custodian_identity=custodian.identity,
+        target_iid=target_iid,
+        content_path=content_path,
+        data_type='JSONObject',
+        data_format='json',
+        owner_iid=runner_keystore.identity.id,
+        creators_iid=[runner_keystore.identity.id],
+        access_restricted=False,
+        content_encrypted=False,
+        license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
+    """Relay-push from a runner through the custodian to a separate DOR-enabled target node."""
+    # spin up a fresh DOR-enabled target and join it to the custodian's network so
+    # the custodian's local NodeDB knows where to forward.
+    target_keystore = Keystore.new(f"relay-target-happy-{get_timestamp_now()}")
+    target_node: Node = test_context.get_node(
+        target_keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None
+    )
+    await P2PJoinNetwork(target_node).perform(p2p_server.info)
+    await asyncio.sleep(1)
+
+    # custodian needs to know about the runner's identity (it stamps owner/creators)
+    await p2p_server.db.update_identity(p2p_client.identity)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'payload.json')
+        with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
+            json.dump({'v': 42, 'tag': 'happy'}, f)
+
+        meta = await P2PRelayPushDataObject.perform(
+            **_relay_push_kwargs(p2p_server, p2p_client.keystore, target_node.identity.id, content_path)
+        )
+        assert meta is not None
+        assert meta.obj_id is not None
+
+        # the object should live on the TARGET — the custodian only relayed
+        target_meta = await target_node.dor.get_meta(meta.obj_id)
+        assert target_meta is not None
+        assert target_meta.obj_id == meta.obj_id
+
+        custodian_meta = await p2p_server.dor.get_meta(meta.obj_id)
+        assert custodian_meta is None, "custodian should not retain a copy when relaying"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_p2p_relay_push_target_unknown(p2p_server, p2p_client):
+    """Relay-push with a target_iid the custodian doesn't know about returns a clean error."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'payload.json')
+        with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
+            json.dump({'v': 1}, f)
+
+        try:
+            await P2PRelayPushDataObject.perform(
+                **_relay_push_kwargs(
+                    p2p_server, p2p_client.keystore,
+                    target_iid='not-a-real-iid-' + 'x' * 50,
+                    content_path=content_path,
+                )
+            )
+            assert False, "expected NetworkError"
+        except NetworkError as e:
+            assert 'target node not found in network' in e.details['reason']
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context):
+    """Relay-push to a known target that lacks DOR returns a clean error (no 5s timeout)."""
+    no_dor_keystore = Keystore.new(f"relay-target-no-dor-{get_timestamp_now()}")
+    no_dor_target: Node = test_context.get_node(
+        no_dor_keystore, enable_rest=False, dor_plugin_class=None, rti_plugin_class=None
+    )
+    await P2PJoinNetwork(no_dor_target).perform(p2p_server.info)
+    await asyncio.sleep(1)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'payload.json')
+        with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
+            json.dump({'v': 2}, f)
+
+        try:
+            await P2PRelayPushDataObject.perform(
+                **_relay_push_kwargs(
+                    p2p_server, p2p_client.keystore, no_dor_target.identity.id, content_path
+                )
+            )
+            assert False, "expected NetworkError"
+        except NetworkError as e:
+            assert 'does not support DOR' in e.details['reason']
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_p2p_relay_push_target_is_custodian(p2p_server, p2p_client):
+    """Relay-push where target == custodian: handler stores via the local DOR.add path."""
+    # custodian needs to know about the runner identity
+    await p2p_server.db.update_identity(p2p_client.identity)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        content_path = os.path.join(temp_dir, 'payload.json')
+        with open(content_path, 'w') as f:
+            # noinspection PyTypeChecker
+            json.dump({'v': 99, 'tag': 'self-relay'}, f)
+
+        meta = await P2PRelayPushDataObject.perform(
+            **_relay_push_kwargs(
+                p2p_server, p2p_client.keystore, p2p_server.identity.id, content_path
+            )
+        )
+        assert meta is not None
+        assert meta.obj_id is not None
+
+        custodian_meta = await p2p_server.dor.get_meta(meta.obj_id)
+        assert custodian_meta is not None
+        assert custodian_meta.obj_id == meta.obj_id

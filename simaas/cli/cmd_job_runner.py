@@ -13,7 +13,7 @@ from simaas.namespace.default import DefaultNamespace
 from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
 from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
@@ -116,8 +116,12 @@ class OutputObjectHandler(threading.Thread):
                 operation='push_output', stage='validate', cause='target node does not support DOR capabilities'
             )
 
-        # check if the target node is the custodian, if so override the P2P address
-        if target_node.identity.id == self._owner.custodian_identity.id:
+        # decide between direct push (to custodian) and custodian-relayed push (to anyone else).
+        # The runner is only guaranteed to reach the custodian — non-custodian peers may live in
+        # network positions the runner cannot connect to (cloud function, NAT, etc.). The
+        # custodian, which has full peer connectivity, forwards the push on the runner's behalf.
+        target_is_custodian = target_node.identity.id == self._owner.custodian_identity.id
+        if target_is_custodian:
             self._logger.info(
                 f"target node is custodian -> overriding P2P address: {self._owner.custodian_address.address}"
             )
@@ -157,22 +161,33 @@ class OutputObjectHandler(threading.Thread):
         # creator(s) is assumed to be the user on whose behalf the job is executed
         creator_iids = [self._owner.user.id]
 
-        # push the data object to the DOR
-        self._logger.info(
-            f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
-        )
-
-        obj = await P2PPushDataObject.perform(
-            target_node.p2p_address, self._owner.keystore, target_node.identity,
-            output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
-            restricted_access, content_encrypted,
-            license=DataObject.License(by=True, sa=True, nc=True, nd=True),
-            recipe=recipe,
-            tags={
-                'name': obj_name,
-                'job_id': self._owner.job.id
-            }
-        )
+        # push the data object — direct to custodian, otherwise relay through custodian.
+        if target_is_custodian:
+            self._logger.info(
+                f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
+            )
+            obj = await P2PPushDataObject.perform(
+                target_node.p2p_address, self._owner.keystore, target_node.identity,
+                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                restricted_access, content_encrypted,
+                license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+                recipe=recipe,
+                tags={'name': obj_name, 'job_id': self._owner.job.id}
+            )
+        else:
+            self._logger.info(
+                f"BEGIN relay-push output '{obj_name}' via custodian "
+                f"-> target {target_node.identity.id}"
+            )
+            obj = await P2PRelayPushDataObject.perform(
+                self._owner.custodian_address.address, self._owner.keystore,
+                self._owner.custodian_identity, target_node.identity.id,
+                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                restricted_access, content_encrypted,
+                license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+                recipe=recipe,
+                tags={'name': obj_name, 'job_id': self._owner.job.id}
+            )
 
         self._logger.info(f"END push output '{obj_name}'")
         return obj
