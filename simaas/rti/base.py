@@ -153,7 +153,10 @@ class RTIServiceBase(RTIRESTService):
                 record.state = proc.state.value
                 record.image_name = proc.image_name
                 record.ports = proc.ports
-                record.gpp = proc.gpp.model_dump()
+                # gpp may legitimately be None on the FAILED path: deploy() creates a placeholder
+                # record with gpp=None before perform_deploy populates it. Without this guard, a
+                # failure before gpp is set would mask the real cause with an AttributeError.
+                record.gpp = proc.gpp.model_dump() if proc.gpp else None
                 record.error = proc.error
                 record.volumes = [volume.model_dump() for volume in proc.volumes]
 
