@@ -126,6 +126,19 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
     def strict_deployment(self) -> bool:
         return self._strict_deployment
 
+    def get_p2p_protocols(self, node) -> list:
+        """P2P protocols this service exposes on the node's P2P bus.
+
+        Called once by ``Node.startup()`` before the P2P service is started.
+        Subclasses (including out-of-tree RTI plugins) extend the list by
+        overriding and chaining via ``super().get_p2p_protocols(node)``.
+        """
+        from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
+        return [
+            P2PPushJobStatus(node),
+            P2PRunnerPerformHandshake(node),
+        ]
+
     @abc.abstractmethod
     @requires_tasks_supported
     @requires_authentication

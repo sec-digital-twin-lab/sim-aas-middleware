@@ -126,6 +126,20 @@ class DORInterface(abc.ABC):
 
 
 class DORRESTService(DORInterface):
+    def get_p2p_protocols(self, node) -> list:
+        """P2P protocols this service exposes on the node's P2P bus.
+
+        Called once by ``Node.startup()`` before the P2P service is started.
+        Subclasses (including out-of-tree plugins) extend the list by overriding
+        and chaining via ``super().get_p2p_protocols(node)``.
+        """
+        from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+        return [
+            P2PLookupDataObject(node),
+            P2PFetchDataObject(node),
+            P2PPushDataObject(node),
+        ]
+
     @abc.abstractmethod
     async def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
         """
