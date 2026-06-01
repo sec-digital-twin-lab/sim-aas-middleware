@@ -8,8 +8,6 @@ from importlib.util import spec_from_file_location, module_from_spec
 from pathlib import Path
 from threading import Lock
 
-import netifaces
-import ipaddress
 from typing import List, Optional, Tuple, Dict
 
 import docker
@@ -24,20 +22,17 @@ log = get_logger('simaas.helpers', 'core')
 
 
 def determine_local_ip() -> Optional[str]:
-    # determine all private IPv4 addresses that are not loopback devices
-    private_ipv4_addresses = []
-    for interface in netifaces.interfaces():
-        addresses = netifaces.ifaddresses(interface)
-        if netifaces.AF_INET in addresses:
-            for entry in addresses[netifaces.AF_INET]:
-                ip_address = entry['addr']
-
-                # check if the address is private and not a loopback device
-                addr = ipaddress.IPv4Address(ip_address)
-                if addr.is_private and not addr.is_loopback:
-                    private_ipv4_addresses.append(ip_address)
-
-    return private_ipv4_addresses[0] if private_ipv4_addresses else None
+    # Ask the kernel which local IP it would use to reach an external address.
+    # The socket never actually sends a packet — UDP "connect" only sets the
+    # destination, after which getsockname() reveals the chosen source IP.
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
 
 
 LOCAL_IP = determine_local_ip()
