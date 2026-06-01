@@ -9,10 +9,10 @@ from typing import Optional, List, Dict
 
 from fastapi import UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
-from sqlalchemy import Column, String, Boolean, BigInteger
+from sqlalchemy import Column, String, Boolean, BigInteger, JSON
 from sqlalchemy import create_engine
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy_json import NestedMutableJson
 
 from simaas.core.helpers import hash_string_object, hash_json_object, hash_file_content
 from simaas.dor.api import DORProxy, DORRESTService
@@ -104,24 +104,24 @@ class DataObjectRecord(Base):
     c_hash = Column(String(64), nullable=False)
     data_type = Column(String(64), nullable=False)
     data_format = Column(String(64), nullable=False)
-    created = Column(NestedMutableJson, nullable=False)
+    created = Column(MutableDict.as_mutable(JSON), nullable=False)
 
     # mutable part of the meta information
     owner_iid = Column(String(64), nullable=False)
     access_restricted = Column(Boolean, nullable=False)
-    access = Column(NestedMutableJson, nullable=False)
-    tags = Column(NestedMutableJson, nullable=False)
+    access = Column(MutableList.as_mutable(JSON), nullable=False)
+    tags = Column(MutableDict.as_mutable(JSON), nullable=False)
     last_accessed = Column(BigInteger, nullable=False)
 
     # type-specific meta information
-    details = Column(NestedMutableJson, nullable=False)
+    details = Column(MutableDict.as_mutable(JSON), nullable=False)
 
 
 class DataObjectProvenanceRecord(Base):
     __tablename__ = 'obj_provenance'
     c_hash = Column(String(64), primary_key=True)
     p_hash = Column(String(64), primary_key=True)
-    provenance = Column(NestedMutableJson, nullable=False)
+    provenance = Column(MutableDict.as_mutable(JSON), nullable=False)
 
 
 class FilesystemDORService(DORRESTService):

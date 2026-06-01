@@ -19,9 +19,9 @@ from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
 
-from sqlalchemy import Column, String, create_engine
+from sqlalchemy import Column, String, JSON, create_engine
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy_json import NestedMutableJson
 
 log = get_logger('simaas.rti', 'rti')
 
@@ -34,9 +34,9 @@ class DBDeployedProcessor(Base):
     id = Column(String(64), primary_key=True)
     state = Column(String, nullable=False)
     image_name = Column(String, nullable=True)
-    ports = Column(NestedMutableJson, nullable=False)
-    volumes = Column(NestedMutableJson, nullable=False)
-    gpp = Column(NestedMutableJson, nullable=True)
+    ports = Column(MutableList.as_mutable(JSON), nullable=False)
+    volumes = Column(MutableList.as_mutable(JSON), nullable=False)
+    gpp = Column(MutableDict.as_mutable(JSON), nullable=True)
     error = Column(String, nullable=True)
 
 
@@ -46,9 +46,9 @@ class DBJobInfo(Base):
     batch_id = Column(String(64), nullable=True)
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
-    status = Column(NestedMutableJson, nullable=False)
-    job = Column(NestedMutableJson, nullable=False)
-    runner = Column(NestedMutableJson, nullable=False)
+    status = Column(MutableDict.as_mutable(JSON), nullable=False)
+    job = Column(MutableDict.as_mutable(JSON), nullable=False)
+    runner = Column(MutableDict.as_mutable(JSON), nullable=False)
 
 
 @dataclass

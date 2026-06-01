@@ -3,8 +3,9 @@ from typing import Optional, Tuple, List, Dict
 from uuid import UUID, uuid4
 
 import sqlalchemy
-import sqlalchemy_json
 from fastapi import HTTPException, Header
+from sqlalchemy import JSON
+from sqlalchemy.ext.mutable import MutableDict
 from pydantic import BaseModel
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -23,7 +24,7 @@ class UserRecord(Base):
     hashed_password = Column(String(64), nullable=False)
     failed_login_attempts = Column(Integer, nullable=False)
     enabled = Column(Boolean, nullable=False)
-    keystore_content = Column(sqlalchemy_json.NestedMutableJson, nullable=False)
+    keystore_content = Column(MutableDict.as_mutable(JSON), nullable=False)
 
 
 class APIKeyRecord(Base):
