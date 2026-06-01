@@ -280,7 +280,9 @@ async def test_runner_non_dor(temp_dir, session_node):
 
         # execute the job
         status = await execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
-        assert 'Target node does not support DOR capabilities' == status.errors[0].exception.details['reason']
+        # Push is rejected client-side via NodeInfo.has_dor() before any network I/O —
+        # raised as an OperationError, so the cause shows up in details['cause'].
+        assert status.errors[0].exception.details['cause'] == 'target node does not support DOR capabilities'
 
         # leave the network
         protocol = P2PLeaveNetwork(target_node)

@@ -13,14 +13,14 @@ from simaas.namespace.default import DefaultNamespace
 from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
 from simaas.nodedb.protocol import P2PGetIdentity, P2PGetNetwork
 from simaas.p2p.base import P2PAddress
 from simaas.p2p.protocol import P2PLatency
 from simaas.p2p.service import P2PService
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
 from simaas.core.errors import ExceptionContent
-from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError
+from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError, NetworkError
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -111,13 +111,17 @@ class OutputObjectHandler(threading.Thread):
             target_node = nodes_by_id[task_out.target_node_iid]
 
         # check if the target node has DOR capabilities
-        if not target_node.dor_service:
+        if not target_node.has_dor():
             raise OperationError(
                 operation='push_output', stage='validate', cause='target node does not support DOR capabilities'
             )
 
-        # check if the target node is the custodian, if so override the P2P address
-        if target_node.identity.id == self._owner.custodian_identity.id:
+        # decide between direct push (to custodian) and custodian-relayed push (to anyone else).
+        # The runner is only guaranteed to reach the custodian — non-custodian peers may live in
+        # network positions the runner cannot connect to (cloud function, NAT, etc.). The
+        # custodian, which has full peer connectivity, forwards the push on the runner's behalf.
+        target_is_custodian = target_node.identity.id == self._owner.custodian_identity.id
+        if target_is_custodian:
             self._logger.info(
                 f"target node is custodian -> overriding P2P address: {self._owner.custodian_address.address}"
             )
@@ -157,22 +161,33 @@ class OutputObjectHandler(threading.Thread):
         # creator(s) is assumed to be the user on whose behalf the job is executed
         creator_iids = [self._owner.user.id]
 
-        # push the data object to the DOR
-        self._logger.info(
-            f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
-        )
-
-        obj = await P2PPushDataObject.perform(
-            target_node.p2p_address, self._owner.keystore, target_node.identity,
-            output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
-            restricted_access, content_encrypted,
-            license=DataObject.License(by=True, sa=True, nc=True, nd=True),
-            recipe=recipe,
-            tags={
-                'name': obj_name,
-                'job_id': self._owner.job.id
-            }
-        )
+        # push the data object — direct to custodian, otherwise relay through custodian.
+        if target_is_custodian:
+            self._logger.info(
+                f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
+            )
+            obj = await P2PPushDataObject.perform(
+                target_node.p2p_address, self._owner.keystore, target_node.identity,
+                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                restricted_access, content_encrypted,
+                license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+                recipe=recipe,
+                tags={'name': obj_name, 'job_id': self._owner.job.id}
+            )
+        else:
+            self._logger.info(
+                f"BEGIN relay-push output '{obj_name}' via custodian "
+                f"-> target {target_node.identity.id}"
+            )
+            obj = await P2PRelayPushDataObject.perform(
+                self._owner.custodian_address.address, self._owner.keystore,
+                self._owner.custodian_identity, target_node.identity.id,
+                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                restricted_access, content_encrypted,
+                license=DataObject.License(by=True, sa=True, nc=True, nd=True),
+                recipe=recipe,
+                tags={'name': obj_name, 'job_id': self._owner.job.id}
+            )
 
         self._logger.info(f"END push output '{obj_name}'")
         return obj
@@ -646,6 +661,11 @@ class JobRunner(CLICommand, ProgressListener):
         network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
         network = [node for node in network if node.dor_service]
 
+        # Try the custodian first: it is the only peer guaranteed reachable from the runner's
+        # network position (which may be a cloud function, behind NAT, etc.). Other peers may
+        # have registered addresses unreachable from where this runner runs.
+        network.sort(key=lambda n: 0 if n.identity.id == self.custodian_identity.id else 1)
+
         loop = asyncio.new_event_loop()
         try:
             class KeystoreWrapper:
@@ -666,9 +686,17 @@ class JobRunner(CLICommand, ProgressListener):
                     peer.p2p_address = self.custodian_address.address
 
                 # does the remote DOR have any of the pending data objects?
-                result: Dict[str, DataObject] = loop.run_until_complete(
-                    lookup.perform(peer, list(pending.keys()))
-                )
+                # NetworkError here means this peer is unreachable from the runner — try the next one.
+                try:
+                    result: Dict[str, DataObject] = loop.run_until_complete(
+                        lookup.perform(peer, list(pending.keys()))
+                    )
+                except NetworkError as e:
+                    self._logger.warning(
+                        f"DOR lookup against peer {peer.identity.id} at {peer.p2p_address} failed "
+                        f"({e.reason}); trying next peer"
+                    )
+                    continue
 
                 # process the results (if any)
                 for obj_id, meta in result.items():
@@ -699,20 +727,34 @@ class JobRunner(CLICommand, ProgressListener):
                                 hint='missing user signature for access'
                             )
 
-                        # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path, user_iid=self._user.id, user_signature=signature
+                        # try to download it. NetworkError means this peer can serve lookup but
+                        # not the download — leave obj_id in pending; a later peer may have it.
+                        try:
+                            loop.run_until_complete(
+                                fetch.perform(
+                                    peer, obj_id, meta_path, content_path,
+                                    user_iid=self._user.id, user_signature=signature
+                                )
                             )
-                        )
+                        except NetworkError as e:
+                            self._logger.warning(
+                                f"DOR fetch from peer {peer.identity.id} for {obj_id} failed "
+                                f"({e.reason}); will retry against remaining peers"
+                            )
+                            continue
 
                     else:
                         # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path
+                        try:
+                            loop.run_until_complete(
+                                fetch.perform(peer, obj_id, meta_path, content_path)
                             )
-                        )
+                        except NetworkError as e:
+                            self._logger.warning(
+                                f"DOR fetch from peer {peer.identity.id} for {obj_id} failed "
+                                f"({e.reason}); will retry against remaining peers"
+                            )
+                            continue
 
                     found[obj_id] = meta.c_hash
                     pending.pop(obj_id)

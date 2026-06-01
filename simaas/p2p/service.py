@@ -15,7 +15,7 @@ from zmq.asyncio import Socket, Context
 from simaas.core.errors import ConfigurationError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
-from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond
+from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond, p2p_send_error
 
 log = get_logger('simaas.p2p', 'p2p')
 
@@ -189,7 +189,11 @@ class P2PService:
                             # do we know the protocol?
                             protocol = self._protocols.get(request.protocol)
                             if protocol is None:
-                                log.warning('server', 'Unsupported protocol, ignoring', protocol=request.protocol)
+                                log.warning('server', 'Unsupported protocol, replying with error', protocol=request.protocol)
+                                await p2p_send_error(
+                                    self._socket, cid, rid, request.protocol,
+                                    f"protocol '{request.protocol}' is not supported by this peer",
+                                )
                                 continue
 
                             # does this request come with an attachment?
