@@ -7,21 +7,17 @@ from simaas.rti.base import RTIServiceBase
 from simaas.dor.schemas import DataObject
 from simaas.core.errors import NotFoundError, AuthorisationError, OperationError, NetworkError
 from simaas.dor.api import DORRESTService
-from simaas.namespace.protocol import P2PNamespaceServiceCall
 from simaas.rti.schemas import Processor, BatchStatus
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject
 from simaas.nodedb.api import NodeDBService, NodeDBProxy
-from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity, P2PGetIdentity, P2PGetNetwork, \
-    P2PReserveNamespaceResources, P2PCancelNamespaceReservation, P2PUpdateNamespaceBudget
+from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
 from simaas.p2p.service import P2PService
 from simaas.rest.service import RESTService
 from simaas.meta import __version__
-from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
 
 log = get_logger('simaas.node', 'node')
 
@@ -82,20 +78,11 @@ class Node(abc.ABC):
 
         log.info('startup', 'Starting P2P service')
         self.p2p = P2PService(self.keystore, p2p_address)
-        self.p2p.add(P2PUpdateIdentity(self))
-        self.p2p.add(P2PJoinNetwork(self))
-        self.p2p.add(P2PLeaveNetwork(self))
-        self.p2p.add(P2PLookupDataObject(self))
-        self.p2p.add(P2PFetchDataObject(self))
-        self.p2p.add(P2PPushDataObject(self))
-        self.p2p.add(P2PPushJobStatus(self))
-        self.p2p.add(P2PGetIdentity(self))
-        self.p2p.add(P2PGetNetwork(self))
-        self.p2p.add(P2PRunnerPerformHandshake(self))
-        self.p2p.add(P2PNamespaceServiceCall(self))
-        self.p2p.add(P2PUpdateNamespaceBudget(self))
-        self.p2p.add(P2PReserveNamespaceResources(self))
-        self.p2p.add(P2PCancelNamespaceReservation(self))
+        for service in (self.db, self.dor, self.rti):
+            if service is None:
+                continue
+            for protocol in service.get_p2p_protocols(self):
+                self.p2p.add(protocol)
         self.p2p.start_service_background()
 
         if rest_address is not None:
