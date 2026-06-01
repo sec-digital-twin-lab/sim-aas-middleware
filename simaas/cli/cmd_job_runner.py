@@ -111,7 +111,7 @@ class OutputObjectHandler(threading.Thread):
             target_node = nodes_by_id[task_out.target_node_iid]
 
         # check if the target node has DOR capabilities
-        if not target_node.dor_service:
+        if not target_node.has_dor():
             raise OperationError(
                 operation='push_output', stage='validate', cause='target node does not support DOR capabilities'
             )

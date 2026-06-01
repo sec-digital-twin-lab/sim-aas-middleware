@@ -171,7 +171,7 @@ class FilesystemDORService(DORRESTService):
         result = []
         for node in await self._node.db.get_network():
             try:
-                if not node.dor_service:
+                if not node.has_dor():
                     continue
 
                 # Skip HTTP request to self (would cause deadlock), query local DOR directly
