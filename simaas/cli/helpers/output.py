@@ -7,6 +7,7 @@ from typing import Any, Callable, List, Optional
 
 from tabulate import tabulate
 
+from simaas.core.errors import _BaseError
 from simaas.core.identity import Identity
 from simaas.dor.schemas import DataObject
 
@@ -58,6 +59,29 @@ def table(headers: List[str], rows: List[List[Any]], empty_msg: str = "No result
     lines = [headers, separators] + rows
 
     return tabulate(lines, tablefmt="plain")
+
+
+def print_json(result: Any = None, error: _BaseError = None) -> None:
+    """Print a standardized JSON envelope to stdout.
+
+    Args:
+        result: The result payload (any JSON-serializable value).
+        error: A _BaseError instance. Its ExceptionContent (id, reason, details) is used.
+    """
+    if error is not None:
+        content = error.content
+        envelope = {
+            "status": "error",
+            "result": None,
+            "error": content.model_dump()
+        }
+    else:
+        envelope = {
+            "status": "ok",
+            "result": result,
+            "error": None
+        }
+    print(json.dumps(envelope, indent=2))
 
 
 def print_result(data: Any, json_mode: bool = False, table_fn: Callable = None,

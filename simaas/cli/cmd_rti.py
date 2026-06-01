@@ -12,7 +12,7 @@ from tabulate import tabulate
 from simaas.core.errors import CLIError, RemoteError
 from simaas.cli.helpers import CLICommand, Argument, prompt_if_missing, prompt_for_string, prompt_for_selection, \
     get_nodes_by_service, prompt_for_confirmation, load_keystore, extract_address, label_data_object, shorten_id, \
-    label_identity, default_if_missing
+    label_identity, default_if_missing, print_json
 from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
 from simaas.helpers import determine_default_rest_address
@@ -90,7 +90,7 @@ class RTIVolumeList(CLICommand):
         vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
         if not os.path.isfile(vol_refs_path):
             if args.get('json_output'):
-                print(json.dumps([], indent=2))
+                print_json(result=[])
             else:
                 print("No volume references found.")
             return []
@@ -102,13 +102,13 @@ class RTIVolumeList(CLICommand):
         # do we have any references?
         if len(vol_refs) == 0:
             if args.get('json_output'):
-                print(json.dumps([], indent=2))
+                print_json(result=[])
             else:
                 print("No volume references found.")
             return []
 
         if args.get('json_output'):
-            print(json.dumps(vol_refs, indent=2))
+            print_json(result=vol_refs)
         else:
             # headers
             lines = [
@@ -133,7 +133,9 @@ class RTIVolumeCreateFSRef(CLICommand):
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
             Argument('--name', dest='name', action='store', help="the name for this volume reference"),
-            Argument('--path', dest='path', action='store', help="the path to the local filesystem location")
+            Argument('--path', dest='path', action='store', help="the path to the local filesystem location"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -174,6 +176,9 @@ class RTIVolumeCreateFSRef(CLICommand):
         with open(vol_refs_path, 'w') as f:
             json.dump(vol_refs, f, indent=2)
 
+        if args.get('json_output'):
+            print_json(result=reference)
+
         return reference
 
 
@@ -183,7 +188,9 @@ class RTIVolumeCreateEFSRef(CLICommand):
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore}')"),
             Argument('--name', dest='name', action='store', help="the name for this volume reference"),
-            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help="the AWS EFS filesystem Id")
+            Argument('--efs-fs-id', dest='efs_fs_id', action='store', help="the AWS EFS filesystem Id"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -224,6 +231,9 @@ class RTIVolumeCreateEFSRef(CLICommand):
         with open(vol_refs_path, 'w') as f:
             json.dump(vol_refs, f, indent=2)
 
+        if args.get('json_output'):
+            print_json(result=reference)
+
         return reference
 
 
@@ -234,6 +244,8 @@ class RTIVolumeDelete(CLICommand):
                      help=f"path to the datastore (default: '{default_datastore}')"),
             Argument('--name', metavar='name', type=str, nargs='*',
                      help="the name of the volume references to be deleted"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[List[dict]]:
@@ -242,7 +254,10 @@ class RTIVolumeDelete(CLICommand):
         # does the volume references file exist?
         vol_refs_path = os.path.join(args['datastore'], 'volume-references.json')
         if not os.path.isfile(vol_refs_path):
-            print("No volume references found.")
+            if args.get('json_output'):
+                print_json(result=[])
+            else:
+                print("No volume references found.")
             return []
 
         # load the volume reference file
@@ -251,7 +266,10 @@ class RTIVolumeDelete(CLICommand):
 
         # do we have any references?
         if len(vol_refs) == 0:
-            print("No volume references found.")
+            if args.get('json_output'):
+                print_json(result=[])
+            else:
+                print("No volume references found.")
             return []
 
         # determine the choices
@@ -277,6 +295,9 @@ class RTIVolumeDelete(CLICommand):
         with open(vol_refs_path, 'w') as f:
             json.dump(filtered, f, indent=2)
 
+        if args.get('json_output'):
+            print_json(result=removed)
+
         return removed
 
 
@@ -287,6 +308,8 @@ class RTIProcDeploy(CLICommand):
                      help="the id of the PDI data object of the processor to be deployed"),
             Argument('--datastore', dest='datastore', action='store',
                      help=f"path to the datastore (default: '{default_datastore} - required for volumes')"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('volumes', metavar='volumes', type=str, nargs='*',
                      help="attach volumes (use this format: '<volume name>:<mount point>:<read only>', "
                           "e.g., 'ref_1:/mnt/storage:true'")
@@ -369,7 +392,8 @@ class RTIProcDeploy(CLICommand):
         volumes: List[ProcessorVolume] = []
         if interactive:
             if len(eligible) == 0:
-                print("No eligible volumes found to attach.")
+                if not args.get('json_output'):
+                    print("No eligible volumes found to attach.")
             else:
                 if prompt_for_confirmation(
                         f"Attach volumes to this processor deployment (found {len(eligible)} eligible volumes)?",
@@ -397,14 +421,21 @@ class RTIProcDeploy(CLICommand):
                 ))
 
         # deploy the processor
-        print(f"Deploying processor {shorten_id(args['proc_id'])}...", end='')
+        if not args.get('json_output'):
+            print(f"Deploying processor {shorten_id(args['proc_id'])}...", end='')
         result = {}
         try:
             result['proc'] = rti.deploy(args['proc_id'], keystore, volumes=volumes if volumes else None)
-            print("Done")
+            if args.get('json_output'):
+                print_json(result={'proc_id': args['proc_id'], 'status': 'deployed'})
+            else:
+                print("Done")
 
         except RemoteError as e:
-            print(f"{e.reason} details: {e.details}")
+            if args.get('json_output'):
+                print_json(error=e)
+            else:
+                print(f"{e.reason} details: {e.details}")
 
         return result
 
@@ -416,6 +447,8 @@ class RTIProcUndeploy(CLICommand):
                      help="the ids of the processors to be undeployed"),
             Argument('--force', dest="force", action='store_const', const=True,
                      help="Force undeployment even if there are still active jobs."),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -441,9 +474,13 @@ class RTIProcUndeploy(CLICommand):
 
         # are the processors deployed?
         result = {}
+        skipped = []
+        errors = []
         for proc_id in args['proc_id']:
             if proc_id not in deployed:
-                print(f"Processor {proc_id} is not deployed at {args['address']}. Skipping.")
+                if not args.get('json_output'):
+                    print(f"Processor {proc_id} is not deployed at {args['address']}. Skipping.")
+                skipped.append(proc_id)
                 continue
 
             # are there any jobs pending for this processor?
@@ -455,12 +492,25 @@ class RTIProcUndeploy(CLICommand):
                     continue
 
             # undeploy the processor
-            print(f"Undeploying processor {proc_id}...", end='')
+            if not args.get('json_output'):
+                print(f"Undeploying processor {proc_id}...", end='')
             try:
                 result[proc_id] = rti.undeploy(proc_id, keystore)
-                print("Done")
+                if not args.get('json_output'):
+                    print("Done")
             except RemoteError as e:
-                print(f"{e.reason} details: {e.details}")
+                if not args.get('json_output'):
+                    print(f"{e.reason} details: {e.details}")
+                errors.append({"proc_id": proc_id, "error": e.reason, "details": e.details})
+
+        if args.get('json_output'):
+            output = {
+                "undeployed": list(result.keys()),
+                "skipped": skipped,
+            }
+            if errors:
+                output["errors"] = errors
+            print_json(result=output)
 
         return result
 
@@ -490,7 +540,7 @@ class RTIProcList(CLICommand):
                     item['repository'] = proc.gpp.repository
                     item['commit_id'] = proc.gpp.commit_id
                 output.append(item)
-            print(json.dumps(output, indent=2))
+            print_json(result=output)
         elif len(deployed) == 0:
             print("No processors deployed.")
         else:
@@ -507,7 +557,9 @@ class RTIProcShow(CLICommand):
     def __init__(self) -> None:
         super().__init__('show', 'show details of a deployed processor', arguments=[
             Argument('--proc-id', dest='proc_id', action='store',
-                     help="the id of the processor")
+                     help="the id of the processor"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -525,22 +577,40 @@ class RTIProcShow(CLICommand):
         proc = rti.get_proc(args['proc_id'])
         jobs = rti.get_jobs_by_proc(proc.id)
 
-        # print detailed information
-        print("Processor Information:")
-        print(f"- Id: {proc.id}")
-        print(f"- State: {proc.state}")
-        if proc.gpp:
-            proc_desc = proc.gpp.proc_descriptor
-            print(f"- Name: {proc_desc.name}")
-            print(f"- Image: {proc.image_name}")
-            input_items = '\n   '.join([f"{i.name} -> {i.data_type}:{i.data_format}" for i in proc_desc.input])
-            print(f"- Input:\n   {input_items}")
-            output_items = '\n   '.join([f"{i.name} -> {i.data_type}:{i.data_format}" for i in proc_desc.output])
-            print(f"- Output:\n   {output_items}")
+        if args.get('json_output'):
+            output = {
+                'id': proc.id,
+                'state': proc.state,
+                'image_name': proc.image_name,
+                'error': proc.error,
+                'jobs': [job.id for job in jobs]
+            }
+            if proc.gpp:
+                proc_desc = proc.gpp.proc_descriptor
+                output['name'] = proc_desc.name
+                output['input'] = [{'name': i.name, 'data_type': i.data_type, 'data_format': i.data_format,
+                                     'optional': i.optional} for i in proc_desc.input]
+                output['output'] = [{'name': i.name, 'data_type': i.data_type, 'data_format': i.data_format,
+                                      'optional': i.optional} for i in proc_desc.output]
+                output['repository'] = proc.gpp.repository
+                output['commit_id'] = proc.gpp.commit_id
+            print_json(result=output)
         else:
-            print(f"- Image: {proc.image_name}")
-        print(f"- Error: {proc.error if proc.error else '(none)'}")
-        print(f"- Jobs: {[job.id for job in jobs] if len(jobs) > 0 else '(none)'}")
+            print("Processor Information:")
+            print(f"- Id: {proc.id}")
+            print(f"- State: {proc.state}")
+            if proc.gpp:
+                proc_desc = proc.gpp.proc_descriptor
+                print(f"- Name: {proc_desc.name}")
+                print(f"- Image: {proc.image_name}")
+                input_items = '\n   '.join([f"{i.name} -> {i.data_type}:{i.data_format}" for i in proc_desc.input])
+                print(f"- Input:\n   {input_items}")
+                output_items = '\n   '.join([f"{i.name} -> {i.data_type}:{i.data_format}" for i in proc_desc.output])
+                print(f"- Output:\n   {output_items}")
+            else:
+                print(f"- Image: {proc.image_name}")
+            print(f"- Error: {proc.error if proc.error else '(none)'}")
+            print(f"- Jobs: {[job.id for job in jobs] if len(jobs) > 0 else '(none)'}")
 
         return {
             'processor': proc,
@@ -551,6 +621,8 @@ class RTIProcShow(CLICommand):
 class RTIJobSubmit(CLICommand):
     def __init__(self) -> None:
         super().__init__('submit', 'submit a new job', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format"),
             Argument('task', metavar='task', type=str, nargs='*', help="path to a task descriptor")
         ])
 
@@ -595,7 +667,7 @@ class RTIJobSubmit(CLICommand):
                 self._proc_choices[proc.id] = Choice(proc, proc_info(proc))
 
         # do we have processors without GPPs?
-        if len(no_gpp_procs) > 0:
+        if len(no_gpp_procs) > 0 and not self._json_output:
             print(f"Ignoring processors without GPP (they are probably still deploying): {', '.join(no_gpp_procs)}")
 
         # do we have processor choices?
@@ -700,6 +772,7 @@ class RTIJobSubmit(CLICommand):
         return job_output
 
     def execute(self, args: dict) -> Optional[dict]:
+        self._json_output = args.get('json_output', False)
         keystore = load_keystore(args, ensure_publication=True)
 
         prompt_if_missing(args, 'address', prompt_for_string,
@@ -785,9 +858,15 @@ class RTIJobSubmit(CLICommand):
         result = self._rti.submit(tasks, with_authorisation_by=keystore)
         batch_id: Optional[str] = result[0].batch_id
         if batch_id:
-            print(f"Batch submitted: {batch_id}")
-            for job in result:
-                print(f"- Task '{job.task.name}' executed by job {job.id}")
+            if args.get('json_output'):
+                print_json(result={
+                    'batch_id': batch_id,
+                    'jobs': [{'job_id': job.id, 'task_name': job.task.name} for job in result]
+                })
+            else:
+                print(f"Batch submitted: {batch_id}")
+                for job in result:
+                    print(f"- Task '{job.task.name}' executed by job {job.id}")
 
             return {
                 'jobs': result
@@ -795,7 +874,10 @@ class RTIJobSubmit(CLICommand):
 
         else:
             job: Job = result[0]
-            print(f"Job submitted: {job.id}")
+            if args.get('json_output'):
+                print_json(result={'job_id': job.id})
+            else:
+                print(f"Job submitted: {job.id}")
 
             return {
                 'job': job
@@ -824,10 +906,9 @@ class RTIJobList(CLICommand):
         period = None
         if args.get('period'):
             period = parse_period(args['period'])
-            if period is None:
-                if not args.get('json_output'):
-                    print(f"Invalid time period '{args['period']}'. Listing currently active jobs only.")
-            elif not args.get('json_output'):
+            if period is None and not args.get('json_output'):
+                print(f"Invalid time period '{args['period']}'. Listing currently active jobs only.")
+            elif period is not None and not args.get('json_output'):
                 print(f"Listing all jobs submitted within time period of {args['period']} -> {period} hours")
         elif not args.get('json_output'):
             print("No time period provided. Listing currently active jobs only.")
@@ -853,7 +934,7 @@ class RTIJobList(CLICommand):
                         'state': status.state,
                         'description': job.task.description
                     })
-                print(json.dumps(output, indent=2))
+                print_json(result=output)
             elif jobs:
                 # get all deployed procs
                 deployed: dict[str, Processor] = {proc.id: proc for proc in rti.get_all_procs()}
@@ -891,7 +972,10 @@ class RTIJobList(CLICommand):
             }
 
         except RemoteError as e:
-            print(e.reason)
+            if args.get('json_output'):
+                print_json(error=e)
+            else:
+                print(e.reason)
 
 
 class RTIJobStatus(CLICommand):
@@ -901,8 +985,9 @@ class RTIJobStatus(CLICommand):
             Argument('--period', dest='period', action='store',
                      help="time period to consider using format <number><unit> where unit can be one "
                           "of these ('h': hours, 'd': days, 'w': weeks). Default is '1d', i.e., one "
-                          "day.")
-
+                          "day."),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -921,7 +1006,8 @@ class RTIJobStatus(CLICommand):
 
             # interpret time period
             if args['period'] == '':
-                print("No time period provided. Listing currently active jobs only.")
+                if not args.get('json_output'):
+                    print("No time period provided. Listing currently active jobs only.")
                 period = None
             else:
                 try:
@@ -929,10 +1015,12 @@ class RTIJobStatus(CLICommand):
                     number = int(args['period'][:-1])
                     multiplier = {'h': 1, 'd': 24, 'w': 7 * 24}
                     period = number * multiplier[unit]
-                    print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
+                    if not args.get('json_output'):
+                        print(f"Listing all jobs submitted within time period of {number}{unit} -> {period} hours")
 
                 except (ValueError, KeyError):
-                    print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
+                    if not args.get('json_output'):
+                        print(f"Invalid time period '{args['period']}. Listing currently active jobs only.")
                     period = None
 
             # get all jobs by this user and select
@@ -950,10 +1038,16 @@ class RTIJobStatus(CLICommand):
         try:
             status = rti.get_job_status(args['job-id'], with_authorisation_by=keystore)
             result['status'] = status
-            print(f"Job status:\n{json.dumps(status.model_dump(), indent=4)}")
+            if args.get('json_output'):
+                print_json(result=status.model_dump())
+            else:
+                print(f"Job status:\n{json.dumps(status.model_dump(), indent=4)}")
 
         except RemoteError:
-            print(f"No status for job {args['job-id']}.")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"No status for job {args['job-id']}."))
+            else:
+                print(f"No status for job {args['job-id']}.")
 
         return result
 
@@ -1019,7 +1113,7 @@ class RTIJobInspect(CLICommand):
                     }
                     output['submitted'] = job.t_submitted
                     output['processor_name'] = job.proc_name
-                print(json.dumps(output, indent=2))
+                print_json(result=output)
             else:
                 print("Job Details")
                 print("-----------")
@@ -1053,7 +1147,10 @@ class RTIJobInspect(CLICommand):
                     print(f"Message: [{status.message.severity}] {status.message.content}")
 
         except RemoteError:
-            print(f"Job {args['job-id']} not found.")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"Job {args['job-id']} not found."))
+            else:
+                print(f"Job {args['job-id']} not found.")
 
         return result
 
@@ -1098,7 +1195,7 @@ class RTIJobLogs(CLICommand):
                     'errors': [{'message': e.message} for e in status.errors],
                     'message': {'severity': status.message.severity, 'content': status.message.content} if status.message else None
                 }
-                print(json.dumps(output, indent=2))
+                print_json(result=output)
             else:
                 print(f"Job Logs: {args['job-id']}")
                 print("-" * 40)
@@ -1121,7 +1218,10 @@ class RTIJobLogs(CLICommand):
                     print(f"\nCurrent message: [{status.message.severity}] {status.message.content}")
 
         except RemoteError:
-            print(f"Job {args['job-id']} not found.")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"Job {args['job-id']} not found."))
+            else:
+                print(f"Job {args['job-id']} not found.")
 
         return result
 
@@ -1132,7 +1232,9 @@ class RTIJobCancel(CLICommand):
             Argument('job-id', metavar='job-id', type=str, nargs='?', help="the id of the job"),
             Argument('--purge', dest="purge", action='store_const', const=True,
                      help="Attempts to cancel the job and, regardless of the outcome, "
-                          "removes the job from the database.")
+                          "removes the job from the database."),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -1162,14 +1264,25 @@ class RTIJobCancel(CLICommand):
         try:
             if args.get('purge'):
                 status = rti.purge_job(args['job-id'], with_authorisation_by=keystore)
-                print(f"Job {args['job-id']} purged. Last status:\n{json.dumps(status.model_dump(), indent=4)}")
+                action = 'purged'
             else:
                 status = rti.cancel_job(args['job-id'], with_authorisation_by=keystore)
-                print(f"Job {args['job-id']} cancelled. Last status:\n{json.dumps(status.model_dump(), indent=4)}")
+                action = 'cancelled'
 
             result['status'] = status
 
+            if args.get('json_output'):
+                output = status.model_dump()
+                output['action'] = action
+                output['job_id'] = args['job-id']
+                print_json(result=output)
+            else:
+                print(f"Job {args['job-id']} {action}. Last status:\n{json.dumps(status.model_dump(), indent=4)}")
+
         except RemoteError:
-            print(f"Job {args['job-id']} not found.")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"Job {args['job-id']} not found."))
+            else:
+                print(f"Job {args['job-id']} not found.")
 
         return result

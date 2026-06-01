@@ -11,7 +11,7 @@ from tabulate import tabulate
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, get_available_keystores, \
     prompt_for_confirmation, prompt_for_password, prompt_if_missing, prompt_for_keystore_selection, \
-    prompt_for_selection, load_keystore, extract_address
+    prompt_for_selection, load_keystore, extract_address, print_json
 from simaas.core.schemas import GithubCredentials, SSHCredentials, KeystoreContent
 from simaas.core.keystore import Keystore
 from simaas.helpers import determine_default_rest_address
@@ -22,7 +22,9 @@ class IdentityCreate(CLICommand):
     def __init__(self):
         super().__init__('create', 'creates a new identity', arguments=[
             Argument('--name', dest='name', action='store', help="name of the identity"),
-            Argument('--email', dest='email', action='store', help="email of the identity")
+            Argument('--email', dest='email', action='store', help="email of the identity"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -33,10 +35,19 @@ class IdentityCreate(CLICommand):
         keystore = Keystore.new(args['name'], args['email'], path=args['keystore'], password=args['password'])
         identity = keystore.identity
 
-        print("New keystore created!")
-        print(f"- Identity: {identity.name}/{identity.email}/{identity.id}")
-        print(f"- Signing Key: {keystore.signing_key.info()}")
-        print(f"- Encryption Key: {keystore.encryption_key.info()}")
+        if args.get('json_output'):
+            print_json(result={
+                'id': identity.id,
+                'name': identity.name,
+                'email': identity.email,
+                'signing_key': keystore.signing_key.info(),
+                'encryption_key': keystore.encryption_key.info()
+            })
+        else:
+            print("New keystore created!")
+            print(f"- Identity: {identity.name}/{identity.email}/{identity.id}")
+            print(f"- Signing Key: {keystore.signing_key.info()}")
+            print(f"- Encryption Key: {keystore.encryption_key.info()}")
 
         return {
             'keystore': keystore
@@ -48,6 +59,8 @@ class IdentityRemove(CLICommand):
         super().__init__('remove', 'removes an existing identity', arguments=[
             Argument('--confirm', dest="confirm", action='store_const', const=True,
                      help="do not require user confirmation to delete keystore"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -60,17 +73,26 @@ class IdentityRemove(CLICommand):
             # delete the keystore
             keystore_path = os.path.join(args['keystore'], f"{args['keystore-id']}.json")
             os.remove(keystore_path)
-            print("Keystore deleted.")
+            if args.get('json_output'):
+                print_json(result={"status": "deleted", "keystore_id": args['keystore-id']})
+            else:
+                print("Keystore deleted.")
 
         else:
-            print("Operation cancelled.")
+            if args.get('json_output'):
+                print_json(result={"status": "cancelled"})
+            else:
+                print("Operation cancelled.")
 
         return None
 
 
 class IdentityShow(CLICommand):
     def __init__(self):
-        super().__init__('show', 'shows details about a keystore', arguments=[])
+        super().__init__('show', 'shows details about a keystore', arguments=[
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
+        ])
 
     def execute(self, args: dict) -> Optional[dict]:
         prompt_if_missing(args, 'keystore-id', prompt_for_keystore_selection,
@@ -80,7 +102,10 @@ class IdentityShow(CLICommand):
         # read the keystore file
         keystore_path = os.path.join(args['keystore'], f"{args['keystore-id']}.json")
         if not os.path.exists(keystore_path):
-            print(f"No keystore found file found at {keystore_path}")
+            if args.get('json_output'):
+                print_json(error=CLIError(f"No keystore file found at {keystore_path}"))
+            else:
+                print(f"No keystore found file found at {keystore_path}")
             return {
                 'content': None
             }
@@ -88,17 +113,32 @@ class IdentityShow(CLICommand):
         # show the public information
         with open(keystore_path, 'r') as f:
             content = KeystoreContent.model_validate(json.load(f))
-        print("Keystore details:")
-        print(f"- Id: {content.iid}")
-        print(f"- Name: {content.profile.name}")
-        print(f"- Email: {content.profile.email}")
-        print(f"- Nonce: {content.nonce}")
-        print("- Assets:")
-        for key, content in content.assets.items():
-            if content['type'] in ['KeyPairAsset', 'MasterKeyPairAsset']:
-                print(f"    - {key}: {content['info']}")
-            else:
-                print(f"    - {key}")
+
+        if args.get('json_output'):
+            assets = {}
+            for key, asset in content.assets.items():
+                assets[key] = {'type': asset['type']}
+                if asset['type'] in ['KeyPairAsset', 'MasterKeyPairAsset']:
+                    assets[key]['info'] = asset['info']
+            print_json(result={
+                'id': content.iid,
+                'name': content.profile.name,
+                'email': content.profile.email,
+                'nonce': content.nonce,
+                'assets': assets
+            })
+        else:
+            print("Keystore details:")
+            print(f"- Id: {content.iid}")
+            print(f"- Name: {content.profile.name}")
+            print(f"- Email: {content.profile.email}")
+            print(f"- Nonce: {content.nonce}")
+            print("- Assets:")
+            for key, content in content.assets.items():
+                if content['type'] in ['KeyPairAsset', 'MasterKeyPairAsset']:
+                    print(f"    - {key}: {content['info']}")
+                else:
+                    print(f"    - {key}")
 
         return {
             'content': content
@@ -119,7 +159,7 @@ class IdentityList(CLICommand):
             # JSON output mode
             output = [{'name': item.profile.name, 'email': item.profile.email, 'id': item.iid}
                       for item in available]
-            print(json.dumps(output, indent=2))
+            print_json(result=output)
         elif len(available) > 0:
             print(f"Found {len(available)} keystores in '{args['keystore']}':")
 
@@ -147,7 +187,9 @@ class IdentityPublish(CLICommand):
     def __init__(self):
         super().__init__('publish', 'publishes an identity update to a node', arguments=[
             Argument('--address', dest='address', action='store', required=False,
-                     help="the address (host:port) of the node")
+                     help="the address (host:port) of the node"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -160,7 +202,10 @@ class IdentityPublish(CLICommand):
 
         proxy = NodeDBProxy(extract_address(args['address']))
         proxy.update_identity(keystore.identity)
-        print("Identity published.")
+        if args.get('json_output'):
+            print_json(result={"status": "published", "id": keystore.identity.id})
+        else:
+            print("Identity published.")
 
         return None
 
@@ -186,7 +231,7 @@ class IdentityDiscover(CLICommand):
             # JSON output mode
             output = [{'name': item.name, 'email': item.email, 'id': item.id}
                       for item in identities.values()]
-            print(json.dumps(output, indent=2))
+            print_json(result=output)
         elif len(identities) == 0:
             print("No identities found.")
         else:
@@ -212,15 +257,18 @@ class IdentityUpdate(CLICommand):
     def __init__(self):
         super().__init__('update', 'updates the profile of the identity', arguments=[
             Argument('--name', dest='name', action='store', help="name of the identity"),
-            Argument('--email', dest='email', action='store', help="email of the identity")
+            Argument('--email', dest='email', action='store', help="email of the identity"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
         keystore = load_keystore(args, ensure_publication=False)
 
-        print("Keystore details:")
-        print(f"- Name: {keystore.identity.name}")
-        print(f"- Email: {keystore.identity.email}")
+        if not args.get('json_output'):
+            print("Keystore details:")
+            print(f"- Name: {keystore.identity.name}")
+            print(f"- Email: {keystore.identity.email}")
 
         name = args['name'] if 'name' in args else None
         email = args['email'] if 'email' in args else None
@@ -236,12 +284,23 @@ class IdentityUpdate(CLICommand):
             email = prompt_for_string("Enter email address:", default=keystore.identity.email)
 
         # update if and as needed
+        updated = False
         if keystore.identity.name != name or keystore.identity.email != email:
-            print("Updating profile.")
+            if not args.get('json_output'):
+                print("Updating profile.")
             keystore.update_profile(name=name, email=email)
-
+            updated = True
         else:
-            print("Nothing to update.")
+            if not args.get('json_output'):
+                print("Nothing to update.")
+
+        if args.get('json_output'):
+            print_json(result={
+                "updated": updated,
+                "id": keystore.identity.id,
+                "name": keystore.identity.name,
+                "email": keystore.identity.email
+            })
 
         return {
             'keystore': keystore
@@ -255,7 +314,9 @@ class CredentialsAddSSHCredentials(CLICommand):
             Argument('--host', dest='host', action='store', help="host used to connect the remote machine"),
             Argument('--login', dest='login', action='store', help="login used for connecting to remote machine"),
             Argument('--key', dest='key', action='store', help="path to the key file"),
-            Argument('--passphrase', dest='passphrase', action='store', help="passphrase for the key")
+            Argument('--passphrase', dest='passphrase', action='store', help="passphrase for the key"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -279,7 +340,11 @@ class CredentialsAddSSHCredentials(CLICommand):
         credentials = SSHCredentials(host=args['host'], login=args['login'], key=key_content, passphrase=passphrase)
         keystore.ssh_credentials.update(args['name'], credentials)
         keystore.sync()
-        print("Credentials created.")
+        if args.get('json_output'):
+            print_json(result={"status": "created", "type": "ssh", "name": args['name'],
+                               "host": args['host'], "login": args['login']})
+        else:
+            print("Credentials created.")
 
         return {
             'credentials': credentials
@@ -294,6 +359,8 @@ class CredentialsAddGithubCredentials(CLICommand):
             Argument('--login', dest='login', action='store', help="login used to connect the remote machine"),
             Argument('--personal-access-token', dest='personal_access_token', action='store',
                      help="personal access token for the login"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -307,7 +374,11 @@ class CredentialsAddGithubCredentials(CLICommand):
         credentials = GithubCredentials(login=args['login'], personal_access_token=args['personal_access_token'])
         keystore.github_credentials.update(args['url'], credentials)
         keystore.sync()
-        print("Credentials created.")
+        if args.get('json_output'):
+            print_json(result={"status": "created", "type": "github", "url": args['url'],
+                               "login": args['login']})
+        else:
+            print("Credentials created.")
 
         return {
             'credentials': credentials
@@ -321,7 +392,9 @@ class CredentialsRemove(CLICommand):
                      help="id of the credential, following the pattern <type>:<name> where type must be "
                           "either 'ssh' or 'github'"),
             Argument('--confirm', dest="confirm", action='store_const', const=True,
-                     help="do not require user confirmation to delete credential")
+                     help="do not require user confirmation to delete credential"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -359,18 +432,20 @@ class CredentialsRemove(CLICommand):
             item = found[args['credential']]
             if prompt_if_missing(args, 'confirm', prompt_for_confirmation,
                                  message=f"Remove credential {args['credential']}?", default=False):
-                print(f"Removing {item['label']}...", end='')
+                if not args.get('json_output'):
+                    print(f"Removing {item['label']}...", end='')
                 if item['asset'] == 'ssh':
                     keystore.ssh_credentials.remove(item['key'])
                     removed.append(f"ssh:{item['key']}")
-                    print("Done")
                 elif item['asset'] == 'github':
                     keystore.github_credentials.remove(item['key'])
                     removed.append(f"github:{item['key']}")
+                if not args.get('json_output'):
                     print("Done")
                 keystore.sync()
             else:
-                print("Operation cancelled.")
+                if not args.get('json_output'):
+                    print("Operation cancelled.")
 
         else:
             # prompt for selection
@@ -386,18 +461,23 @@ class CredentialsRemove(CLICommand):
             if prompt_if_missing(args, 'confirm', prompt_for_confirmation,
                                  message="Remove the selected credentials?", default=False):
                 for item in items:
-                    print(f"Removing {item['label']}...", end='')
+                    if not args.get('json_output'):
+                        print(f"Removing {item['label']}...", end='')
                     if item['asset'] == 'ssh':
                         keystore.ssh_credentials.remove(item['key'])
                         removed.append(f"ssh:{item['key']}")
-                        print("Done")
                     elif item['asset'] == 'github':
                         keystore.github_credentials.remove(item['key'])
                         removed.append(f"github:{item['key']}")
+                    if not args.get('json_output'):
                         print("Done")
                 keystore.sync()
             else:
-                print("Operation cancelled.")
+                if not args.get('json_output'):
+                    print("Operation cancelled.")
+
+        if args.get('json_output'):
+            print_json(result={"removed": removed})
 
         return {
             'removed': removed
@@ -407,7 +487,9 @@ class CredentialsRemove(CLICommand):
 class CredentialsTestSSHCredentials(CLICommand):
     def __init__(self):
         super().__init__('ssh', 'tests SSH credentials', arguments=[
-            Argument('--name', dest='name', action='store', help="name used to identify this SSH credential")
+            Argument('--name', dest='name', action='store', help="name used to identify this SSH credential"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -432,11 +514,17 @@ class CredentialsTestSSHCredentials(CLICommand):
             private_key = paramiko.RSAKey.from_private_key(StringIO(ssh_credentials.key), password=ssh_credentials.passphrase)
             ssh_client.connect(hostname=ssh_credentials.host, username=ssh_credentials.login, pkey=private_key)
             returncode = 0
-            print("SSH credentials test successful.")
+            if args.get('json_output'):
+                print_json(result={"success": True, "name": args['name']})
+            else:
+                print("SSH credentials test successful.")
 
         except Exception as e:
             returncode = -1
-            print(f"SSH credentials test unsuccessful -> {e}")
+            if args.get('json_output'):
+                print_json(result={"success": False, "name": args['name'], "error": str(e)})
+            else:
+                print(f"SSH credentials test unsuccessful -> {e}")
 
         return {
             'returncode': returncode
@@ -448,6 +536,8 @@ class CredentialsTestGithubCredentials(CLICommand):
         super().__init__('github', 'tests Github credentials', arguments=[
             Argument('--url', dest='url', action='store', help="URL of the repository (also used as identifier "
                                                                "for this Github credential)"),
+            Argument('--json', dest='json_output', action='store_const', const=True,
+                     help="output results in JSON format")
         ])
 
     def execute(self, args: dict) -> Optional[dict]:
@@ -471,11 +561,18 @@ class CredentialsTestGithubCredentials(CLICommand):
         url = url[:index] + insert + url[index:]
 
         repo_name = url[url.find('github.com') + 11:]
-        print(f"repo_name: {repo_name}")
+        if not args.get('json_output'):
+            print(f"repo_name: {repo_name}")
 
         result = subprocess.run(['curl', '-H', f"Authorization: token {github_credentials.personal_access_token}",
                                  f"https://api.github.com/repos/{repo_name}"], capture_output=True)
-        if result.returncode == 0:
+        if args.get('json_output'):
+            print_json(result={
+                "success": result.returncode == 0,
+                "url": args['url'],
+                "returncode": result.returncode
+            })
+        elif result.returncode == 0:
             print("Github credentials test successful.")
         else:
             print("Github credentials test unsuccessful.\n"
@@ -513,7 +610,7 @@ class CredentialsList(CLICommand):
 
         if args.get('json_output'):
             # JSON output mode
-            print(json.dumps(ssh_creds + github_creds, indent=2))
+            print_json(result=ssh_creds + github_creds)
         elif len(credentials) == 0:
             print("No credentials found.")
         else:

@@ -24,8 +24,9 @@ from simaas.cli.cmd_gateway import (
     GatewayUserList, GatewayUserCreate, GatewayUserDelete, GatewayUserDisable, GatewayUserEnable, GatewayUserPublish,
     GatewayKeyList, GatewayKeyCreate, GatewayKeyDelete,
 )
-from simaas.core.errors import CLIError
+from simaas.core.errors import CLIError, InternalError
 from simaas.cli.helpers import CLIParser, Argument, CLICommandGroup
+from simaas.cli.helpers.output import print_json
 
 # deactivate annoying DEBUG messages by multipart
 logging.getLogger('multipart.multipart').setLevel(logging.WARNING)
@@ -184,16 +185,25 @@ def main():
         sys.exit(0)
 
     except CLIError as e:
-        print(e.reason)
+        if '--json' in sys.argv:
+            print_json(error=e)
+        else:
+            print(e.reason)
         sys.exit(-1)
 
     except KeyboardInterrupt:
-        print("Interrupted by user.")
+        if '--json' in sys.argv:
+            print_json(error=CLIError("Interrupted by user."))
+        else:
+            print("Interrupted by user.")
         sys.exit(-2)
 
     except Exception as e:
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        print(f"Unrefined exception:\n{trace}")
+        if '--json' in sys.argv:
+            print_json(error=InternalError(component='cli', state=str(e)))
+        else:
+            print(f"Unrefined exception:\n{trace}")
         sys.exit(-3)
 
 
