@@ -20,7 +20,7 @@ from simaas.p2p.protocol import P2PLatency
 from simaas.p2p.service import P2PService
 from simaas.cli.helpers import CLICommand, Argument, prompt_for_string, prompt_if_missing, env_if_missing
 from simaas.core.errors import ExceptionContent
-from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError
+from simaas.core.errors import _BaseError, NotFoundError, ValidationError, AuthorisationError, OperationError, InternalError, NetworkError
 from simaas.core.helpers import validate_json, hash_json_object, get_timestamp_now
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
@@ -646,6 +646,11 @@ class JobRunner(CLICommand, ProgressListener):
         network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
         network = [node for node in network if node.dor_service]
 
+        # Try the custodian first: it is the only peer guaranteed reachable from the runner's
+        # network position (which may be a cloud function, behind NAT, etc.). Other peers may
+        # have registered addresses unreachable from where this runner runs.
+        network.sort(key=lambda n: 0 if n.identity.id == self.custodian_identity.id else 1)
+
         loop = asyncio.new_event_loop()
         try:
             class KeystoreWrapper:
@@ -666,9 +671,17 @@ class JobRunner(CLICommand, ProgressListener):
                     peer.p2p_address = self.custodian_address.address
 
                 # does the remote DOR have any of the pending data objects?
-                result: Dict[str, DataObject] = loop.run_until_complete(
-                    lookup.perform(peer, list(pending.keys()))
-                )
+                # NetworkError here means this peer is unreachable from the runner — try the next one.
+                try:
+                    result: Dict[str, DataObject] = loop.run_until_complete(
+                        lookup.perform(peer, list(pending.keys()))
+                    )
+                except NetworkError as e:
+                    self._logger.warning(
+                        f"DOR lookup against peer {peer.identity.id} at {peer.p2p_address} failed "
+                        f"({e.reason}); trying next peer"
+                    )
+                    continue
 
                 # process the results (if any)
                 for obj_id, meta in result.items():
@@ -699,20 +712,34 @@ class JobRunner(CLICommand, ProgressListener):
                                 hint='missing user signature for access'
                             )
 
-                        # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path, user_iid=self._user.id, user_signature=signature
+                        # try to download it. NetworkError means this peer can serve lookup but
+                        # not the download — leave obj_id in pending; a later peer may have it.
+                        try:
+                            loop.run_until_complete(
+                                fetch.perform(
+                                    peer, obj_id, meta_path, content_path,
+                                    user_iid=self._user.id, user_signature=signature
+                                )
                             )
-                        )
+                        except NetworkError as e:
+                            self._logger.warning(
+                                f"DOR fetch from peer {peer.identity.id} for {obj_id} failed "
+                                f"({e.reason}); will retry against remaining peers"
+                            )
+                            continue
 
                     else:
                         # try to download it
-                        loop.run_until_complete(
-                            fetch.perform(
-                                peer, obj_id, meta_path, content_path
+                        try:
+                            loop.run_until_complete(
+                                fetch.perform(peer, obj_id, meta_path, content_path)
                             )
-                        )
+                        except NetworkError as e:
+                            self._logger.warning(
+                                f"DOR fetch from peer {peer.identity.id} for {obj_id} failed "
+                                f"({e.reason}); will retry against remaining peers"
+                            )
+                            continue
 
                     found[obj_id] = meta.c_hash
                     pending.pop(obj_id)
