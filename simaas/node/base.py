@@ -1,3 +1,4 @@
+import time
 import abc
 import threading
 from typing import Optional, Tuple
@@ -137,7 +138,7 @@ class Node(abc.ABC):
 
     def shutdown_rti(self, timeout: int = 60) -> None:
         """
-        Async cleanup of RTI service: undeploy all processors and wait for workers.
+        Cleanup of RTI service: undeploy all processors and wait for workers.
 
         Call this before shutdown() to cleanly undeploy processors.
         """
