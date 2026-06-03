@@ -292,13 +292,11 @@ class DummyNamespace(Namespace):
             pass
 
     def __init__(self):
-        async_dor = DummyNamespace.DummyDOR()
-        async_rti = DummyNamespace.DummyRTI(self)
-        super().__init__(async_dor, async_rti)
-        self._async_dor = async_dor
-        self._async_rti = async_rti
-        self._sync_dor = async_dor
-        self._sync_rti = async_rti
+        dor = DummyNamespace.DummyDOR()
+        rti = DummyNamespace.DummyRTI(self)
+        super().__init__(dor, rti)
+        self._dor_impl = dor
+        self._rti_impl = rti
         self._keystore = Keystore.new('dummy')
 
     def id(self) -> str:
@@ -315,16 +313,16 @@ class DummyNamespace(Namespace):
 
     @property
     def dor(self) -> DORInterface:
-        return self._sync_dor
+        return self._dor_impl
 
     @property
     def rti(self) -> RTIInterface:
-        return self._sync_rti
+        return self._rti_impl
 
     @property
     def internal_rti(self) -> 'DummyNamespace.DummyRTI':
-        """Access internal async RTI for test setup (e.g., put_batch_status)."""
-        return self._async_rti
+        """Access internal RTI for test setup (e.g., put_batch_status)."""
+        return self._rti_impl
 
     def destroy(self) -> None:
         pass

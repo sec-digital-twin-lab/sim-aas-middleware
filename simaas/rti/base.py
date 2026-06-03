@@ -219,7 +219,6 @@ class RTIServiceBase(RTIRESTService):
             # extract job before session closes
             job = Job.model_validate(record.job)
 
-        # async operation outside session/lock
         self._node.db.update_identity(runner_identity)
 
         return job
@@ -681,7 +680,7 @@ class RTIServiceBase(RTIRESTService):
         Updates the status of a particular job. Authorisation is required by the owner of the job
         (i.e., the user that has created the job by submitting the task in the first place).
         """
-        # Collect async work to do (populated during DB operations)
+        # Collect background work to do (populated during DB operations)
         namespace_to_cancel: Optional[Tuple[str, str]] = None  # (namespace, job_id)
         job_to_cleanup: Optional[str] = None
         jobs_to_cancel: List[Tuple[str, Optional[P2PAddress]]] = []  # (job_id, runner_address)

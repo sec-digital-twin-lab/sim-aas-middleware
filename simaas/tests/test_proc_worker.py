@@ -1,8 +1,8 @@
-"""Unit tests for the fork-isolated ProcessorWorker.
+"""Unit tests for ProcessorWorker.
 
 Tests the IPC mechanism (pipe + event) between the parent and the
-fork-isolated child process using mock processors and namespaces.
-No Docker, no ZMQ, no simaas node infrastructure required.
+isolated child process using mock processors and namespaces.
+No Docker or simaas node infrastructure required.
 """
 
 import os

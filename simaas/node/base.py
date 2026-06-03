@@ -57,8 +57,7 @@ class Node(abc.ABC):
         """
         Start the node's daemon services (P2P, REST).
 
-        This is an async method that manages thread lifecycle. To join a network after startup,
-        call `node.join_network(boot_node_address)` separately.
+        To join a network after startup, call `node.join_network(boot_node_address)` separately.
         """
         log.info('startup', f'Sim-aaS Middleware {__version__}')
 
@@ -125,8 +124,7 @@ class Node(abc.ABC):
         """
         Stop the node's daemon services (P2P, REST).
 
-        This is a sync method that manages thread lifecycle. Before calling shutdown,
-        you should call async cleanup methods:
+        Before calling shutdown, you should call:
         - `node.leave_network()` to inform peers
         - `node.shutdown_rti()` to undeploy processors
         """
