@@ -159,7 +159,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
             keystores[0], os.path.join(tempdir, 'node0'), enable_db=True,
             dor_plugin_class=None, rti_plugin_class=None)
         node0.startup(p2p_address, rest_address=None)
-        time.sleep(1)
 
         # at this point node0 should only know about itself
         network: List[NodeInfo] = node0.db.get_network()
@@ -169,7 +168,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
 
         # perform the join
         node0.join_network(module_node.rest.address())
-        time.sleep(1)
 
         # the module node should know of n+1 nodes now
         network: List[NodeInfo] = module_nodedb_proxy.get_network()
@@ -181,7 +179,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         # shutdown the extra node silently (i.e., not leaving the network) - this emulates what happens
         # when a node suddenly crashes for example.
         node0.shutdown()
-        time.sleep(1)
 
         # the module node should still know n+1 nodes
         network: List[NodeInfo] = module_nodedb_proxy.get_network()
@@ -196,7 +193,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
             dor_plugin_class=None, rti_plugin_class=None
         )
         node1.startup(p2p_address, rest_address=None)
-        time.sleep(1)
 
         # at this point node1 should only know about itself
         network: List[NodeInfo] = node1.db.get_network()
@@ -208,7 +204,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
 
         # perform the join
         node1.join_network(module_node.rest.address())
-        time.sleep(1)
 
         # the module node should now still only know of n+1 nodes now (the first node should be replaced)
         network: List[NodeInfo] = module_nodedb_proxy.get_network()

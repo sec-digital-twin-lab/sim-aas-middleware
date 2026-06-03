@@ -109,9 +109,6 @@ class TestContext:
                            strict_deployment=strict_deployment if rti_plugin_class is not None else None)
         node.startup(p2p_address, rest_address=rest_address if enable_rest else None)
 
-        import time
-        time.sleep(2)
-
         self.nodes[name] = node
 
         return node

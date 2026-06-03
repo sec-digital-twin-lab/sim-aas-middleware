@@ -204,7 +204,6 @@ def test_p2p_fetch_restricted(p2p_server):
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()
         client.startup(p2p_address, rest_address=rest_address)
-        time.sleep(1)
 
         # create an owner for the data object -> make the server aware of the identity
         owner = Keystore.new(f"owner-{get_timestamp_now()}")
@@ -325,7 +324,6 @@ def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
         target_keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None
     )
     P2PJoinNetwork(target_node).perform(p2p_server.info)
-    time.sleep(1)
 
     # custodian needs to know about the runner's identity (it stamps owner/creators)
     p2p_server.db.update_identity(p2p_client.identity)
@@ -381,7 +379,6 @@ def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context):
         no_dor_keystore, enable_rest=False, dor_plugin_class=None, rti_plugin_class=None
     )
     P2PJoinNetwork(no_dor_target).perform(p2p_server.info)
-    time.sleep(1)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'payload.json')
