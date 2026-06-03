@@ -20,7 +20,7 @@ from simaas.core.rsakeypair import RSAKeyPair
 from simaas.core.schemas import KeystoreContent
 from simaas.core.helpers import generate_random_string, write_json_to_file
 from simaas.core.assets import MasterKeyPairAsset, KeyPairAsset, ContentKeysAsset, SSHCredentialsAsset, \
-    GithubCredentialsAsset
+    GithubCredentialsAsset, TLSCertAsset
 from simaas.core.identity import generate_identity_token, Identity
 
 log = get_logger('simaas.core', 'ks')
@@ -55,6 +55,14 @@ class Keystore:
                 elif asset['type'] == SSHCredentialsAsset.__name__:
                     self._loaded[key] = SSHCredentialsAsset.load(asset, self._master)
 
+                elif asset['type'] == TLSCertAsset.__name__:
+                    self._loaded[key] = TLSCertAsset.load(asset, self._master)
+
+        # auto-generate TLS cert for keystores that pre-date the asset.
+        # The cert is persisted on the next sync().
+        if 'tls-cert' not in self._loaded:
+            self._loaded['tls-cert'] = TLSCertAsset.create_new()
+
         # keep references to essential keys
         self._s_key = self._loaded['signing-key'].get()
         self._e_key = self._loaded['encryption-key'].get()
@@ -88,6 +96,7 @@ class Keystore:
         content_keys = ContentKeysAsset()
         ssh_credentials = SSHCredentialsAsset()
         github_credentials = GithubCredentialsAsset()
+        tls_cert = TLSCertAsset.create_new()
 
         # create the keystore content
         content = {
@@ -103,7 +112,8 @@ class Keystore:
                 'encryption-key': encryption_key.store(master_key.get()),
                 'content-keys': content_keys.store(master_key.get()),
                 'ssh-credentials': ssh_credentials.store(master_key.get()),
-                'github-credentials': github_credentials.store(master_key.get())
+                'github-credentials': github_credentials.store(master_key.get()),
+                'tls-cert': tls_cert.store(master_key.get()),
             }
         }
 
@@ -210,6 +220,18 @@ class Keystore:
 
     def curve_public_key(self) -> bytes:
         return self._curve_public
+
+    def tls_cert_pem(self) -> bytes:
+        with self._mutex:
+            return self._loaded['tls-cert'].cert_pem()
+
+    def tls_key_pem(self) -> bytes:
+        with self._mutex:
+            return self._loaded['tls-cert'].key_pem()
+
+    def tls_spki_hex(self) -> str:
+        with self._mutex:
+            return self._loaded['tls-cert'].spki_hex()
 
     def update_profile(self, name: str = None, email: str = None) -> Identity:
         with self._mutex:
