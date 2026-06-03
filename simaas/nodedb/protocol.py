@@ -32,9 +32,7 @@ class P2PUpdateIdentity(P2PProtocol):
     async def perform(self, peer: NodeInfo) -> Identity:
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         message = UpdateIdentityMessage(identity=self._node.identity)
@@ -52,9 +50,7 @@ class P2PUpdateIdentity(P2PProtocol):
             try:
                 peer_address = P2PAddress(
                     address=peer.p2p_address,
-                    curve_secret_key=self._node.keystore.curve_secret_key(),
-                    curve_public_key=self._node.keystore.curve_public_key(),
-                    curve_server_key=peer.identity.c_public_key
+                    peer_tls_cert=peer.identity.tls_cert
                 )
 
                 message = UpdateIdentityMessage(identity=self._node.identity)
@@ -196,9 +192,7 @@ class P2PJoinNetwork(P2PProtocol):
             try:
                 peer_address = P2PAddress(
                     address=peer.p2p_address,
-                    curve_secret_key=self._node.keystore.curve_secret_key(),
-                    curve_public_key=self._node.keystore.curve_public_key(),
-                    curve_server_key=peer.identity.c_public_key
+                    peer_tls_cert=peer.identity.tls_cert
                 )
 
                 # create update message with a snapshot of the network, excluding nodes we already know about
@@ -298,9 +292,7 @@ class P2PLeaveNetwork(P2PProtocol):
             if peer.identity.id != message.origin.identity.id:
                 peer_address = P2PAddress(
                     address=peer.p2p_address,
-                    curve_secret_key=self._node.keystore.curve_secret_key(),
-                    curve_public_key=self._node.keystore.curve_public_key(),
-                    curve_server_key=peer.identity.c_public_key
+                    peer_tls_cert=peer.identity.tls_cert
                 )
 
                 if blocking:
@@ -350,9 +342,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=node.keystore.curve_secret_key(),
-            curve_public_key=node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         try:
@@ -404,9 +394,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=node.keystore.curve_secret_key(),
-            curve_public_key=node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         try:
@@ -458,9 +446,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=node.keystore.curve_secret_key(),
-            curve_public_key=node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         try:

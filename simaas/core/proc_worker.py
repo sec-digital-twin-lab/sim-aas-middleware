@@ -1,16 +1,14 @@
 """
 Fork-isolated worker process for running processor adapters.
 
-Spawns a child process BEFORE ZMQ initialisation so that the processor
-runs in an environment free of ZMQ I/O threads.  This eliminates the
-Rosetta 2 fork-deadlock: adapters can use subprocess.run(), matplotlib,
-or any library that forks internally — no workarounds required.
+The child is forked before the parent opens any P2P sockets so the
+processor runs in a clean address space.
 
 Lifecycle (managed by JobRunner)::
 
     worker = ProcessorWorker(proc, keystore)
-    worker.start()                # fork — call before ZMQ
-    ...                           # parent does ZMQ/P2P setup
+    worker.start()                # fork
+    ...                           # parent does P2P setup
     worker.run(wd_path, job, ...) # blocks until processor finishes
     worker.stop()                 # cleanup
 """
@@ -145,11 +143,7 @@ class _NamespaceProxy:
 # ---------------------------------------------------------------------------
 
 def _worker_main(conn, parent_conn, proc, keystore, interrupt_event):
-    """Entry point for the fork-isolated worker process.
-
-    This function runs in the child process.  It has NO ZMQ context or
-    I/O threads — fork/subprocess is safe.
-    """
+    """Entry point for the fork-isolated worker process."""
     # Close the parent's pipe end (inherited via fork, not needed here).
     parent_conn.close()
 
@@ -233,8 +227,8 @@ class ProcessorWorker:
     Usage::
 
         worker = ProcessorWorker(proc, keystore)
-        worker.start()          # fork — before ZMQ
-        ...                     # ZMQ / P2P setup
+        worker.start()          # fork
+        ...                     # P2P setup
         worker.run(...)         # blocks until processor finishes
         worker.stop()           # cleanup
     """
@@ -247,7 +241,7 @@ class ProcessorWorker:
         self._interrupt_event = None
 
     def start(self):
-        """Fork the worker process.  **Must** be called before any ZMQ context."""
+        """Fork the worker process. Call before opening P2P sockets."""
         ctx = mp.get_context('fork')
         self._interrupt_event = ctx.Event()
         parent_conn, child_conn = ctx.Pipe()

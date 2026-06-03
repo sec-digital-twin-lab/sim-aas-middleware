@@ -16,9 +16,7 @@ class NamespaceDOR(DORInterface):
     def __init__(self, custodian_identity: Identity, custodian_address: str, authority: Keystore):
         self._peer_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=authority.curve_secret_key(),
-            curve_public_key=authority.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
         self._authority = authority
 
@@ -160,9 +158,7 @@ class NamespaceRTI(RTIInterface):
     def __init__(self, custodian_identity: Identity, custodian_address: str, authority: Keystore):
         self._peer_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=authority.curve_secret_key(),
-            curve_public_key=authority.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
         self._authority = authority
 

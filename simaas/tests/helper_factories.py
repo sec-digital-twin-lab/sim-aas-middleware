@@ -231,7 +231,7 @@ def prepare_proc_path(proc_path: str) -> GitProcessorPointer:
 
 
 def run_job_cmd(
-        job_path: str, proc_path: str, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+        job_path: str, proc_path: str, service_address: str, custodian_address: str, custodian_tls_cert: str, job_id: str
 ) -> None:
     """Run a job command in a separate thread."""
     try:
@@ -241,7 +241,7 @@ def run_job_cmd(
             'proc_path': proc_path,
             'service_address': service_address,
             'custodian_address': custodian_address,
-            'custodian_pub_key': custodian_pub_key,
+            'custodian_tls_cert': custodian_tls_cert,
             'job_id': job_id
         }
         cmd.execute(args)
@@ -323,7 +323,7 @@ async def execute_job(
 
     threading.Thread(
         target=run_job_cmd,
-        args=(wd_path, proc_path, service_address, custodian.p2p.address(), custodian.identity.c_public_key, job_id)
+        args=(wd_path, proc_path, service_address, custodian.p2p.address(), custodian.identity.tls_cert, job_id)
     ).start()
 
     if cancel:
@@ -347,9 +347,7 @@ async def execute_job(
 
         await P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
-            curve_secret_key=custodian.keystore.curve_secret_key(),
-            curve_public_key=custodian.keystore.curve_public_key(),
-            curve_server_key=runner_identity.c_public_key
+            peer_tls_cert=runner_identity.tls_cert
         ))
 
     # Wait for job completion with timeout

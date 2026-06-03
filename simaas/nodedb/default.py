@@ -46,7 +46,7 @@ class IdentityRecord(Base):
     email = Column(String, nullable=False)
     s_public_key = Column(String, nullable=True)
     e_public_key = Column(String, nullable=True)
-    c_public_key = Column(String, nullable=True)
+    tls_cert = Column(String, nullable=True)
     nonce = Column(Integer, nullable=False)
     signature = Column(String, nullable=True)
     last_seen = Column(BigInteger, nullable=False)
@@ -198,7 +198,7 @@ class DefaultNodeDBService(NodeDBService):
                 email=record.email,
                 s_public_key=record.s_public_key,
                 e_public_key=record.e_public_key,
-                c_public_key=record.c_public_key,
+                tls_cert=record.tls_cert,
                 nonce=record.nonce,
                 signature=record.signature,
                 last_seen=record.last_seen
@@ -217,7 +217,7 @@ class DefaultNodeDBService(NodeDBService):
                     email=record.email,
                     s_public_key=record.s_public_key,
                     e_public_key=record.e_public_key,
-                    c_public_key=record.c_public_key,
+                    tls_cert=record.tls_cert,
                     nonce=record.nonce,
                     signature=record.signature,
                     last_seen=record.last_seen
@@ -239,7 +239,7 @@ class DefaultNodeDBService(NodeDBService):
             if record is None:
                 session.add(IdentityRecord(iid=identity.id, name=identity.name, email=identity.email,
                                            s_public_key=identity.s_public_key, e_public_key=identity.e_public_key,
-                                           c_public_key=identity.c_public_key, nonce=identity.nonce,
+                                           tls_cert=identity.tls_cert, nonce=identity.nonce,
                                            signature=identity.signature, last_seen=get_timestamp_now()))
                 session.commit()
 
@@ -251,7 +251,7 @@ class DefaultNodeDBService(NodeDBService):
                 record.nonce = identity.nonce
                 record.s_public_key = identity.s_public_key
                 record.e_public_key = identity.e_public_key
-                record.c_public_key = identity.c_public_key
+                record.tls_cert = identity.tls_cert
                 record.signature = identity.signature
                 record.last_seen = get_timestamp_now()
                 session.commit()

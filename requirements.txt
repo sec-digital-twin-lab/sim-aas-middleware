@@ -22,5 +22,4 @@ tabulate==0.10.0
 uvicorn==0.46.0
 watchtower==3.4.0
 python-dotenv==1.2.2
-pyzmq==27.1.0
 rdflib==7.6.0

@@ -35,9 +35,7 @@ class P2PLookupDataObject(P2PProtocol):
     async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         reply, _ = await p2p_request(
@@ -92,9 +90,7 @@ class P2PFetchDataObject(P2PProtocol):
                       timeout: Optional[int] = None) -> DataObject:
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
@@ -246,9 +242,7 @@ class P2PPushDataObject(P2PProtocol):
     ) -> DataObject:
         peer_address = P2PAddress(
             address=p2p_address,
-            curve_secret_key=keystore.curve_secret_key(),
-            curve_public_key=keystore.curve_public_key(),
-            curve_server_key=peer.c_public_key
+            peer_tls_cert=peer.tls_cert
         )
 
         message = PushRequest(
@@ -331,9 +325,7 @@ class P2PRelayPushDataObject(P2PProtocol):
     ) -> DataObject:
         peer_address = P2PAddress(
             address=custodian_p2p_address,
-            curve_secret_key=keystore.curve_secret_key(),
-            curve_public_key=keystore.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
 
         message = RelayPushRequest(

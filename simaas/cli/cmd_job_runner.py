@@ -326,8 +326,8 @@ class JobRunner(CLICommand, ProgressListener):
                      help="address used by P2P service for secure communication"),
             Argument('--custodian-address', dest='custodian_address', action='store',
                      help="P2P address of the custodian"),
-            Argument('--custodian-pub-key', dest='custodian_pub_key', action='store',
-                     help="Public curve key of custodian"),
+            Argument('--custodian-tls-cert', dest='custodian_tls_cert', action='store',
+                     help="PEM-encoded TLS cert of the custodian"),
             Argument('--job-id', dest='job_id', action='store',
                      help="Id of the job (will be used by the runner to retrieve job information from the custodian)")
         ])
@@ -504,22 +504,20 @@ class JobRunner(CLICommand, ProgressListener):
             raise NotFoundError(resource_type='processor', resource_id=proc_name, searched_locations=[proc_path])
 
     def _initialise_p2p(
-            self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+            self, service_address: str, custodian_address: str, custodian_tls_cert: str, job_id: str
     ) -> None:
         # start the secured P2P service (keystore already created before fork)
         self._p2p = P2PService(self._keystore, service_address)
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
         self._p2p.add(self._barrier)
-        self._p2p.start_service_background(encrypt=True)
+        self._p2p.start_service_background()
         self._logger.info("P2P service interface is up.")
 
         # determine the full P2P address of the custodian
         self._custodian_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=self._keystore.curve_secret_key(),
-            curve_public_key=self._keystore.curve_public_key(),
-            curve_server_key=custodian_pub_key
+            peer_tls_cert=custodian_tls_cert,
         )
 
         # figure out the port of the P2P service
@@ -589,9 +587,7 @@ class JobRunner(CLICommand, ProgressListener):
                 member_identity = self._batch_identities[name]
                 member_p2p_address = P2PAddress(
                     address=self._batch_ports[name]['6000/tcp'],
-                    curve_secret_key=self._keystore.curve_secret_key(),
-                    curve_public_key=self._keystore.curve_public_key(),
-                    curve_server_key=member_identity.c_public_key
+                    peer_tls_cert=member_identity.tls_cert
                 )
                 mappings.append((name, member_p2p_address))
 
@@ -875,14 +871,14 @@ class JobRunner(CLICommand, ProgressListener):
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
         prompt_if_missing(args, 'service_address', prompt_for_string, message="Enter address for the P2P service:")
         env_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS')
-        env_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY')
+        env_if_missing(args, 'custodian_tls_cert', 'SIMAAS_CUSTODIAN_TLS_CERT')
         env_if_missing(args, 'job_id', 'JOB_ID')
 
         # check if required args are defined
         print(f"Environment: {os.environ}")
         print(f"Arguments: {args}")
-        if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            raise ValidationError(field='arguments', expected='custodian_address, custodian_pub_key, job_id', actual='missing')
+        if not all(key in args for key in ['custodian_address', 'custodian_tls_cert', 'job_id']):
+            raise ValidationError(field='arguments', expected='custodian_address, custodian_tls_cert, job_id', actual='missing')
 
         # determine working directory
         self._wd_path = args['job_path']
@@ -910,21 +906,18 @@ class JobRunner(CLICommand, ProgressListener):
             # initialise processor
             self._initialise_processor(args['proc_path'])
 
-            # create the ephemeral keystore BEFORE forking (uses zmq.curve_public
-            # but does NOT start I/O threads).
             self._keystore = Keystore.new('runner')
             self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
 
-            # fork the worker process BEFORE ZMQ — the child inherits the
-            # processor and keystore but has zero ZMQ threads, so fork/subprocess
-            # is safe inside adapter code.
+            # fork the worker process before any network sockets are opened, so
+            # the child starts with a clean inherited address space.
             self._worker = ProcessorWorker(self._proc, self._keystore)
             self._worker.start()
             self._logger.info("Fork-isolated worker process started.")
 
             # initialise P2P services
             self._initialise_p2p(
-                args['service_address'], args['custodian_address'], args['custodian_pub_key'], args['job_id']
+                args['service_address'], args['custodian_address'], args['custodian_tls_cert'], args['job_id']
             )
 
             # if, for some reason, we have not received a job, then we can't proceed.

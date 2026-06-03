@@ -278,7 +278,7 @@ def batch_deregister_job_def(proc: Processor, config: Optional[AWSConfiguration]
 
 
 def batch_run_job(
-        repository_name: str, proc: Processor, custodian_address: str, custodian_pubkey: str, job_id: str,
+        repository_name: str, proc: Processor, custodian_address: str, custodian_tls_cert: str, job_id: str,
         budget: ResourceDescriptor, config: Optional[AWSConfiguration] = None
 ) -> str:
     # get the client
@@ -294,7 +294,7 @@ def batch_run_job(
         containerOverrides={
             "environment": [
                 {"name": "SIMAAS_CUSTODIAN_ADDRESS", "value": custodian_address},
-                {"name": "SIMAAS_CUSTODIAN_PUBKEY", "value": custodian_pubkey},
+                {"name": "SIMAAS_CUSTODIAN_TLS_CERT", "value": custodian_tls_cert},
                 {"name": "JOB_ID", "value": job_id},
                 {"name": "EXTERNAL_P2P_ADDRESS", "value": 'HOSTNAME'},
             ],
@@ -519,8 +519,8 @@ class AWSRTIService(RTIServiceBase):
             self, job: Job, proc: Processor, submitted: Optional[List[Tuple[Job, str]]] = None,
             volumes: Optional[Dict[str, dict]] = None
     ) -> str:
-        # determine the custodian address and curve public key
-        custodian_pubkey: str = self._node.identity.c_public_key
+        # determine the custodian address and TLS cert
+        custodian_tls_cert: str = self._node.identity.tls_cert
         if "SIMAAS_CUSTODIAN_HOST" in os.environ:
             custodian_host: str = os.environ["SIMAAS_CUSTODIAN_HOST"]
             custodian_address: str = f"tcp://{custodian_host}:{self._node.p2p.port()}"
@@ -530,7 +530,7 @@ class AWSRTIService(RTIServiceBase):
 
         # submit the job to AWS Batch
         aws_job_id = batch_run_job(
-            self._aws_repository_name, proc, custodian_address, custodian_pubkey, job.id, job.task.budget,
+            self._aws_repository_name, proc, custodian_address, custodian_tls_cert, job.id, job.task.budget,
             config=self._aws_config
         )
 

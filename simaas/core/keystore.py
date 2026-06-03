@@ -7,9 +7,7 @@ import string
 from threading import Lock
 from typing import Optional
 
-import zmq
 from pydantic import ValidationError
-from zmq.utils import z85
 
 from simaas.core.eckeypair import ECKeyPair
 from simaas.core.errors import ConfigurationError, InternalError
@@ -58,19 +56,10 @@ class Keystore:
                 elif asset['type'] == TLSCertAsset.__name__:
                     self._loaded[key] = TLSCertAsset.load(asset, self._master)
 
-        # auto-generate TLS cert for keystores that pre-date the asset.
-        # The cert is persisted on the next sync().
-        if 'tls-cert' not in self._loaded:
-            self._loaded['tls-cert'] = TLSCertAsset.create_new()
-
         # keep references to essential keys
         self._s_key = self._loaded['signing-key'].get()
         self._e_key = self._loaded['encryption-key'].get()
-
-        # create curve public key
-        self._curve_secret: bytes = self._s_key.private_as_bytes()
-        self._curve_secret: bytes = z85.encode(self._curve_secret)
-        self._curve_public: bytes = zmq.curve_public(self._curve_secret)
+        self._tls_cert = self._loaded['tls-cert']
 
         # check if signature is valid
         content_hash = hash_json_object(content.model_dump(), exclusions=['signature'])
@@ -136,7 +125,7 @@ class Keystore:
     def from_content(cls, content: KeystoreContent) -> Keystore:
         # check if we have required assets
         for required in ['master-key', 'signing-key', 'encryption-key', 'content-keys', 'ssh-credentials',
-                         'github-credentials']:
+                         'github-credentials', 'tls-cert']:
             if required not in content.assets:
                 raise ConfigurationError(
                     path='keystore.assets',
@@ -176,7 +165,7 @@ class Keystore:
 
         # check if we have required assets
         for required in ['master-key', 'signing-key', 'encryption-key', 'content-keys', 'ssh-credentials',
-                         'github-credentials']:
+                         'github-credentials', 'tls-cert']:
             if required not in content.assets:
                 raise ConfigurationError(
                     path='keystore.assets',
@@ -215,23 +204,17 @@ class Keystore:
         with self._mutex:
             return self._s_key
 
-    def curve_secret_key(self) -> bytes:
-        return self._curve_secret
-
-    def curve_public_key(self) -> bytes:
-        return self._curve_public
-
     def tls_cert_pem(self) -> bytes:
         with self._mutex:
-            return self._loaded['tls-cert'].cert_pem()
+            return self._tls_cert.cert_pem()
 
     def tls_key_pem(self) -> bytes:
         with self._mutex:
-            return self._loaded['tls-cert'].key_pem()
+            return self._tls_cert.key_pem()
 
     def tls_spki_hex(self) -> str:
         with self._mutex:
-            return self._loaded['tls-cert'].spki_hex()
+            return self._tls_cert.spki_hex()
 
     def update_profile(self, name: str = None, email: str = None) -> Identity:
         with self._mutex:
@@ -293,7 +276,7 @@ class Keystore:
                                   email=self._content.profile.email,
                                   s_public_key=self._s_key.public_as_string(),
                                   e_public_key=self._e_key.public_as_string(),
-                                  c_public_key=self._curve_public.hex(),
+                                  tls_cert=self._tls_cert.cert_pem().decode('utf-8'),
                                   nonce=self._content.nonce,
                                   signature=signature,
                                   last_seen=get_timestamp_now())

@@ -751,9 +751,7 @@ class RTIServiceBase(RTIRESTService):
                             runner = Identity.model_validate(related.runner['identity'])
                             runner_address = P2PAddress(
                                 address=related.runner['address'],
-                                curve_secret_key=self._node.keystore.curve_secret_key(),
-                                curve_public_key=self._node.keystore.curve_public_key(),
-                                curve_server_key=runner.c_public_key
+                                peer_tls_cert=runner.tls_cert
                             )
                         else:
                             runner_address = None
@@ -846,9 +844,7 @@ class RTIServiceBase(RTIRESTService):
             runner = Identity.model_validate(record.runner['identity'])
             runner_address = P2PAddress(
                 address=record.runner['address'],
-                curve_secret_key=self._node.keystore.curve_secret_key(),
-                curve_public_key=self._node.keystore.curve_public_key(),
-                curve_server_key=runner.c_public_key
+                peer_tls_cert=runner.tls_cert
             )
         else:
             runner_address = None
