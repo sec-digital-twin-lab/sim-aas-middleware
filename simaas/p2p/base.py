@@ -1,7 +1,7 @@
 import abc
-import asyncio
 import json
 import os
+import socket
 import ssl
 import struct
 import tempfile
@@ -36,7 +36,7 @@ class P2PProtocol(abc.ABC):
         return self._protocol
 
     @abc.abstractmethod
-    async def handle(
+    def handle(
             self, request: BaseModel, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         ...
@@ -101,30 +101,38 @@ def build_server_ssl_context(cert_pem: bytes, key_pem: bytes) -> ssl.SSLContext:
     return ctx
 
 
-async def _send_frame(writer: asyncio.StreamWriter, message: P2PMessage,
-                      attachment_path: Optional[str] = None) -> None:
+def _send_frame(sock: socket.socket, message: P2PMessage, attachment_path: Optional[str] = None) -> None:
     header = json.dumps(message.model_dump()).encode('utf-8')
-    writer.write(struct.pack('>I', len(header)))
-    writer.write(header)
-    await writer.drain()
+    sock.sendall(struct.pack('>I', len(header)) + header)
     if attachment_path:
         with open(attachment_path, 'rb') as f:
             while True:
                 chunk = f.read(_CHUNK_SIZE)
                 if not chunk:
                     break
-                writer.write(chunk)
-                await writer.drain()
+                sock.sendall(chunk)
 
 
-async def _recv_header(reader: asyncio.StreamReader) -> P2PMessage:
-    raw_len = await reader.readexactly(4)
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = bytearray(n)
+    view = memoryview(buf)
+    received = 0
+    while received < n:
+        got = sock.recv_into(view[received:])
+        if got == 0:
+            raise IOError(f'connection closed; expected {n} bytes, got {received}')
+        received += got
+    return bytes(buf)
+
+
+def _recv_header(sock: socket.socket) -> P2PMessage:
+    raw_len = _recv_exact(sock, 4)
     (header_len,) = struct.unpack('>I', raw_len)
-    header = await reader.readexactly(header_len)
+    header = _recv_exact(sock, header_len)
     return P2PMessage.model_validate_json(header)
 
 
-async def _recv_attachment(reader: asyncio.StreamReader, size: int, download_path: Optional[str]) -> Optional[str]:
+def _recv_attachment(sock: socket.socket, size: int, download_path: Optional[str]) -> Optional[str]:
     if size <= 0:
         return None
     if download_path is None:
@@ -132,7 +140,7 @@ async def _recv_attachment(reader: asyncio.StreamReader, size: int, download_pat
     remaining = size
     with open(download_path, 'wb') as f:
         while remaining > 0:
-            chunk = await reader.read(min(_CHUNK_SIZE, remaining))
+            chunk = sock.recv(min(_CHUNK_SIZE, remaining))
             if not chunk:
                 raise IOError('attachment truncated')
             f.write(chunk)
@@ -140,7 +148,7 @@ async def _recv_attachment(reader: asyncio.StreamReader, size: int, download_pat
     return download_path
 
 
-async def p2p_request(
+def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
         attachment_path: Optional[str] = None, download_path: Optional[str] = None,
         timeout: Optional[int] = None,
@@ -152,14 +160,14 @@ async def p2p_request(
     host, port = _parse_tcp_address(peer.address)
     ssl_ctx = build_client_ssl_context(peer.peer_tls_cert)
 
-    writer: Optional[asyncio.StreamWriter] = None
+    raw_sock: Optional[socket.socket] = None
+    sock: Optional[ssl.SSLSocket] = None
     try:
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port, ssl=ssl_ctx, server_hostname='simaas-node'),
-                timeout=effective_timeout_s,
-            )
-        except (asyncio.TimeoutError, OSError, ssl.SSLError) as e:
+            raw_sock = socket.create_connection((host, port), timeout=effective_timeout_s)
+            sock = ssl_ctx.wrap_socket(raw_sock, server_hostname='simaas-node')
+            sock.settimeout(effective_timeout_s)
+        except (socket.timeout, OSError, ssl.SSLError) as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             raise NetworkError(peer_address=peer.address, operation='connect',
                                timeout_ms=int(effective_timeout_s * 1000), trace=trace)
@@ -169,14 +177,14 @@ async def p2p_request(
             attachment_size=attachment_size,
         )
         try:
-            await asyncio.wait_for(_send_frame(writer, request, attachment_path), timeout=effective_timeout_s)
-        except (asyncio.TimeoutError, OSError, ssl.SSLError) as e:
+            _send_frame(sock, request, attachment_path)
+        except (socket.timeout, OSError, ssl.SSLError) as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             raise NetworkError(peer_address=peer.address, operation='send',
                                timeout_ms=int(effective_timeout_s * 1000), trace=trace)
 
         try:
-            reply = await asyncio.wait_for(_recv_header(reader), timeout=effective_timeout_s)
+            reply = _recv_header(sock)
             if reply.type == 'error':
                 err_content = reply.content or {}
                 raise NetworkError(
@@ -184,11 +192,8 @@ async def p2p_request(
                     reason=err_content.get('reason', 'peer reported an error'),
                     **{k: v for k, v in err_content.items() if k != 'reason'},
                 )
-            reply_attachment = await asyncio.wait_for(
-                _recv_attachment(reader, reply.attachment_size, download_path),
-                timeout=effective_timeout_s,
-            )
-        except (asyncio.TimeoutError, OSError, ssl.SSLError, IOError) as e:
+            reply_attachment = _recv_attachment(sock, reply.attachment_size, download_path)
+        except (socket.timeout, OSError, ssl.SSLError, IOError) as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             raise NetworkError(peer_address=peer.address, operation='receive',
                                timeout_ms=int(effective_timeout_s * 1000), trace=trace)
@@ -198,31 +203,35 @@ async def p2p_request(
         return None, reply_attachment
 
     finally:
-        if writer is not None:
+        if sock is not None:
             try:
-                writer.close()
-                await writer.wait_closed()
+                sock.close()
+            except Exception:
+                pass
+        elif raw_sock is not None:
+            try:
+                raw_sock.close()
             except Exception:
                 pass
 
 
-async def p2p_send_error(writer: asyncio.StreamWriter, protocol_name: str, reason: str, **extra) -> None:
+def p2p_send_error(sock: socket.socket, protocol_name: str, reason: str, **extra) -> None:
     try:
         reply = P2PMessage(
             protocol=protocol_name, type='error',
             content={'reason': reason, **extra},
             attachment_size=0,
         )
-        await _send_frame(writer, reply)
+        _send_frame(sock, reply)
     except Exception as e:
         log.warning('respond', 'Failed to send P2P error reply', exc=e, protocol=protocol_name)
 
 
-async def p2p_respond(writer: asyncio.StreamWriter, protocol: P2PProtocol, request: P2PMessage,
-                      attachment_path: Optional[str] = None, download_path: Optional[str] = None) -> None:
+def p2p_respond(sock: socket.socket, protocol: P2PProtocol, request: P2PMessage,
+                attachment_path: Optional[str] = None, download_path: Optional[str] = None) -> None:
     try:
         request_type = protocol.request_type()
-        reply_content, reply_attachment_path = await protocol.handle(
+        reply_content, reply_attachment_path = protocol.handle(
             request_type.model_validate(request.content), attachment_path, download_path,
         )
         reply_attachment_size = os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
@@ -232,7 +241,7 @@ async def p2p_respond(writer: asyncio.StreamWriter, protocol: P2PProtocol, reque
                 content=reply_content.model_dump() if reply_content else None,
                 attachment_size=reply_attachment_size,
             )
-            await _send_frame(writer, reply, reply_attachment_path)
+            _send_frame(sock, reply, reply_attachment_path)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             log.error('respond', 'Unexpected P2P error', exc=e)

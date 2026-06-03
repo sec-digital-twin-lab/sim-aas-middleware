@@ -1,7 +1,7 @@
-import asyncio
 import os.path
 import random
 import tempfile
+import time
 from typing import Optional, Tuple
 
 from pydantic import BaseModel
@@ -26,22 +26,22 @@ class P2PLatency(P2PProtocol):
         super().__init__(self.NAME)
 
     @classmethod
-    async def perform(cls, p2p_address: str, peer: Identity, max_attempts: int = 10) -> Tuple[float, int]:
+    def perform(cls, p2p_address: str, peer: Identity, max_attempts: int = 10) -> Tuple[float, int]:
         peer_address = P2PAddress(address=p2p_address, peer_tls_cert=peer.tls_cert)
         for attempt in range(max_attempts):
             try:
                 t0 = get_timestamp_now()
-                reply, _ = await p2p_request(
+                reply, _ = p2p_request(
                     peer_address, cls.NAME, LatencyMessage(t_now=t0),
                     reply_type=LatencyMessage,
                 )
                 return reply.t_now - t0, attempt
             except NetworkError:
-                await asyncio.sleep(0.5)
+                time.sleep(0.5)
 
         raise OperationError(operation='latency_test', cause=f'failed after {max_attempts} attempts')
 
-    async def handle(
+    def handle(
             self, request: LatencyMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         return LatencyMessage(t_now=get_timestamp_now()), None
@@ -66,8 +66,8 @@ class P2PThroughput(P2PProtocol):
         super().__init__(self.NAME)
 
     @classmethod
-    async def perform(cls, p2p_address: str, peer: Identity, size: int,
-                      max_attempts: int = 10) -> Tuple[float, float, int]:
+    def perform(cls, p2p_address: str, peer: Identity, size: int,
+                max_attempts: int = 10) -> Tuple[float, float, int]:
         peer_address = P2PAddress(address=p2p_address, peer_tls_cert=peer.tls_cert)
         with tempfile.TemporaryDirectory() as tempdir:
             attachment_path = os.path.join(tempdir, 'payload')
@@ -77,7 +77,7 @@ class P2PThroughput(P2PProtocol):
             for attempt in range(max_attempts):
                 try:
                     t0 = get_timestamp_now()
-                    reply, _ = await p2p_request(
+                    reply, _ = p2p_request(
                         peer_address, cls.NAME, ThroughputMessage(t_now=t0),
                         reply_type=ThroughputMessage, attachment_path=attachment_path,
                     )
@@ -90,11 +90,11 @@ class P2PThroughput(P2PProtocol):
                     return upload, download, attempt
 
                 except NetworkError:
-                    await asyncio.sleep(0.5)
+                    time.sleep(0.5)
 
             raise OperationError(operation='throughput_test', cause=f'failed after {max_attempts} attempts')
 
-    async def handle(
+    def handle(
             self, request: ThroughputMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         return ThroughputMessage(t_now=get_timestamp_now()), attachment_path

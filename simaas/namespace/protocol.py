@@ -1,4 +1,3 @@
-import asyncio
 import os.path
 import traceback
 
@@ -90,7 +89,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def _check_restrictions(self, service, method, args, identity: Identity) -> None:
+    def _check_restrictions(self, service, method, args, identity: Identity) -> None:
         cls = service.__class__  # Get actual class if method is bound
 
         # Iterate over the class and its parent classes (including ABCs)
@@ -100,39 +99,39 @@ class P2PNamespaceServiceCall(P2PProtocol):
                 # Check for restriction flags and append appropriate dependencies
                 if getattr(interface_method, "_dor_requires_ownership", False):
                     obj_id: str = args['obj_id']
-                    await self._node.check_dor_ownership(obj_id, identity)
+                    self._node.check_dor_ownership(obj_id, identity)
 
                 if getattr(interface_method, "_dor_requires_access", False):
                     obj_id: str = args['obj_id']
-                    await self._node.check_dor_has_access(obj_id, identity)
+                    self._node.check_dor_has_access(obj_id, identity)
 
                 if getattr(interface_method, "_rti_requires_tasks_supported", False):
                     for task in args['tasks']:
-                        await self._node.check_rti_is_deployed(task.proc_id)
-                        await self._node.check_rti_not_busy(task.proc_id)
+                        self._node.check_rti_is_deployed(task.proc_id)
+                        self._node.check_rti_not_busy(task.proc_id)
 
                 if getattr(interface_method, "_rti_requires_proc_deployed", False):
                     proc_id: str = args['proc_id']
-                    await self._node.check_rti_is_deployed(proc_id)
+                    self._node.check_rti_is_deployed(proc_id)
 
                 if getattr(interface_method, "_rti_node_ownership_if_strict", False):
                     if self._node.rti.strict_deployment:
-                        await self._node.check_rti_node_owner(identity)
+                        self._node.check_rti_node_owner(identity)
 
                 if getattr(interface_method, "_rti_job_or_node_ownership", False):
                     job_id: str = args['job_id']
-                    await self._node.check_rti_job_or_node_owner(job_id, identity)
+                    self._node.check_rti_job_or_node_owner(job_id, identity)
 
                 if getattr(interface_method, "_rti_batch_or_node_ownership", False):
                     batch_id: str = args['batch_id']
-                    await self._node.check_rti_batch_or_node_owner(batch_id, identity)
+                    self._node.check_rti_batch_or_node_owner(batch_id, identity)
 
                 if getattr(interface_method, "_rti_requires_proc_not_busy", False):
                     proc_id: str = args['proc_id']
-                    await self._node.check_rti_not_busy(proc_id)
+                    self._node.check_rti_not_busy(proc_id)
 
     @classmethod
-    async def perform(
+    def perform(
             cls, peer_address: P2PAddress, authority: Keystore, service: str, method: str,
             args: Optional[dict] = None, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
             max_attempts: int = 3
@@ -143,7 +142,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                 request = generate_authorised_request(authority, service, method, args)
 
                 # send the request
-                reply, _ = await p2p_request(
+                reply, _ = p2p_request(
                     peer_address, cls.NAME, request, reply_type=NamespaceServiceResponse,
                     attachment_path=attachment_path,
                     download_path=download_path
@@ -164,19 +163,19 @@ class P2PNamespaceServiceCall(P2PProtocol):
             except NetworkError:
                 delay = attempt + 1
                 log.warning('service', 'Failed to perform namespace service call, retrying', attempt=attempt+1, max_attempts=max_attempts, delay=delay)
-                await asyncio.sleep(delay)
+                time.sleep(delay)
 
         raise OperationError(operation='namespace_service_call', cause=f'failed after {max_attempts} attempts')
 
 
-    async def handle(
+    def handle(
             self, request: NamespaceServiceRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
 
         try:
             # do we know the identity that authorised the request?
-            identity = await self._node.db.get_identity(request.authorisation.iid)
+            identity = self._node.db.get_identity(request.authorisation.iid)
             if identity is None:
                 raise AuthenticationError(
                     identity_id=request.authorisation.iid,
@@ -234,7 +233,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                         args[key] = attachment_path
 
             # check restrictions
-            await self._check_restrictions(service, method, args, identity)
+            self._check_restrictions(service, method, args, identity)
 
             # are we expected to send an attachment back?
             content_path = None
@@ -244,7 +243,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
                     args[key] = content_path
 
             # call the method
-            result = await method(**args)
+            result = method(**args)
             result = serialise(result)
 
             # serialise the result

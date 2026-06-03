@@ -1,4 +1,3 @@
-import asyncio
 import os
 import time
 from typing import Optional, Tuple, Dict, Any
@@ -37,14 +36,14 @@ class P2PRunnerPerformHandshake(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, peer_address: P2PAddress, runner_identity: Identity, runner_address: str, job_id: str,
             gpp: GitProcessorPointer, max_attempts: int = 3
     ) -> Tuple[Optional[Job], Identity, Optional[str]]:
         for attempt in range(max_attempts):
             try:
-                # send the request and await a response
-                response = await p2p_request(
+                # send the request and a response
+                response = p2p_request(
                     peer_address, cls.NAME, RunnerHandshakeRequest(
                         runner_identity=runner_identity, runner_address=runner_address, job_id=job_id, gpp=gpp
                     ), RunnerHandshakeResponse
@@ -61,17 +60,17 @@ class P2PRunnerPerformHandshake(P2PProtocol):
             except NetworkError:
                 delay = attempt + 1
                 log.warning('handshake', 'Failed to perform handshake with custodian, retrying', attempt=attempt+1, max_attempts=max_attempts, delay=delay)
-                await asyncio.sleep(delay)
+                time.sleep(delay)
 
         raise OperationError(operation='handshake', cause=f'failed after {max_attempts} attempts')
 
-    async def handle(
+    def handle(
             self, request: RunnerHandshakeRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         try:
             # based on job id, update the job with runner information and retrieve the job
-            job: Job = await self._node.rti.update_job(
+            job: Job = self._node.rti.update_job(
                 request.job_id, request.runner_identity, request.runner_address
             )
 
@@ -82,7 +81,7 @@ class P2PRunnerPerformHandshake(P2PProtocol):
 
             # determine the batch status (if this job is part of one)
             batch_status: Optional[BatchStatus] = \
-                await self._node.rti.get_batch_status(job.batch_id) if job.batch_id else None
+                self._node.rti.get_batch_status(job.batch_id) if job.batch_id else None
 
             return RunnerHandshakeResponse(
                 job=job, custodian_identity=self._node.identity, secrets=secrets, join_batch=batch_status
@@ -118,8 +117,8 @@ class BatchBarrier(P2PProtocol):
         self._releases: Dict[str, dict] = {}
 
     @classmethod
-    async def perform(cls, peer_address: P2PAddress, barrier_name: str, batch_status: BatchStatus) -> None:
-        await p2p_request(
+    def perform(cls, peer_address: P2PAddress, barrier_name: str, batch_status: BatchStatus) -> None:
+        p2p_request(
             peer_address, cls.NAME, BatchBarrierRequest(
                 barrier_name=barrier_name, batch_status=batch_status
             ), None
@@ -133,7 +132,7 @@ class BatchBarrier(P2PProtocol):
             time.sleep(0.1)
         return self._releases.pop(barrier_name)
 
-    async def handle(
+    def handle(
             self, request: BatchBarrierRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
@@ -165,25 +164,25 @@ class P2PPushJobStatus(P2PProtocol):
         self._rti = node.rti
 
     @classmethod
-    async def perform(
+    def perform(
             cls, peer_address: P2PAddress, job_id: str, job_status: JobStatus, max_attempts: int = 10
     ) -> None:
         for attempt in range(max_attempts):
             try:
-                await p2p_request(
+                p2p_request(
                     peer_address, cls.NAME, JobStatusRequest(job_id=job_id, job_status=job_status)
                 )
                 return None
 
             except NetworkError:
-                await asyncio.sleep(0.5)
+                time.sleep(0.5)
 
         raise OperationError(operation='push_job_status', cause=f'failed after {max_attempts} attempts')
 
-    async def handle(
+    def handle(
             self, request: JobStatusRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        await self._rti.update_job_status(request.job_id, request.job_status)
+        self._rti.update_job_status(request.job_id, request.job_status)
         return None, None
 
     @staticmethod
@@ -207,20 +206,20 @@ class P2PInterruptJob(P2PProtocol):
         self._runner = runner
 
     @classmethod
-    async def perform(cls, peer_address: P2PAddress, max_attempts: int = 10) -> None:
+    def perform(cls, peer_address: P2PAddress, max_attempts: int = 10) -> None:
         for attempt in range(max_attempts):
             try:
-                await p2p_request(
+                p2p_request(
                     peer_address, cls.NAME, InterruptJobRequest()
                 )
                 return None
 
             except NetworkError:
-                await asyncio.sleep(0.5)
+                time.sleep(0.5)
 
         raise OperationError(operation='interrupt_job', cause=f'failed after {max_attempts} attempts')
 
-    async def handle(
+    def handle(
             self, request: InterruptJobRequest, attachment_path: Optional[str] = None,
             download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:

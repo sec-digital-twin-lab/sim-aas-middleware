@@ -1,4 +1,3 @@
-import asyncio
 import json
 import os
 import shutil
@@ -61,14 +60,14 @@ class DockerRTIService(RTIServiceBase):
     def type(self) -> str:
         return 'docker'
 
-    async def perform_deploy(self, proc: Processor) -> None:
+    def perform_deploy(self, proc: Processor) -> None:
         try:
             # search the network for the processor docker image data object and fetch it
             protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj = None
-            for node in [node for node in await self._node.db.get_network() if node.has_dor()]:
-                result: Dict[str, DataObject] = await protocol.perform(node, [proc.id])
+            for node in [node for node in self._node.db.get_network() if node.has_dor()]:
+                result: Dict[str, DataObject] = protocol.perform(node, [proc.id])
                 proc_obj = result.get(proc.id)
                 if proc_obj:
                     custodian = node
@@ -84,17 +83,17 @@ class DockerRTIService(RTIServiceBase):
                 raise ValidationError(field='tags.image_name', hint='missing from processor data object')
 
             # do we already have this docker image deployed? if not fetch and load from DOR
-            if not await asyncio.to_thread(docker_find_image, image_name):
+            if not docker_find_image(image_name):
                 # is the processor data object and image or a GPP?
                 if proc_obj.data_format == 'tar':
                     # fetch the data object
                     meta_path = os.path.join(self._procs_path, f"{proc.id}.meta")
                     content_path = os.path.join(self._procs_path, f"{proc.id}.content")
                     protocol = P2PFetchDataObject(self._node)
-                    await protocol.perform(custodian, proc.id, meta_path, content_path)
+                    protocol.perform(custodian, proc.id, meta_path, content_path)
 
                     # load the image
-                    image = await asyncio.to_thread(docker_load_image, content_path, image_name)
+                    image = docker_load_image(content_path, image_name)
                     if image is None:
                         raise OperationError(operation='docker_load', stage='verify', cause=f'image {image_name} not found after load')
 
@@ -108,8 +107,7 @@ class DockerRTIService(RTIServiceBase):
                     # clone the repository and checkout the specified commit
                     repo_path = os.path.join(self._procs_path, proc.id)
                     commit_id = proc_obj.tags['commit_id']
-                    await asyncio.to_thread(
-                        clone_repository, repository, repo_path, commit_id=commit_id, credentials=credentials
+                    clone_repository(repository, repo_path, commit_id=commit_id, credentials=credentials
                     )
 
                     proc_path = proc_obj.tags['proc_path']
@@ -127,13 +125,11 @@ class DockerRTIService(RTIServiceBase):
                         json.dump(gpp.model_dump(), f, indent=2)
 
                     # build the image
-                    await asyncio.to_thread(
-                        build_processor_image,
-                        proc_path, os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
+                    build_processor_image(proc_path, os.environ['SIMAAS_REPO_PATH'], image_name, credentials=credentials
                     )
 
             # find out what ports are exposed
-            ports: List[Tuple[int, str]] = await asyncio.to_thread(docker_get_exposed_ports, image_name)
+            ports: List[Tuple[int, str]] = docker_get_exposed_ports(image_name)
 
             # update processor object
             proc.state = Processor.State.READY
@@ -156,11 +152,11 @@ class DockerRTIService(RTIServiceBase):
             # update the db record
             self.update_proc_db(proc)
 
-    async def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
+    def perform_undeploy(self, proc: Processor, keep_image: bool = True) -> None:
         # remove the docker image (if applicable)
         if not keep_image:
             try:
-                await asyncio.to_thread(docker_delete_image, proc.image_name)
+                docker_delete_image(proc.image_name)
 
             except Exception as e:
                 log.error('undeploy', 'Failed to delete docker image', exc=e, proc=proc.id, image=proc.image_name)
@@ -247,7 +243,7 @@ class DockerRTIService(RTIServiceBase):
 
                 raise
 
-    async def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
+    def perform_cancel(self, job_id: str, peer_address: P2PAddress, grace_period: int = 30) -> None:
         runner_iid: str = None
         try:
             # mark cancelled in DB first (state is correct even if we crash later)
@@ -266,24 +262,24 @@ class DockerRTIService(RTIServiceBase):
             # send P2P interrupt (best effort)
             if peer_address:
                 try:
-                    await P2PInterruptJob.perform(peer_address)
+                    P2PInterruptJob.perform(peer_address)
                 except Exception:
                     pass
 
             # wait grace period for container to stop
             deadline = get_timestamp_now() + grace_period * 1000
             while get_timestamp_now() < deadline:
-                if not await asyncio.to_thread(docker_container_running, container_id):
+                if not docker_container_running(container_id):
                     break
-                await asyncio.sleep(1)
+                time.sleep(1)
 
             # force kill if still running
-            if await asyncio.to_thread(docker_container_running, container_id):
-                await asyncio.to_thread(docker_kill_job_container, container_id)
+            if docker_container_running(container_id):
+                docker_kill_job_container(container_id)
 
             # cleanup container/scratch (if not retaining history)
             if not self.retain_job_history:
-                await asyncio.to_thread(docker_delete_container, container_id)
+                docker_delete_container(container_id)
                 if self._scratch_volume:
                     scratch_path = os.path.join(self._scratch_volume, f"{job_id}_scratch")
                     shutil.rmtree(scratch_path, ignore_errors=True)
@@ -291,7 +287,7 @@ class DockerRTIService(RTIServiceBase):
             # delete the runner identity (always, regardless of retain_job_history)
             if runner_iid:
                 log.info('cancel', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
-                await self._node.db.delete_identity(runner_iid)
+                self._node.db.delete_identity(runner_iid)
 
         except Exception as e:
             log.error('cancel', 'Job cancellation failed', exc=e, job=job_id)
@@ -299,15 +295,15 @@ class DockerRTIService(RTIServiceBase):
         finally:
             self.on_cancellation_worker_done(job_id)
 
-    async def perform_purge(self, record: DBJobInfo) -> None:
+    def perform_purge(self, record: DBJobInfo) -> None:
         # try to kill the container (if anything is left)
         try:
             container_id = record.runner['container_id']
-            await asyncio.to_thread(docker_kill_job_container, container_id)
+            docker_kill_job_container(container_id)
         except Exception:
             log.warning('purge', 'Killing Docker container failed', job=record.id, container=record.runner.get('container_id'))
 
-    async def perform_job_cleanup(self, job_id: str) -> None:
+    def perform_job_cleanup(self, job_id: str) -> None:
         runner_iid: str = None
         try:
             with self._session_maker() as session:
@@ -322,26 +318,26 @@ class DockerRTIService(RTIServiceBase):
                     # wait for docker container to be shutdown
                     container_id: str = record.runner['container_id']
                     log.info('cleanup', 'Waiting for container to stop', job=job_id, container=container_id)
-                    while await asyncio.to_thread(docker_container_running, container_id):
-                        await asyncio.sleep(1)
+                    while docker_container_running(container_id):
+                        time.sleep(1)
 
                     # delete the container
                     log.info('cleanup', 'Deleting container', job=job_id, container=container_id)
-                    await asyncio.to_thread(docker_delete_container, container_id)
+                    docker_delete_container(container_id)
 
             # delete the scratch folder (if any and not retaining history)
             if not self.retain_job_history and self._scratch_volume is not None:
                 job_scratch_path = os.path.abspath(os.path.join(self._scratch_volume, f"{job_id}_scratch"))
                 log.info('cleanup', 'Deleting scratch folder', job=job_id, path=job_scratch_path)
                 try:
-                    await asyncio.to_thread(shutil.rmtree, job_scratch_path)
+                    shutil.rmtree(job_scratch_path)
                 except OSError as e:
                     log.warning('cleanup', 'Failed to delete scratch folder', job=job_id, error=str(e))
 
             # delete the runner identity (always, regardless of retain_job_history)
             if runner_iid:
                 log.info('cleanup', 'Deleting runner identity', job=job_id, runner_iid=runner_iid)
-                await self._node.db.delete_identity(runner_iid)
+                self._node.db.delete_identity(runner_iid)
 
         except Exception as e:
             log.error('cleanup', 'Job cleanup failed', exc=e, job=job_id)

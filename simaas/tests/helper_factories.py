@@ -1,6 +1,5 @@
 """Test data factories for creating test objects."""
-
-import asyncio
+import time
 import json
 import logging
 import os
@@ -250,7 +249,7 @@ def run_job_cmd(
         print(trace)
 
 
-async def execute_job(
+def execute_job(
         wd_parent_path: str, custodian: Node, job_id: str,
         a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
         user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False,
@@ -330,7 +329,7 @@ async def execute_job(
         runner_identity = None
         runner_address = None
         for i in range(10):
-            await asyncio.sleep(1)
+            time.sleep(1)
 
             with rti._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
@@ -345,7 +344,7 @@ async def execute_job(
         # Simulate RTI cancel flow: mark cancelled in DB first, then send interrupt
         rti.mark_job_cancelled(job_id)
 
-        await P2PInterruptJob.perform(P2PAddress(
+        P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             peer_tls_cert=runner_identity.tls_cert
         ))
@@ -354,12 +353,12 @@ async def execute_job(
     timeout = 60  # seconds
     elapsed = 0
     while elapsed < timeout:
-        status: JobStatus = await rti.get_job_status(job.id)
+        status: JobStatus = rti.get_job_status(job.id)
 
         if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             return status
 
-        await asyncio.sleep(0.5)
+        time.sleep(0.5)
         elapsed += 0.5
 
     # Timeout reached - return current status for debugging

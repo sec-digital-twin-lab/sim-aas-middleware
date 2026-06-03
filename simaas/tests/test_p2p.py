@@ -1,10 +1,10 @@
 """Integration tests for the P2P networking service."""
 
-import asyncio
 import json
 import logging
 import os
 import tempfile
+import time
 from typing import List, Dict
 
 import pytest
@@ -65,19 +65,17 @@ def p2p_client(test_context) -> Node:
 # ==============================================================================
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_latency(p2p_server, p2p_client):
+def test_p2p_latency(p2p_server, p2p_client):
     """Test P2P latency measurement between peers."""
-    latency, attempt = await P2PLatency.perform(p2p_server.p2p.address(), p2p_server.identity)
+    latency, attempt = P2PLatency.perform(p2p_server.p2p.address(), p2p_server.identity)
     print(f"latency: {latency} msec")
     print(f"attempt: {attempt}")
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_throughput(p2p_server, p2p_client):
+def test_p2p_throughput(p2p_server, p2p_client):
     """Test P2P throughput measurement between peers."""
-    upload, download, attempt = await P2PThroughput.perform(
+    upload, download, attempt = P2PThroughput.perform(
         p2p_server.p2p.address(), p2p_server.identity, 100 * 1024 * 1024,
     )
     print(f"upload: {upload:.2f} kB/s")
@@ -86,8 +84,7 @@ async def test_p2p_throughput(p2p_server, p2p_client):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_unreachable(p2p_server, p2p_client):
+def test_p2p_unreachable(p2p_server, p2p_client):
     """Test handling of unreachable P2P peers."""
     protocol = P2PUpdateIdentity(p2p_client)
 
@@ -95,7 +92,7 @@ async def test_p2p_unreachable(p2p_server, p2p_client):
     info.p2p_address = PortMaster.generate_p2p_address()
 
     try:
-        await protocol.perform(info)
+        protocol.perform(info)
         assert False
     except PeerUnavailableError:
         assert True
@@ -104,24 +101,22 @@ async def test_p2p_unreachable(p2p_server, p2p_client):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_update_identity(p2p_server, p2p_client):
+def test_p2p_update_identity(p2p_server, p2p_client):
     """Test P2P identity update protocol."""
     protocol = P2PUpdateIdentity(p2p_client)
 
     try:
-        result: Identity = await protocol.perform(p2p_server.info)
+        result: Identity = protocol.perform(p2p_server.info)
         assert result.id == p2p_server.identity.id
     except Exception:
         assert False
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_join_leave_network(p2p_server, p2p_client):
+def test_p2p_join_leave_network(p2p_server, p2p_client):
     """Test P2P network join and leave operations."""
-    networkS: List[NodeInfo] = await p2p_server.db.get_network()
-    networkC: List[NodeInfo] = await p2p_client.db.get_network()
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 1
 
@@ -129,26 +124,25 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
     boot_node: NodeInfo = p2p_server.info
 
     protocol = P2PJoinNetwork(p2p_client)
-    result: NodeInfo = await protocol.perform(boot_node)
+    result: NodeInfo = protocol.perform(boot_node)
     assert result.identity.id == p2p_server.identity.id
 
-    networkS: List[NodeInfo] = await p2p_server.db.get_network()
-    networkC: List[NodeInfo] = await p2p_client.db.get_network()
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
     assert len(networkS) == 2
     assert len(networkC) == 2
 
     protocol = P2PLeaveNetwork(p2p_client)
-    await protocol.perform(blocking=True)
+    protocol.perform(blocking=True)
 
-    networkS: List[NodeInfo] = await p2p_server.db.get_network()
-    networkC: List[NodeInfo] = await p2p_client.db.get_network()
+    networkS: List[NodeInfo] = p2p_server.db.get_network()
+    networkC: List[NodeInfo] = p2p_client.db.get_network()
     assert len(networkS) == 1
     assert len(networkC) == 2
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
+def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
     """Test P2P data object lookup and fetch operations."""
     # client is supposed to be the owner of the data object -> make the server aware of the identity
     owner = p2p_client.identity
@@ -168,7 +162,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
     # perform the lookup
     protocol = P2PLookupDataObject(p2p_client)
-    result: Dict[str, DataObject] = await protocol.perform(p2p_server.info, [obj_id])
+    result: Dict[str, DataObject] = protocol.perform(p2p_server.info, [obj_id])
     assert len(result) == 1
     assert obj_id in result
 
@@ -180,7 +174,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
         # perform a valid fetch
         try:
-            meta: DataObject = await protocol.perform(p2p_server.info, obj_id, meta_path, content_path)
+            meta: DataObject = protocol.perform(p2p_server.info, obj_id, meta_path, content_path)
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
             assert os.path.isfile(content_path)
@@ -189,7 +183,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
         # perform an invalid fetch
         try:
-            await protocol.perform(p2p_server.info, '01234', meta_path, content_path)
+            protocol.perform(p2p_server.info, '01234', meta_path, content_path)
             assert False
         except NetworkError as e:
             assert 'data object not found' in e.details['reason']
@@ -198,8 +192,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_fetch_restricted(p2p_server):
+def test_p2p_fetch_restricted(p2p_server):
     """Test P2P fetch of restricted data objects with access control."""
     with tempfile.TemporaryDirectory() as temp_dir:
         # create a fresh client node
@@ -210,8 +203,8 @@ async def test_p2p_fetch_restricted(p2p_server):
         )
         p2p_address = PortMaster.generate_p2p_address()
         rest_address = PortMaster.generate_rest_address()
-        await client.startup(p2p_address, rest_address=rest_address)
-        await asyncio.sleep(1)
+        client.startup(p2p_address, rest_address=rest_address)
+        time.sleep(1)
 
         # create an owner for the data object -> make the server aware of the identity
         owner = Keystore.new(f"owner-{get_timestamp_now()}")
@@ -235,7 +228,7 @@ async def test_p2p_fetch_restricted(p2p_server):
         # try to fetch a data object that doesn't exist
         try:
             fake_obj_id = 'abcdef'
-            await protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
+            protocol.perform(p2p_server.info, fake_obj_id, meta_path, content_path)
             assert False
         except NetworkError as e:
             assert 'data object not found' in e.details['reason']
@@ -244,7 +237,7 @@ async def test_p2p_fetch_restricted(p2p_server):
 
         # the client identity is not known to the server at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
             assert 'user id not found' in e.details['reason']
@@ -252,11 +245,11 @@ async def test_p2p_fetch_restricted(p2p_server):
             assert False
 
         # update the server with the client identity
-        await p2p_server.db.update_identity(client.identity)
+        p2p_server.db.update_identity(client.identity)
 
         # the client does not have permission at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
             assert 'user does not have access' in e.details['reason']
@@ -273,7 +266,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             token = f"{client.identity.id}:12343245"
             invalid_signature = client.keystore.sign(token.encode('utf-8'))
 
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
                                    user_signature=invalid_signature)
             assert False
         except NetworkError as e:
@@ -287,7 +280,7 @@ async def test_p2p_fetch_restricted(p2p_server):
 
         # the client does not have permission at this point to receive the data object
         try:
-            await protocol.perform(p2p_server.info, obj_id, meta_path, content_path,
+            protocol.perform(p2p_server.info, obj_id, meta_path, content_path,
                                    user_iid=client.identity.id, user_signature=signature)
             assert meta.obj_id == obj_id
             assert os.path.isfile(meta_path)
@@ -323,8 +316,7 @@ def _relay_push_kwargs(custodian, runner_keystore, target_iid, content_path):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
+def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
     """Relay-push from a runner through the custodian to a separate DOR-enabled target node."""
     # spin up a fresh DOR-enabled target and join it to the custodian's network so
     # the custodian's local NodeDB knows where to forward.
@@ -332,11 +324,11 @@ async def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
     target_node: Node = test_context.get_node(
         target_keystore, enable_rest=True, dor_plugin_class=FilesystemDORService, rti_plugin_class=None
     )
-    await P2PJoinNetwork(target_node).perform(p2p_server.info)
-    await asyncio.sleep(1)
+    P2PJoinNetwork(target_node).perform(p2p_server.info)
+    time.sleep(1)
 
     # custodian needs to know about the runner's identity (it stamps owner/creators)
-    await p2p_server.db.update_identity(p2p_client.identity)
+    p2p_server.db.update_identity(p2p_client.identity)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'payload.json')
@@ -344,24 +336,23 @@ async def test_p2p_relay_push_happy_path(p2p_server, p2p_client, test_context):
             # noinspection PyTypeChecker
             json.dump({'v': 42, 'tag': 'happy'}, f)
 
-        meta = await P2PRelayPushDataObject.perform(
+        meta = P2PRelayPushDataObject.perform(
             **_relay_push_kwargs(p2p_server, p2p_client.keystore, target_node.identity.id, content_path)
         )
         assert meta is not None
         assert meta.obj_id is not None
 
         # the object should live on the TARGET — the custodian only relayed
-        target_meta = await target_node.dor.get_meta(meta.obj_id)
+        target_meta = target_node.dor.get_meta(meta.obj_id)
         assert target_meta is not None
         assert target_meta.obj_id == meta.obj_id
 
-        custodian_meta = await p2p_server.dor.get_meta(meta.obj_id)
+        custodian_meta = p2p_server.dor.get_meta(meta.obj_id)
         assert custodian_meta is None, "custodian should not retain a copy when relaying"
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_relay_push_target_unknown(p2p_server, p2p_client):
+def test_p2p_relay_push_target_unknown(p2p_server, p2p_client):
     """Relay-push with a target_iid the custodian doesn't know about returns a clean error."""
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'payload.json')
@@ -370,7 +361,7 @@ async def test_p2p_relay_push_target_unknown(p2p_server, p2p_client):
             json.dump({'v': 1}, f)
 
         try:
-            await P2PRelayPushDataObject.perform(
+            P2PRelayPushDataObject.perform(
                 **_relay_push_kwargs(
                     p2p_server, p2p_client.keystore,
                     target_iid='not-a-real-iid-' + 'x' * 50,
@@ -383,15 +374,14 @@ async def test_p2p_relay_push_target_unknown(p2p_server, p2p_client):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context):
+def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context):
     """Relay-push to a known target that lacks DOR returns a clean error (no 5s timeout)."""
     no_dor_keystore = Keystore.new(f"relay-target-no-dor-{get_timestamp_now()}")
     no_dor_target: Node = test_context.get_node(
         no_dor_keystore, enable_rest=False, dor_plugin_class=None, rti_plugin_class=None
     )
-    await P2PJoinNetwork(no_dor_target).perform(p2p_server.info)
-    await asyncio.sleep(1)
+    P2PJoinNetwork(no_dor_target).perform(p2p_server.info)
+    time.sleep(1)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'payload.json')
@@ -400,7 +390,7 @@ async def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context
             json.dump({'v': 2}, f)
 
         try:
-            await P2PRelayPushDataObject.perform(
+            P2PRelayPushDataObject.perform(
                 **_relay_push_kwargs(
                     p2p_server, p2p_client.keystore, no_dor_target.identity.id, content_path
                 )
@@ -411,11 +401,10 @@ async def test_p2p_relay_push_target_no_dor(p2p_server, p2p_client, test_context
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_p2p_relay_push_target_is_custodian(p2p_server, p2p_client):
+def test_p2p_relay_push_target_is_custodian(p2p_server, p2p_client):
     """Relay-push where target == custodian: handler stores via the local DOR.add path."""
     # custodian needs to know about the runner identity
-    await p2p_server.db.update_identity(p2p_client.identity)
+    p2p_server.db.update_identity(p2p_client.identity)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         content_path = os.path.join(temp_dir, 'payload.json')
@@ -423,7 +412,7 @@ async def test_p2p_relay_push_target_is_custodian(p2p_server, p2p_client):
             # noinspection PyTypeChecker
             json.dump({'v': 99, 'tag': 'self-relay'}, f)
 
-        meta = await P2PRelayPushDataObject.perform(
+        meta = P2PRelayPushDataObject.perform(
             **_relay_push_kwargs(
                 p2p_server, p2p_client.keystore, p2p_server.identity.id, content_path
             )
@@ -431,6 +420,6 @@ async def test_p2p_relay_push_target_is_custodian(p2p_server, p2p_client):
         assert meta is not None
         assert meta.obj_id is not None
 
-        custodian_meta = await p2p_server.dor.get_meta(meta.obj_id)
+        custodian_meta = p2p_server.dor.get_meta(meta.obj_id)
         assert custodian_meta is not None
         assert custodian_meta.obj_id == meta.obj_id

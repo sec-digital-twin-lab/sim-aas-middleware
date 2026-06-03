@@ -99,7 +99,7 @@ class _InterfaceProxy:
 
 
 class _NamespaceProxy:
-    """Proxy for SyncNamespace in the worker process.
+    """Proxy for a Namespace in the worker process.
 
     Simple properties (id, name, custodian_address, keystore) are served
     from values inherited via fork or sent in the run command.

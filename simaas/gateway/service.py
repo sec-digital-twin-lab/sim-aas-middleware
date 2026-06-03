@@ -77,7 +77,7 @@ def _handle_error(e: Exception):
 # --- Data Endpoints ---
 
 @app.get("/gateway/v1/data")
-async def search_data_objects(
+def search_data_objects(
     patterns: str = None, data_type: str = None, data_format: str = None, c_hashes: str = None,
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> List[DataObject]:
@@ -95,7 +95,7 @@ async def search_data_objects(
 
 
 @app.post("/gateway/v1/data")
-async def upload_data_object(
+def upload_data_object(
     body: str = Form(...), attachment: UploadFile = File(...),
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> DataObject:
@@ -120,12 +120,12 @@ async def upload_data_object(
             'tags': parsed.get('tags')
         }
 
-        async with httpx.AsyncClient() as client:
+        with httpx.Client() as client:
             form_data = {
                 'body': (None, json.dumps(dor_body), 'application/json'),
-                'attachment': (attachment.filename, await attachment.read(), attachment.content_type)
+                'attachment': (attachment.filename, attachment.read(), attachment.content_type)
             }
-            response = await client.post(url, headers=headers, files=form_data)
+            response = client.post(url, headers=headers, files=form_data)
             response.raise_for_status()
             return DataObject.model_validate(response.json())
 
@@ -134,7 +134,7 @@ async def upload_data_object(
 
 
 @app.delete("/gateway/v1/data/{obj_id}")
-async def delete_data_object(
+def delete_data_object(
     obj_id: str, credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> DataObject:
     try:
@@ -144,7 +144,7 @@ async def delete_data_object(
 
 
 @app.get("/gateway/v1/data/{obj_id}/meta")
-async def get_data_object_meta(
+def get_data_object_meta(
     obj_id: str, _: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> DataObject:
     try:
@@ -157,7 +157,7 @@ async def get_data_object_meta(
 
 
 @app.get("/gateway/v1/data/{obj_id}/content")
-async def download_data_object_content(
+def download_data_object_content(
     obj_id: str, credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ):
     try:
@@ -168,11 +168,11 @@ async def download_data_object_content(
             'saasauth-signature': generate_authorisation_token(keystore, f"GET:{url}", None)
         }
 
-        async def forward_stream():
-            async with httpx.AsyncClient() as client:
-                async with client.stream("GET", url, headers=headers) as response:
+        def forward_stream():
+            with httpx.Client() as client:
+                with client.stream("GET", url, headers=headers) as response:
                     response.raise_for_status()
-                    async for chunk in response.aiter_bytes(chunk_size=1024 * 1024):
+                    for chunk in response.iter_bytes(chunk_size=1024 * 1024):
                         yield chunk
 
         return StreamingResponse(forward_stream(), media_type="application/octet-stream")
@@ -182,7 +182,7 @@ async def download_data_object_content(
 
 
 @app.put("/gateway/v1/data/{obj_id}/tags")
-async def update_data_object_tags(
+def update_data_object_tags(
     obj_id: str, tags: List[DataObject.Tag],
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> DataObject:
@@ -193,7 +193,7 @@ async def update_data_object_tags(
 
 
 @app.delete("/gateway/v1/data/{obj_id}/tags")
-async def remove_data_object_tags(
+def remove_data_object_tags(
     obj_id: str, keys: List[str],
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> DataObject:
@@ -206,7 +206,7 @@ async def remove_data_object_tags(
 # --- Job Endpoints ---
 
 @app.get("/gateway/v1/proc")
-async def list_available_processors(
+def list_available_processors(
     _: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> Dict[str, GitProcessorPointer]:
     try:
@@ -217,7 +217,7 @@ async def list_available_processors(
 
 
 @app.post("/gateway/v1/proc/{proc_id}")
-async def submit_job(
+def submit_job(
     proc_id: str, request: SubmitJobRequest,
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> Job:
@@ -271,7 +271,7 @@ async def submit_job(
 
 
 @app.get("/gateway/v1/job")
-async def list_jobs(
+def list_jobs(
     credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> List[Job]:
     try:
@@ -281,7 +281,7 @@ async def list_jobs(
 
 
 @app.get("/gateway/v1/job/{job_id}")
-async def get_job_status(
+def get_job_status(
     job_id: str, credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> JobStatus:
     try:
@@ -291,7 +291,7 @@ async def get_job_status(
 
 
 @app.delete("/gateway/v1/job/{job_id}")
-async def cancel_job(
+def cancel_job(
     job_id: str, credentials: Tuple[str, User] = Depends(DatabaseWrapper.verify_key)
 ) -> JobStatus:
     try:
