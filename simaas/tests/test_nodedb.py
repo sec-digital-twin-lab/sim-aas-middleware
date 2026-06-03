@@ -1,6 +1,4 @@
 """Integration tests for the Node Database (NodeDB) service."""
-
-import asyncio
 import pytest
 import os
 import logging
@@ -9,7 +7,6 @@ import time
 
 from typing import List, Dict, Optional
 
-from simaas.core.async_helpers import run_coro_safely
 
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
@@ -161,18 +158,16 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         node0 = DefaultNode(
             keystores[0], os.path.join(tempdir, 'node0'), enable_db=True,
             dor_plugin_class=None, rti_plugin_class=None)
-        run_coro_safely(node0.startup(p2p_address, rest_address=None))
-        time.sleep(1)
+        node0.startup(p2p_address, rest_address=None)
 
         # at this point node0 should only know about itself
-        network: List[NodeInfo] = run_coro_safely(node0.db.get_network())
+        network: List[NodeInfo] = node0.db.get_network()
         network: List[str] = [item.identity.id for item in network]
         assert len(network) == 1
         assert node0.identity.id in network
 
         # perform the join
-        run_coro_safely(node0.join_network(module_node.rest.address()))
-        time.sleep(1)
+        node0.join_network(module_node.rest.address())
 
         # the module node should know of n+1 nodes now
         network: List[NodeInfo] = module_nodedb_proxy.get_network()
@@ -184,7 +179,6 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         # shutdown the extra node silently (i.e., not leaving the network) - this emulates what happens
         # when a node suddenly crashes for example.
         node0.shutdown()
-        time.sleep(1)
 
         # the module node should still know n+1 nodes
         network: List[NodeInfo] = module_nodedb_proxy.get_network()
@@ -198,11 +192,10 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
             keystores[1], os.path.join(tempdir, 'node1'), enable_db=True,
             dor_plugin_class=None, rti_plugin_class=None
         )
-        run_coro_safely(node1.startup(p2p_address, rest_address=None))
-        time.sleep(1)
+        node1.startup(p2p_address, rest_address=None)
 
         # at this point node1 should only know about itself
-        network: List[NodeInfo] = run_coro_safely(node1.db.get_network())
+        network: List[NodeInfo] = node1.db.get_network()
         network: List[str] = [item.identity.id for item in network]
         assert len(network) == 1
         assert module_node.identity.id not in network
@@ -210,8 +203,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         assert node1.identity.id in network
 
         # perform the join
-        run_coro_safely(node1.join_network(module_node.rest.address()))
-        time.sleep(1)
+        node1.join_network(module_node.rest.address())
 
         # the module node should now still only know of n+1 nodes now (the first node should be replaced)
         network: List[NodeInfo] = module_nodedb_proxy.get_network()
@@ -221,7 +213,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
         assert node0.identity.id not in network
         assert node1.identity.id in network
 
-        run_coro_safely(node1.leave_network())
+        node1.leave_network()
         node1.shutdown()
         time.sleep(1)
 
@@ -235,8 +227,7 @@ def test_different_address(test_context, module_node, module_nodedb_proxy):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_join_leave_protocol():
+def test_join_leave_protocol():
     """Test network join and leave protocols."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
@@ -248,24 +239,24 @@ async def test_join_leave_protocol():
             )
             p2p_address = PortMaster.generate_p2p_address()
             rest_address = PortMaster.generate_rest_address()
-            await node.startup(p2p_address, rest_address=rest_address)
+            node.startup(p2p_address, rest_address=rest_address)
             nodes.append(node)
 
-        await asyncio.sleep(1)
+        time.sleep(1)
 
         # each node should know about 1 identity: its own
         for node in nodes:
-            identities: List[Identity] = await node.db.get_identities()
+            identities: List[Identity] = node.db.get_identities()
             assert len(identities) == 1
             assert identities[0].id == node.identity.id
 
         # tell node 1 to join the network with node 0
-        await nodes[1].join_network(nodes[0].rest.address())
-        await asyncio.sleep(1)
+        nodes[1].join_network(nodes[0].rest.address())
+        time.sleep(1)
 
         # nodes 0 and 1 should know about each other and node 2 only about itself
         for node in nodes:
-            identities = await node.db.get_identities()
+            identities = node.db.get_identities()
             if node == nodes[0] or node == nodes[1]:
                 assert len(identities) == 2
                 assert identities[0].id == nodes[0].identity.id or nodes[1].identity.id
@@ -276,28 +267,28 @@ async def test_join_leave_protocol():
                 assert identities[0].id == nodes[2].identity.id
 
         # tell node 2 to join the network with node 0
-        await nodes[2].join_network(nodes[0].rest.address())
-        await asyncio.sleep(1)
+        nodes[2].join_network(nodes[0].rest.address())
+        time.sleep(1)
 
         # all nodes should now know about each other
         for node in nodes:
-            identities = await node.db.get_identities()
+            identities = node.db.get_identities()
             assert len(identities) == 3
 
-            network = await node.db.get_network()
+            network = node.db.get_network()
             assert len(network) == 3
 
         # tell node 2 to leave the network
-        await nodes[2].leave_network()
-        await asyncio.sleep(1)
+        nodes[2].leave_network()
+        time.sleep(1)
 
         # all nodes should still know about each other's identities BUT the network for nodes 0 and 1 is now only
         # of size 2 while node 2 still knows about everyone.
         for node in nodes:
-            identities = await node.db.get_identities()
+            identities = node.db.get_identities()
             assert len(identities) == 3
 
-            network = await node.db.get_network()
+            network = node.db.get_network()
             if node == nodes[0] or node == nodes[1]:
                 assert len(network) == 2
 
@@ -307,8 +298,7 @@ async def test_join_leave_protocol():
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_update_identity():
+def test_update_identity():
     """Test identity update propagation across network."""
     with tempfile.TemporaryDirectory() as tempdir:
         nodes: List[Node] = []
@@ -320,46 +310,46 @@ async def test_update_identity():
             )
             p2p_address = PortMaster.generate_p2p_address()
             rest_address = PortMaster.generate_rest_address()
-            await node.startup(p2p_address, rest_address=rest_address)
-            await asyncio.sleep(1)
+            node.startup(p2p_address, rest_address=rest_address)
+            time.sleep(1)
 
             nodes.append(node)
 
             if i > 0:
-                await node.join_network(nodes[0].rest.address())
+                node.join_network(nodes[0].rest.address())
 
         # all nodes should now know about each other
         for node in nodes:
-            identities = await node.db.get_identities()
+            identities = node.db.get_identities()
             assert len(identities) == 3
 
-            network = await node.db.get_network()
+            network = node.db.get_network()
             assert len(network) == 3
 
         # get the starting nonce
         node0_id = nodes[0].identity.id
-        nonce0_by0_before = (await nodes[0].db.get_identity(node0_id)).nonce
-        nonce0_by1_before = (await nodes[1].db.get_identity(node0_id)).nonce
-        nonce0_by2_before = (await nodes[2].db.get_identity(node0_id)).nonce
+        nonce0_by0_before = (nodes[0].db.get_identity(node0_id)).nonce
+        nonce0_by1_before = (nodes[1].db.get_identity(node0_id)).nonce
+        nonce0_by2_before = (nodes[2].db.get_identity(node0_id)).nonce
 
         # update id of node0 but don't propagate
-        await nodes[0].update_identity(name='bob', propagate=False)
-        await asyncio.sleep(1)
+        nodes[0].update_identity(name='bob', propagate=False)
+        time.sleep(1)
 
-        nonce0_by0_after = (await nodes[0].db.get_identity(node0_id)).nonce
-        nonce0_by1_after = (await nodes[1].db.get_identity(node0_id)).nonce
-        nonce0_by2_after = (await nodes[2].db.get_identity(node0_id)).nonce
+        nonce0_by0_after = (nodes[0].db.get_identity(node0_id)).nonce
+        nonce0_by1_after = (nodes[1].db.get_identity(node0_id)).nonce
+        nonce0_by2_after = (nodes[2].db.get_identity(node0_id)).nonce
         assert nonce0_by0_after == nonce0_by0_before + 1
         assert nonce0_by1_before == nonce0_by1_after
         assert nonce0_by2_before == nonce0_by2_after
 
         # update id of node0
-        await nodes[0].update_identity(name='jane', propagate=True)
-        await asyncio.sleep(1)
+        nodes[0].update_identity(name='jane', propagate=True)
+        time.sleep(1)
 
-        nonce0_by0_after = (await nodes[0].db.get_identity(node0_id)).nonce
-        nonce0_by1_after = (await nodes[1].db.get_identity(node0_id)).nonce
-        nonce0_by2_after = (await nodes[2].db.get_identity(node0_id)).nonce
+        nonce0_by0_after = (nodes[0].db.get_identity(node0_id)).nonce
+        nonce0_by1_after = (nodes[1].db.get_identity(node0_id)).nonce
+        nonce0_by2_after = (nodes[2].db.get_identity(node0_id)).nonce
         assert nonce0_by0_after == nonce0_by0_before + 2
         assert nonce0_by1_after == nonce0_by1_before + 2
         assert nonce0_by2_after == nonce0_by2_before + 2
@@ -373,7 +363,7 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
     last_seen = identity.last_seen
 
     # update the identity
-    run_coro_safely(module_node.update_identity(name='new name'))
+    module_node.update_identity(name='new name')
 
     # get the identity last seen
     identity: Identity = module_nodedb_proxy.get_identity(module_node.identity.id)
@@ -381,8 +371,7 @@ def test_touch_data_object(module_node, module_nodedb_proxy):
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_update(test_context):
+def test_namespace_update(test_context):
     """Test namespace creation and propagation across network."""
     namespace = 'my_namespace'
 
@@ -395,35 +384,34 @@ async def test_namespace_update(test_context):
 
     # initially the namespace doesn't exist -> no nodes knows about it
     for node in nodes:
-        assert await node.db.get_namespace(namespace) is None
+        assert node.db.get_namespace(namespace) is None
 
     # update the namespace on node0
-    await nodes[0].db.update_namespace_budget(namespace, ResourceDescriptor(vcpus=2, memory=2048))
+    nodes[0].db.update_namespace_budget(namespace, ResourceDescriptor(vcpus=2, memory=2048))
 
     # node0 should know about it while the others don't
-    assert await nodes[0].db.get_namespace(namespace) is not None
+    assert nodes[0].db.get_namespace(namespace) is not None
     for node in nodes[1:]:
-        assert await node.db.get_namespace(namespace) is None
+        assert node.db.get_namespace(namespace) is None
 
     # node1-2 joins the network and should then also know about the namespace
-    await nodes[1].join_network(nodes[0].rest.address())
-    await nodes[2].join_network(nodes[0].rest.address())
-    await asyncio.sleep(0.5)  # Allow time for P2P propagation
-    assert await nodes[1].db.get_namespace(namespace) is not None
-    assert await nodes[2].db.get_namespace(namespace) is not None
+    nodes[1].join_network(nodes[0].rest.address())
+    nodes[2].join_network(nodes[0].rest.address())
+    time.sleep(0.5)  # Allow time for P2P propagation
+    assert nodes[1].db.get_namespace(namespace) is not None
+    assert nodes[2].db.get_namespace(namespace) is not None
 
     # update the namespace on node1 -> all nodes should know about the new budget
-    await nodes[1].db.update_namespace_budget(namespace, ResourceDescriptor(vcpus=4, memory=4096))
+    nodes[1].db.update_namespace_budget(namespace, ResourceDescriptor(vcpus=4, memory=4096))
     for node in nodes:
-        ns_info = await node.db.get_namespace(namespace)
+        ns_info = node.db.get_namespace(namespace)
         assert ns_info is not None
         assert ns_info.budget.vcpus == 4
         assert ns_info.budget.memory == 4096
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_reserve_cancel(test_context):
+def test_namespace_reserve_cancel(test_context):
     """Test namespace resource reservation and cancellation."""
     namespace = 'my_namespace'
     budget = ResourceDescriptor(vcpus=2, memory=2048)
@@ -437,41 +425,41 @@ async def test_namespace_reserve_cancel(test_context):
 
     # make sure nodes have joined the same network
     for node in nodes[1:]:
-        await node.join_network(nodes[0].rest.address())
+        node.join_network(nodes[0].rest.address())
 
     # create the namespace
-    await nodes[0].db.update_namespace_budget(namespace, budget)
+    nodes[0].db.update_namespace_budget(namespace, budget)
 
     # all nodes should know about the namespace now
     for node in nodes:
-        assert await node.db.get_namespace(namespace) is not None
+        assert node.db.get_namespace(namespace) is not None
 
     # make reservation with too much CPUs
     with pytest.raises(OperationError) as e:
-        await nodes[0].db.reserve_namespace_resources(namespace, "job000", ResourceDescriptor(vcpus=4, memory=2048))
+        nodes[0].db.reserve_namespace_resources(namespace, "job000", ResourceDescriptor(vcpus=4, memory=2048))
     assert f"{namespace}:job000 failed" in e.value.reason
 
     # make reservation with too much memory
     with pytest.raises(OperationError) as e:
-        await nodes[0].db.reserve_namespace_resources(namespace, "job001", ResourceDescriptor(vcpus=2, memory=4096))
+        nodes[0].db.reserve_namespace_resources(namespace, "job001", ResourceDescriptor(vcpus=2, memory=4096))
     assert f"{namespace}:job001 failed" in e.value.reason
 
     # make reservation that succeeds
     try:
-        await nodes[0].db.reserve_namespace_resources(namespace, "job002", ResourceDescriptor(vcpus=2, memory=2048))
+        nodes[0].db.reserve_namespace_resources(namespace, "job002", ResourceDescriptor(vcpus=2, memory=2048))
     except OperationError:
         assert False
 
     # there should be one reservation
     for node in nodes:
-        assert len((await node.db.get_namespace(namespace)).reservations) == 1
+        assert len((node.db.get_namespace(namespace)).reservations) == 1
 
     # cancel reservation that doesn't exist -> there should still be one reservation
-    assert await nodes[0].db.cancel_namespace_reservation(namespace, "job000") is False
+    assert nodes[0].db.cancel_namespace_reservation(namespace, "job000") is False
     for node in nodes:
-        assert len((await node.db.get_namespace(namespace)).reservations) == 1
+        assert len((node.db.get_namespace(namespace)).reservations) == 1
 
     # cancel reservation that does exist -> there should still be no reservation
-    assert await nodes[0].db.cancel_namespace_reservation(namespace, "job002") is True
+    assert nodes[0].db.cancel_namespace_reservation(namespace, "job002") is True
     for node in nodes:
-        assert len((await node.db.get_namespace(namespace)).reservations) == 0
+        assert len((node.db.get_namespace(namespace)).reservations) == 0

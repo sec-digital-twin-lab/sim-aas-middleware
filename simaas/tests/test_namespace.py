@@ -1,6 +1,5 @@
 """Integration tests for the Namespace service."""
-
-import asyncio
+import time
 import json
 import logging
 import os
@@ -10,7 +9,6 @@ from typing import Optional, List
 
 import pytest
 
-from simaas.core.async_helpers import run_coro_safely
 
 from simaas.rti.schemas import Task, Job, JobStatus, Processor
 from simaas.dor.schemas import DataObject, DataObjectProvenance
@@ -56,7 +54,7 @@ def p2p_server(test_context) -> Node:
 def known_user(p2p_server) -> Keystore:
     """Create a keystore for a user known to the p2p_server."""
     keystore = Keystore.new('unknown')
-    run_coro_safely(p2p_server.db.update_identity(keystore.identity))
+    p2p_server.db.update_identity(keystore.identity)
     return keystore
 
 
@@ -71,50 +69,48 @@ def unknown_user(p2p_server) -> Keystore:
 # ==============================================================================
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_unknown_user(p2p_server, unknown_user):
+def test_namespace_unknown_user(p2p_server, unknown_user):
     """Test that unknown users cannot access namespace services."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), unknown_user)
 
     with pytest.raises(OperationError) as e:
-        await namespace.dor.statistics()
+        namespace.dor.statistics()
     assert 'Authentication failed' in e.value.reason or 'Identity unknown' in str(e.value.details)
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_user, random_content):
+def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unknown_user, random_content):
     """Test DOR operations through namespace interface."""
     namespace = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), known_user)
 
     # unknown owner
     with pytest.raises(OperationError) as e:
-        await namespace.dor.add(
+        namespace.dor.add(
             random_content, 'JSON', 'json', unknown_user.identity.id, creators_iid=[known_user.identity.id]
         )
     assert 'not found' in e.value.reason
 
     # unknown creator
     with pytest.raises(OperationError) as e:
-        await namespace.dor.add(
+        namespace.dor.add(
             random_content, 'JSON', 'json', known_user.identity.id, creators_iid=[unknown_user.identity.id]
         )
     assert 'not found' in e.value.reason
 
     # successful add
-    meta: DataObject = await namespace.dor.add(
+    meta: DataObject = namespace.dor.add(
         random_content, 'JSON', 'json', known_user.identity.id, creators_iid=[known_user.identity.id]
     )
     assert meta is not None
 
     # successful search
-    reply: List[DataObject] = await namespace.dor.search(
+    reply: List[DataObject] = namespace.dor.search(
         data_type='JSON', data_format='sdfsdf'
     )
     assert len(reply) == 0
 
     # successful search
-    reply: List[DataObject] = await namespace.dor.search(
+    reply: List[DataObject] = namespace.dor.search(
         data_type='JSON', data_format='json'
     )
     assert len(reply) == 1
@@ -123,24 +119,23 @@ async def test_namespace_dor_add_search_get_remove(p2p_server, known_user, unkno
     c_hash = reply[0].c_hash
 
     # successful get meta
-    meta: Optional[DataObject] = await namespace.dor.get_meta(obj_id)
+    meta: Optional[DataObject] = namespace.dor.get_meta(obj_id)
     assert meta is not None
     assert meta.obj_id == obj_id
 
     # successful get provenance
-    result: Optional[DataObjectProvenance] = await namespace.dor.get_provenance(c_hash)
+    result: Optional[DataObjectProvenance] = namespace.dor.get_provenance(c_hash)
     assert result is not None
 
-    result: Optional[DataObjectProvenance] = await namespace.dor.get_provenance(c_hash)
+    result: Optional[DataObjectProvenance] = namespace.dor.get_provenance(c_hash)
     assert result is not None
 
-    result: Optional[DataObject] = await namespace.dor.remove(obj_id)
+    result: Optional[DataObject] = namespace.dor.remove(obj_id)
     assert result is not None
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, random_content):
+def test_namespace_dor_access_control(p2p_server, known_user, unknown_user, random_content):
     """Test DOR access control operations through namespace interface."""
     with tempfile.TemporaryDirectory() as temp_dir:
         other_user = p2p_server.keystore
@@ -148,64 +143,63 @@ async def test_namespace_dor_access_control(p2p_server, known_user, unknown_user
         namespace1 = DefaultNamespace('test', p2p_server.identity, p2p_server.p2p.address(), other_user)
 
         # successful add
-        meta: DataObject = await namespace0.dor.add(
+        meta: DataObject = namespace0.dor.add(
             random_content, 'JSON', 'json', known_user.identity.id, access_restricted=True
         )
         assert meta is not None
 
         # successful get content
         content_path = os.path.join(temp_dir, f"{meta.obj_id}.content")
-        await namespace0.dor.get_content(meta.obj_id, content_path)
+        namespace0.dor.get_content(meta.obj_id, content_path)
         assert os.path.isfile(content_path)
 
         # no access
         with pytest.raises(OperationError) as e:
-            await namespace1.dor.get_content(meta.obj_id, content_path)
+            namespace1.dor.get_content(meta.obj_id, content_path)
         assert "Authorisation denied" in e.value.reason or "access" in e.value.reason
 
         # not owner
         with pytest.raises(OperationError) as e:
-            await namespace1.dor.grant_access(meta.obj_id, other_user.identity.id)
+            namespace1.dor.grant_access(meta.obj_id, other_user.identity.id)
         assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful grant access
-        meta = await namespace0.dor.grant_access(meta.obj_id, other_user.identity.id)
+        meta = namespace0.dor.grant_access(meta.obj_id, other_user.identity.id)
         assert other_user.identity.id in meta.access
 
         # successful get content
-        await namespace1.dor.get_content(meta.obj_id, content_path)
+        namespace1.dor.get_content(meta.obj_id, content_path)
         assert os.path.isfile(content_path)
 
         # successful revoke access
-        meta = await namespace0.dor.revoke_access(meta.obj_id, other_user.identity.id)
+        meta = namespace0.dor.revoke_access(meta.obj_id, other_user.identity.id)
         assert other_user.identity.id not in meta.access
 
         # no access
         with pytest.raises(OperationError) as e:
-            await namespace1.dor.get_content(meta.obj_id, content_path)
+            namespace1.dor.get_content(meta.obj_id, content_path)
         assert "Authorisation denied" in e.value.reason or "access" in e.value.reason
 
         # not owner
         with pytest.raises(OperationError) as e:
-            await namespace1.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
+            namespace1.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
         assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful transfer ownership
-        meta = await namespace0.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
+        meta = namespace0.dor.transfer_ownership(meta.obj_id, other_user.identity.id)
         assert meta.owner_iid == other_user.identity.id
 
         # not owner
         with pytest.raises(OperationError) as e:
-            await namespace0.dor.remove(meta.obj_id)
+            namespace0.dor.remove(meta.obj_id)
         assert "Authorisation denied" in e.value.reason or "owner" in e.value.reason
 
         # successful remove
-        await namespace1.dor.remove(meta.obj_id)
+        namespace1.dor.remove(meta.obj_id)
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_rti_job_procs(
+def test_namespace_rti_job_procs(
         docker_available, session_node, known_user, deployed_abc_processor
 ):
     """Test RTI processor operations through namespace interface."""
@@ -213,21 +207,20 @@ async def test_namespace_rti_job_procs(
         pytest.skip("Docker is not available")
 
 
-    await session_node.db.update_identity(known_user.identity)
+    session_node.db.update_identity(known_user.identity)
     owner = session_node.keystore
 
     namespace = DefaultNamespace('test', session_node.identity, session_node.p2p.address(), owner)
 
-    procs: List[Processor] = await namespace.rti.get_all_procs()
+    procs: List[Processor] = namespace.rti.get_all_procs()
     assert len(procs) > 0
 
-    proc: Optional[Processor] = await namespace.rti.get_proc(procs[0].id)
+    proc: Optional[Processor] = namespace.rti.get_proc(procs[0].id)
     assert proc is not None
 
 
 @pytest.mark.integration
-@pytest.mark.asyncio
-async def test_namespace_rti_job_submit_status(
+def test_namespace_rti_job_submit_status(
         docker_available, session_node, known_user, deployed_abc_processor
 ):
     """Test RTI job submission and status retrieval through namespace interface."""
@@ -235,7 +228,7 @@ async def test_namespace_rti_job_submit_status(
         pytest.skip("Docker is not available")
 
 
-    await session_node.db.update_identity(known_user.identity)
+    session_node.db.update_identity(known_user.identity)
     proc_id = deployed_abc_processor.obj_id
     wrong_user = known_user
     owner = session_node.keystore
@@ -262,18 +255,18 @@ async def test_namespace_rti_job_submit_status(
     )
 
     # submit the job
-    result = await namespace0.rti.submit([task])
+    result = namespace0.rti.submit([task])
     job: Job = result[0]
 
     # not owner of job
     with pytest.raises(OperationError) as e:
-        await namespace1.rti.get_job_status(job.id)
+        namespace1.rti.get_job_status(job.id)
     assert "Authorisation denied" in e.value.reason or "job_owner or node_owner" in e.value.reason
 
     while True:
         # get information about the running job
         try:
-            status: JobStatus = await namespace0.rti.get_job_status(job.id)
+            status: JobStatus = namespace0.rti.get_job_status(job.id)
 
             from pprint import pprint
             pprint(status.model_dump())
@@ -285,7 +278,7 @@ async def test_namespace_rti_job_submit_status(
         except Exception:
             pass
 
-        await asyncio.sleep(1)
+        time.sleep(1)
 
     # check if we have an object id for output object 'c'
     assert ('c' in status.output)
@@ -293,7 +286,7 @@ async def test_namespace_rti_job_submit_status(
     with tempfile.TemporaryDirectory() as temp_dir:
         # get the contents of the output data object
         download_path = os.path.join(temp_dir, 'c.json')
-        await namespace0.dor.get_content(status.output['c'].obj_id, download_path)
+        namespace0.dor.get_content(status.output['c'].obj_id, download_path)
         assert os.path.isfile(download_path)
 
         with open(download_path, 'r') as f:

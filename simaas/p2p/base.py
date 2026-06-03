@@ -1,17 +1,17 @@
 import abc
 import json
 import os
-import random
+import socket
+import ssl
+import struct
+import tempfile
 import traceback
-import zmq
-
 from typing import Optional, Tuple
-from pydantic import BaseModel
-from zmq import Again
-from zmq.asyncio import Socket, Context
 
-from simaas.core.logging import get_logger
+from pydantic import BaseModel
+
 from simaas.core.errors import NetworkError
+from simaas.core.logging import get_logger
 
 log = get_logger('simaas.p2p', 'p2p')
 
@@ -25,9 +25,7 @@ class P2PMessage(BaseModel):
 
 class P2PAddress(BaseModel):
     address: str
-    curve_secret_key: Optional[bytes]
-    curve_public_key: Optional[bytes]
-    curve_server_key: Optional[str]
+    peer_tls_cert: str
 
 
 class P2PProtocol(abc.ABC):
@@ -38,7 +36,7 @@ class P2PProtocol(abc.ABC):
         return self._protocol
 
     @abc.abstractmethod
-    async def handle(
+    def handle(
             self, request: BaseModel, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         ...
@@ -52,202 +50,202 @@ class P2PProtocol(abc.ABC):
         ...
 
 
-# Minimum assumed throughput for timeout calculation (bytes per second).
-# Conservative floor so that large-attachment transfers get adequate time.
+# Minimum assumed throughput for size-aware timeout (bytes per second).
 _THROUGHPUT_FLOOR = 10 * 1024 * 1024
+_CHUNK_SIZE = 1024 * 1024
 
 
-async def p2p_request(
+def _parse_tcp_address(address: str) -> Tuple[str, int]:
+    if address.startswith('tcp://'):
+        address = address[len('tcp://'):]
+    host, port = address.rsplit(':', 1)
+    return host, int(port)
+
+
+def _write_pem_pair(cert_pem: bytes, key_pem: bytes) -> Tuple[str, str]:
+    cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+    kf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
+    cf.write(cert_pem); cf.close()
+    kf.write(key_pem); kf.close()
+    return cf.name, kf.name
+
+
+def _unlink_silently(*paths: str) -> None:
+    for p in paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+
+
+def build_client_ssl_context(peer_cert_pem: str) -> ssl.SSLContext:
+    """Client context pinning the peer's self-signed cert as the only trusted CA."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_verify_locations(cadata=peer_cert_pem)
+    return ctx
+
+
+def build_server_ssl_context(cert_pem: bytes, key_pem: bytes) -> ssl.SSLContext:
+    """Server context presenting its own self-signed cert. Clients are not authenticated at TLS level."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    cert_path, key_path = _write_pem_pair(cert_pem, key_pem)
+    try:
+        ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+    finally:
+        _unlink_silently(cert_path, key_path)
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _send_frame(sock: socket.socket, message: P2PMessage, attachment_path: Optional[str] = None) -> None:
+    header = json.dumps(message.model_dump()).encode('utf-8')
+    sock.sendall(struct.pack('>I', len(header)) + header)
+    if attachment_path:
+        with open(attachment_path, 'rb') as f:
+            while True:
+                chunk = f.read(_CHUNK_SIZE)
+                if not chunk:
+                    break
+                sock.sendall(chunk)
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = bytearray(n)
+    view = memoryview(buf)
+    received = 0
+    while received < n:
+        got = sock.recv_into(view[received:])
+        if got == 0:
+            raise IOError(f'connection closed; expected {n} bytes, got {received}')
+        received += got
+    return bytes(buf)
+
+
+def _recv_header(sock: socket.socket) -> P2PMessage:
+    raw_len = _recv_exact(sock, 4)
+    (header_len,) = struct.unpack('>I', raw_len)
+    header = _recv_exact(sock, header_len)
+    return P2PMessage.model_validate_json(header)
+
+
+def _recv_attachment(sock: socket.socket, size: int, download_path: Optional[str]) -> Optional[str]:
+    if size <= 0:
+        return None
+    if download_path is None:
+        download_path = os.devnull
+    remaining = size
+    with open(download_path, 'wb') as f:
+        while remaining > 0:
+            chunk = sock.recv(min(_CHUNK_SIZE, remaining))
+            if not chunk:
+                raise IOError('attachment truncated')
+            f.write(chunk)
+            remaining -= len(chunk)
+    return download_path
+
+
+def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
         attachment_path: Optional[str] = None, download_path: Optional[str] = None,
-        timeout: Optional[int] = None, chunk_size: int = 1024 * 1024
+        timeout: Optional[int] = None,
 ) -> Tuple[Optional[BaseModel], Optional[str]]:
-    # compute size-aware timeout for large attachments
     attachment_size = os.path.getsize(attachment_path) if attachment_path else 0
-    base_timeout = timeout if timeout is not None else 5000
-    effective_timeout = max(base_timeout, int(attachment_size / _THROUGHPUT_FLOOR * 1000))
+    base_timeout_ms = timeout if timeout is not None else 5000
+    effective_timeout_s = max(base_timeout_ms, int(attachment_size / _THROUGHPUT_FLOOR * 1000)) / 1000.0
 
-    # create socket
-    context = Context.instance()
-    socket = context.socket(zmq.DEALER)
-    socket.setsockopt(zmq.LINGER, 0)
-    socket.setsockopt(zmq.RCVTIMEO, effective_timeout)
-    socket.setsockopt(zmq.SNDTIMEO, effective_timeout)
-    if peer.curve_secret_key and peer.curve_public_key and peer.curve_server_key:
-        socket.curve_secretkey = peer.curve_secret_key
-        socket.curve_publickey = peer.curve_public_key
-        socket.curve_serverkey = bytes.fromhex(peer.curve_server_key)
+    host, port = _parse_tcp_address(peer.address)
+    ssl_ctx = build_client_ssl_context(peer.peer_tls_cert)
 
-    # try to establish connection
+    raw_sock: Optional[socket.socket] = None
+    sock: Optional[ssl.SSLSocket] = None
     try:
-        socket.connect(peer.address)
+        try:
+            raw_sock = socket.create_connection((host, port), timeout=effective_timeout_s)
+            sock = ssl_ctx.wrap_socket(raw_sock, server_hostname='simaas-node')
+            sock.settimeout(effective_timeout_s)
+        except (socket.timeout, OSError, ssl.SSLError) as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise NetworkError(peer_address=peer.address, operation='connect',
+                               timeout_ms=int(effective_timeout_s * 1000), trace=trace)
 
-    except Again as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='connect', timeout_ms=effective_timeout, trace=trace)
-
-    except Exception as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='connect', trace=trace)
-
-    # try to send the request
-    try:
-        # build and send request message
-        rid = str(random.randint(1, 2 ** 32 - 1)).encode('utf-8')
-        request: P2PMessage = P2PMessage(
+        request = P2PMessage(
             protocol=protocol, type='request', content=content.model_dump(),
-            attachment_size=attachment_size
+            attachment_size=attachment_size,
         )
-        request: dict = request.model_dump()
-        request: str = json.dumps(request)
-        request: bytes = request.encode('utf-8')
-        await socket.send_multipart([rid, request])
+        try:
+            _send_frame(sock, request, attachment_path)
+        except (socket.timeout, OSError, ssl.SSLError) as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise NetworkError(peer_address=peer.address, operation='send',
+                               timeout_ms=int(effective_timeout_s * 1000), trace=trace)
 
-        # send the attachment (if any)
-        if attachment_path is not None:
-            with open(attachment_path, 'rb') as f:
-                total_sent = 0
-                while total_sent < attachment_size:
-                    chunk = f.read(chunk_size)
-                    if not chunk:
-                        break
+        try:
+            reply = _recv_header(sock)
+            if reply.type == 'error':
+                err_content = reply.content or {}
+                raise NetworkError(
+                    peer_address=peer.address, operation=protocol,
+                    reason=err_content.get('reason', 'peer reported an error'),
+                    **{k: v for k, v in err_content.items() if k != 'reason'},
+                )
+            reply_attachment = _recv_attachment(sock, reply.attachment_size, download_path)
+        except (socket.timeout, OSError, ssl.SSLError, IOError) as e:
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            raise NetworkError(peer_address=peer.address, operation='receive',
+                               timeout_ms=int(effective_timeout_s * 1000), trace=trace)
 
-                    await socket.send_multipart([rid, chunk])
-                    total_sent += len(chunk)
-
-    except Again as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='send', timeout_ms=effective_timeout, trace=trace)
-
-    except Exception as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='send', trace=trace)
-
-    # try to receive the reply
-    try:
-        # wait for reply and parse it
-        frames = await socket.recv_multipart()
-        rid, content = frames[:2]
-        reply: str = content.decode('utf-8')
-        reply: dict = json.loads(reply)
-        reply: P2PMessage = P2PMessage.model_validate(reply)
-
-        # did the peer report a protocol-level error (e.g. unsupported protocol)?
-        if reply.type == 'error':
-            socket.close()
-            err_content = reply.content or {}
-            raise NetworkError(
-                peer_address=peer.address,
-                operation=protocol,
-                reason=err_content.get('reason', 'peer reported an error'),
-                **{k: v for k, v in err_content.items() if k != 'reason'},
-            )
-
-        # receive the attachment (if any)
-        if reply.attachment_size > 0:
-            # what if we have an attachment but no download path? write to devnull
-            if download_path is None:
-                download_path = os.devnull
-
-            # receive the attachment in chunks
-            total_received = 0
-            while total_received < reply.attachment_size:
-                with open(download_path, 'ab') as f:
-                    frames = await socket.recv_multipart()
-                    rid, chunk = frames
-                    f.write(chunk)
-                    total_received += len(chunk)
-
-        # are we expecting a reply?
         if reply_type is not None and reply.content is not None:
-            reply: reply_type = reply_type.model_validate(reply.content)
-        else:
-            reply = None
+            return reply_type.model_validate(reply.content), reply_attachment
+        return None, reply_attachment
 
-        # close the socket
-        socket.close()
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        elif raw_sock is not None:
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
 
-        return reply, download_path
 
-    except Again as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='receive', timeout_ms=effective_timeout, trace=trace)
-
-    except Exception as e:
-        trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-        socket.close()
-        raise NetworkError(peer_address=peer.address, operation='receive', trace=trace)
-
-async def p2p_send_error(
-        socket: Socket, cid: bytes, rid: bytes, protocol_name: str, reason: str, **extra
-) -> None:
-    """Send a protocol-level error reply (used e.g. when the requested protocol is not registered).
-
-    Encoded as a ``P2PMessage`` with ``type='error'`` and ``content`` carrying ``reason`` plus any
-    extra fields. The client's ``p2p_request`` detects this and raises ``NetworkError``.
-    """
+def p2p_send_error(sock: socket.socket, protocol_name: str, reason: str, **extra) -> None:
     try:
-        reply: P2PMessage = P2PMessage(
+        reply = P2PMessage(
             protocol=protocol_name, type='error',
             content={'reason': reason, **extra},
             attachment_size=0,
         )
-        await socket.send_multipart([cid, rid, json.dumps(reply.model_dump()).encode('utf-8')])
+        _send_frame(sock, reply)
     except Exception as e:
         log.warning('respond', 'Failed to send P2P error reply', exc=e, protocol=protocol_name)
 
 
-async def p2p_respond(
-        socket: Socket, cid: bytes, rid: bytes, protocol: P2PProtocol, request: P2PMessage,
-        attachment_path: Optional[str] = None, download_path: Optional[str] = None, chunk_size: int = 1024 * 1024
-) -> None:
+def p2p_respond(sock: socket.socket, protocol: P2PProtocol, request: P2PMessage,
+                attachment_path: Optional[str] = None, download_path: Optional[str] = None) -> None:
     try:
-        # Handle the request - let application errors propagate with clear tracebacks
         request_type = protocol.request_type()
-        reply_content, reply_attachment_path = await protocol.handle(
-            request_type.model_validate(request.content), attachment_path, download_path
+        reply_content, reply_attachment_path = protocol.handle(
+            request_type.model_validate(request.content), attachment_path, download_path,
         )
-
-        # some casting for PyCharm
-        reply_content: Optional[BaseModel] = reply_content
-        reply_attachment_path: Optional[str] = reply_attachment_path
-        reply_attachment_size: int = os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
-
-        # prepare and send the reply message - wrap ZMQ ops for transport debugging
+        reply_attachment_size = os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
         try:
-            reply: P2PMessage = P2PMessage(
+            reply = P2PMessage(
                 protocol=protocol.name(), type='reply',
                 content=reply_content.model_dump() if reply_content else None,
-                attachment_size=reply_attachment_size
+                attachment_size=reply_attachment_size,
             )
-            reply: dict = reply.model_dump()
-            reply: str = json.dumps(reply)
-            reply: bytes = reply.encode('utf-8')
-            await socket.send_multipart([cid, rid, reply])
-
-            # if we have a reply attachment, send it in chunks
-            if reply_attachment_path is not None:
-                with open(reply_attachment_path, 'rb') as f:
-                    total_sent = 0
-                    while total_sent < reply_attachment_size:
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-
-                        await socket.send_multipart([cid, rid, chunk])
-                        total_sent += len(chunk)
-
+            _send_frame(sock, reply, reply_attachment_path)
         except Exception as e:
             trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
             log.error('respond', 'Unexpected P2P error', exc=e)
             raise NetworkError(operation='respond', trace=trace)
-
     finally:
-        if attachment_path:
-            if os.path.isfile(attachment_path):
-                os.remove(attachment_path)
+        if attachment_path and os.path.isfile(attachment_path):
+            os.remove(attachment_path)

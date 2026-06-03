@@ -12,7 +12,6 @@ import tempfile
 
 import pytest
 
-from simaas.core.async_helpers import run_coro_safely
 
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
@@ -63,9 +62,9 @@ def session_node(session_keystore):
         )
 
         # join the network
-        run_coro_safely(_node1.join_network(rest_address0))
+        _node1.join_network(rest_address0)
 
-        network = run_coro_safely(_node0.db.get_network())
+        network = _node0.db.get_network()
         assert len(network) == 2
 
         yield _node0

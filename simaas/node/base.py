@@ -1,5 +1,5 @@
+import time
 import abc
-import asyncio
 import threading
 from typing import Optional, Tuple
 
@@ -53,13 +53,12 @@ class Node(abc.ABC):
             strict_deployment=self.rti.strict_deployment if self.rti else None
         )
 
-    async def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
+    def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
                       bind_all_address: bool = False, wait_until_ready: bool = True) -> None:
         """
         Start the node's daemon services (P2P, REST).
 
-        This is an async method that manages thread lifecycle. To join a network after startup,
-        call `await node.join_network(boot_node_address)` separately.
+        To join a network after startup, call `node.join_network(boot_node_address)` separately.
         """
         log.info('startup', f'Sim-aaS Middleware {__version__}')
 
@@ -93,14 +92,14 @@ class Node(abc.ABC):
 
         if wait_until_ready:
             log.info('startup', 'Waiting until node is ready')
-            if not await self.p2p.wait_until_ready(timeout=10.0):
+            if not self.p2p.wait_until_ready(timeout=10.0):
                 raise OperationError(
                     operation='node_startup',
                     stage='p2p_ready',
                     cause='timeout',
                     hint='P2P service failed to become ready'
                 )
-            if self.rest and not await self.rest.wait_until_ready(timeout=10.0):
+            if self.rest and not self.rest.wait_until_ready(timeout=10.0):
                 raise OperationError(
                     operation='node_startup',
                     stage='rest_ready',
@@ -110,8 +109,8 @@ class Node(abc.ABC):
             log.info('startup', 'Node is ready')
 
         # update our node db
-        await self.db.update_identity(self.identity)
-        await self.db.update_network(NodeInfo(
+        self.db.update_identity(self.identity)
+        self.db.update_network(NodeInfo(
             identity=self.identity,
             last_seen=get_timestamp_now(),
             dor_service=self.dor.type() if self.dor else 'none',
@@ -126,10 +125,9 @@ class Node(abc.ABC):
         """
         Stop the node's daemon services (P2P, REST).
 
-        This is a sync method that manages thread lifecycle. Before calling shutdown,
-        you should call async cleanup methods:
-        - `await node.leave_network()` to inform peers
-        - `await node.shutdown_rti()` to undeploy processors
+        Before calling shutdown, you should call:
+        - `node.leave_network()` to inform peers
+        - `node.shutdown_rti()` to undeploy processors
         """
         log.info('shutdown', 'Stopping all services')
         if self.p2p:
@@ -138,9 +136,9 @@ class Node(abc.ABC):
         if self.rest:
             self.rest.stop_service()
 
-    async def shutdown_rti(self, timeout: int = 60) -> None:
+    def shutdown_rti(self, timeout: int = 60) -> None:
         """
-        Async cleanup of RTI service: undeploy all processors and wait for workers.
+        Cleanup of RTI service: undeploy all processors and wait for workers.
 
         Call this before shutdown() to cleanly undeploy processors.
         """
@@ -148,16 +146,16 @@ class Node(abc.ABC):
             return
 
         # if we have any procs deployed, undeploy them
-        for proc in await self.rti.get_all_procs():
+        for proc in self.rti.get_all_procs():
             proc_id: str = proc.id
-            await self.rti.undeploy(proc_id)
+            self.rti.undeploy(proc_id)
 
             # wait until proc is undeployed
             deadline = get_timestamp_now() + timeout * 1000
-            check: Optional[Processor] = await self.rti.get_proc(proc_id)
+            check: Optional[Processor] = self.rti.get_proc(proc_id)
             while get_timestamp_now() < deadline and check is not None:
-                await asyncio.sleep(1)
-                check = await self.rti.get_proc(proc_id)
+                time.sleep(1)
+                check = self.rti.get_proc(proc_id)
 
             # successful?
             if check is not None:
@@ -168,11 +166,11 @@ class Node(abc.ABC):
             if not self.rti.has_active_workers():
                 break
             log.info('shutdown', 'Waiting for active worker threads', identity=self.identity.id)
-            await asyncio.sleep(1)
+            time.sleep(1)
         else:
             log.warning('shutdown', 'Ignoring active worker threads still running', identity=self.identity.id)
 
-    async def join_network(self, boot_node_address: Tuple[str, int]) -> None:
+    def join_network(self, boot_node_address: Tuple[str, int]) -> None:
         log.info('network', 'Joining network via boot node', boot_node=str(boot_node_address))
 
         try:
@@ -186,39 +184,39 @@ class Node(abc.ABC):
 
         try:
             protocol = P2PJoinNetwork(self)
-            await protocol.perform(boot_node)
-            network = await self.db.get_network()
+            protocol.perform(boot_node)
+            network = self.db.get_network()
             log.info('network', 'Network joined', node_count=len(network))
         except NetworkError as e:
             log.error('network', 'Error during P2P network join', reason=e.reason)
 
-    async def leave_network(self, blocking: bool = False) -> None:
+    def leave_network(self, blocking: bool = False) -> None:
         try:
             protocol = P2PLeaveNetwork(self)
-            await protocol.perform(blocking=blocking)
+            protocol.perform(blocking=blocking)
         except NetworkError as e:
             log.error('network', 'Error during P2P network leave', reason=e.reason)
 
-    async def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
+    def update_identity(self, name: str = None, email: str = None, propagate: bool = True) -> Identity:
         with self._mutex:
             # perform update on the keystore and update our own node db
             identity = self._keystore.update_profile(name=name, email=email)
-            await self.db.update_identity(identity)
+            self.db.update_identity(identity)
 
             # propagate only if flag is set
             if propagate:
                 try:
                     protocol = P2PUpdateIdentity(self)
-                    network = await self.db.get_network()
-                    await protocol.broadcast(network)
+                    network = self.db.get_network()
+                    protocol.broadcast(network)
                 except NetworkError as e:
                     log.error('identity', 'Error during P2P identity update', reason=e.reason)
 
             return identity
 
-    async def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
+    def check_dor_ownership(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
-        meta = await self.dor.get_meta(obj_id)
+        meta = self.dor.get_meta(obj_id)
         if meta is None:
             raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
@@ -230,9 +228,9 @@ class Node(abc.ABC):
                 required_permission='owner'
             )
 
-    async def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
+    def check_dor_has_access(self, obj_id: str, identity: Identity) -> None:
         # get the meta information of the object
-        meta: DataObject = await self.dor.get_meta(obj_id)
+        meta: DataObject = self.dor.get_meta(obj_id)
         if meta is None:
             raise NotFoundError(resource_type='data_object', resource_id=obj_id)
 
@@ -244,18 +242,18 @@ class Node(abc.ABC):
                 required_permission='access'
             )
 
-    async def check_rti_is_deployed(self, proc_id: str) -> None:
-        if not await self.rti.get_proc(proc_id):
+    def check_rti_is_deployed(self, proc_id: str) -> None:
+        if not self.rti.get_proc(proc_id):
             raise NotFoundError(resource_type='processor', resource_id=proc_id)
 
-    async def check_rti_not_busy(self, proc_id: str) -> None:
-        proc: Processor = await self.rti.get_proc(proc_id)
+    def check_rti_not_busy(self, proc_id: str) -> None:
+        proc: Processor = self.rti.get_proc(proc_id)
         if proc.state in [Processor.State.BUSY_DEPLOY, Processor.State.BUSY_UNDEPLOY]:
             raise OperationError(operation='deploy', stage='check', cause='processor busy')
 
-    async def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
+    def check_rti_job_or_node_owner(self, job_id: str, identity: Identity) -> None:
         # get the job user (i.e., owner) and check if the caller user ids check out
-        job_owner_iid = await self.rti.get_job_owner_iid(job_id)
+        job_owner_iid = self.rti.get_job_owner_iid(job_id)
         if job_owner_iid != identity.id and identity.id != self.identity.id:
             raise AuthorisationError(
                 identity_id=identity.id,
@@ -263,9 +261,9 @@ class Node(abc.ABC):
                 required_permission='job_owner or node_owner'
             )
 
-    async def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
+    def check_rti_batch_or_node_owner(self, batch_id: str, identity: Identity) -> None:
         # get the batch status to determine the owner iid
-        batch_status: BatchStatus = await self.rti.get_batch_status(batch_id)
+        batch_status: BatchStatus = self.rti.get_batch_status(batch_id)
         batch_owner_iid = batch_status.user_iid
 
         # check if the identity is part of the batch
@@ -281,7 +279,7 @@ class Node(abc.ABC):
                 required_permission='batch_owner, batch_member, or node_owner'
             )
 
-    async def check_rti_node_owner(self, identity: Identity) -> None:
+    def check_rti_node_owner(self, identity: Identity) -> None:
         # check if the user is the owner of the node
         if self.identity.id != identity.id:
             raise AuthorisationError(

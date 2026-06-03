@@ -1,6 +1,5 @@
 """Test data factories for creating test objects."""
-
-import asyncio
+import time
 import json
 import logging
 import os
@@ -231,7 +230,7 @@ def prepare_proc_path(proc_path: str) -> GitProcessorPointer:
 
 
 def run_job_cmd(
-        job_path: str, proc_path: str, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+        job_path: str, proc_path: str, service_address: str, custodian_address: str, custodian_tls_cert: str, job_id: str
 ) -> None:
     """Run a job command in a separate thread."""
     try:
@@ -241,7 +240,7 @@ def run_job_cmd(
             'proc_path': proc_path,
             'service_address': service_address,
             'custodian_address': custodian_address,
-            'custodian_pub_key': custodian_pub_key,
+            'custodian_tls_cert': custodian_tls_cert,
             'job_id': job_id
         }
         cmd.execute(args)
@@ -250,7 +249,7 @@ def run_job_cmd(
         print(trace)
 
 
-async def execute_job(
+def execute_job(
         wd_parent_path: str, custodian: Node, job_id: str,
         a: Union[dict, int, str, DataObject], b: Union[dict, int, str, DataObject],
         user: Identity = None, sig_a: str = None, sig_b: str = None, target_node: Node = None, cancel: bool = False,
@@ -323,14 +322,14 @@ async def execute_job(
 
     threading.Thread(
         target=run_job_cmd,
-        args=(wd_path, proc_path, service_address, custodian.p2p.address(), custodian.identity.c_public_key, job_id)
+        args=(wd_path, proc_path, service_address, custodian.p2p.address(), custodian.identity.tls_cert, job_id)
     ).start()
 
     if cancel:
         runner_identity = None
         runner_address = None
         for i in range(10):
-            await asyncio.sleep(1)
+            time.sleep(1)
 
             with rti._session_maker() as session:
                 record = session.get(DBJobInfo, job_id)
@@ -345,23 +344,21 @@ async def execute_job(
         # Simulate RTI cancel flow: mark cancelled in DB first, then send interrupt
         rti.mark_job_cancelled(job_id)
 
-        await P2PInterruptJob.perform(P2PAddress(
+        P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
-            curve_secret_key=custodian.keystore.curve_secret_key(),
-            curve_public_key=custodian.keystore.curve_public_key(),
-            curve_server_key=runner_identity.c_public_key
+            peer_tls_cert=runner_identity.tls_cert
         ))
 
     # Wait for job completion with timeout
     timeout = 60  # seconds
     elapsed = 0
     while elapsed < timeout:
-        status: JobStatus = await rti.get_job_status(job.id)
+        status: JobStatus = rti.get_job_status(job.id)
 
         if status.state in [JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED]:
             return status
 
-        await asyncio.sleep(0.5)
+        time.sleep(0.5)
         elapsed += 0.5
 
     # Timeout reached - return current status for debugging

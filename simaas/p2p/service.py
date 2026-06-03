@@ -1,246 +1,175 @@
-import asyncio
-import json
 import os
 import socket
+import socketserver
+import ssl
+import struct
 import tempfile
 import threading
-import zmq
-
-from threading import Lock
 from typing import Optional, Dict, Tuple
-
-from zmq import Again
-from zmq.asyncio import Socket, Context
 
 from simaas.core.errors import ConfigurationError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
-from simaas.p2p.base import P2PProtocol, P2PMessage, p2p_respond, p2p_send_error
+from simaas.p2p.base import (
+    P2PProtocol, P2PMessage, build_server_ssl_context,
+    p2p_respond, p2p_send_error,
+)
 
 log = get_logger('simaas.p2p', 'p2p')
+
+_CHUNK_SIZE = 1024 * 1024
+
+
+class _ConnHandler(socketserver.BaseRequestHandler):
+    """Handles a single peer connection. The TLS-wrapped socket is in self.request."""
+
+    def handle(self) -> None:
+        service: P2PService = self.server.simaas_service
+        sock: ssl.SSLSocket = self.request
+        try:
+            raw_len = _recv_exact(sock, 4)
+            (header_len,) = struct.unpack('>I', raw_len)
+            header = _recv_exact(sock, header_len)
+            request = P2PMessage.model_validate_json(header)
+
+            protocol = service.lookup_protocol(request.protocol)
+            if protocol is None:
+                log.warning('server', 'Unsupported protocol', protocol=request.protocol)
+                p2p_send_error(sock, request.protocol,
+                               f"protocol '{request.protocol}' is not supported by this peer")
+                return
+
+            with tempfile.TemporaryDirectory() as tempdir:
+                attachment_path: Optional[str] = None
+                if request.attachment_size > 0:
+                    attachment_path = os.path.join(tempdir, 'attachment')
+                    remaining = request.attachment_size
+                    with open(attachment_path, 'wb') as f:
+                        while remaining > 0:
+                            chunk = sock.recv(min(_CHUNK_SIZE, remaining))
+                            if not chunk:
+                                log.warning('server', 'Attachment truncated', protocol=request.protocol)
+                                return
+                            f.write(chunk)
+                            remaining -= len(chunk)
+
+                p2p_respond(sock, protocol, request, attachment_path, download_path=tempdir)
+
+        except (IOError, ssl.SSLError, socket.error) as e:
+            log.info('server', 'Connection error', exc=e)
+        except Exception as e:
+            log.warning('server', 'Exception in connection handler', exc=e)
+
+
+def _recv_exact(sock: ssl.SSLSocket, n: int) -> bytes:
+    buf = bytearray(n)
+    view = memoryview(buf)
+    received = 0
+    while received < n:
+        got = sock.recv_into(view[received:])
+        if got == 0:
+            raise IOError(f'connection closed; expected {n} bytes, got {received}')
+        received += got
+    return bytes(buf)
+
+
+class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, server_address: Tuple[str, int], handler_cls, ssl_ctx: ssl.SSLContext):
+        super().__init__(server_address, handler_cls, bind_and_activate=True)
+        self._ssl_ctx = ssl_ctx
+        self.simaas_service: Optional[P2PService] = None
+
+    def get_request(self):
+        raw_sock, addr = self.socket.accept()
+        try:
+            tls_sock = self._ssl_ctx.wrap_socket(raw_sock, server_side=True)
+        except (ssl.SSLError, OSError) as e:
+            log.warning('server', 'TLS handshake failed', addr=addr, exc=e)
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
+            raise
+        return tls_sock, addr
+
+    def handle_error(self, request, client_address):
+        # Suppress noisy tracebacks for failed TLS handshakes and dropped clients.
+        log.info('server', 'Request handling error', client=client_address)
 
 
 class P2PService:
     def __init__(self, keystore: Keystore, address: str) -> None:
-        self._mutex = Lock()
         self._keystore = keystore
         self._address = address
         self._port = int(address.split(':')[-1])
-        self._socket: Optional[Socket] = None
         self._protocols: Dict[str, P2PProtocol] = {}
-        self._stop_event = threading.Event()
-        self._ready_event = threading.Event()
-        self._stopped_event = threading.Event()  # Signals handler has fully stopped
-        self._pending: Dict[P2PProtocol, bytes, Tuple[P2PMessage, str]] = {}
+        self._server: Optional[_ThreadedSSLServer] = None
         self._thread: Optional[threading.Thread] = None
+        self._ready_event = threading.Event()
 
     def is_ready(self) -> bool:
-        return self._socket is not None
+        return self._server is not None
 
     def add(self, protocol: P2PProtocol) -> None:
-        """Adds a protocol to the P2P service."""
         log.info('protocol', 'Adding P2P protocol', name=protocol.name())
         self._protocols[protocol.name()] = protocol
 
+    def lookup_protocol(self, name: str) -> Optional[P2PProtocol]:
+        return self._protocols.get(name)
+
     def address(self) -> str:
-        """Returns the address (host:port) of the P2P service."""
         return self._address
 
     def port(self) -> int:
-        """Returns the port of the P2P service."""
         return self._port
 
     def fq_address(self) -> str:
-        """Returns the fully qualified address of the P2P service"""
         fqdn = socket.getfqdn()
         return f"tcp://{fqdn}:{self._port}"
 
-    def _init_socket(self, encrypt: bool = True, timeout: int = 5000) -> None:
-        """Initialize the ZMQ socket."""
-        if not self._socket:
-            try:
-                context = Context.instance()
-                self._socket = context.socket(zmq.ROUTER)
-                self._socket.setsockopt(zmq.LINGER, 0)
-                self._socket.setsockopt(zmq.RCVTIMEO, timeout)
-                self._socket.setsockopt(zmq.SNDTIMEO, timeout)
-                if encrypt:
-                    self._socket.curve_secretkey = self._keystore.curve_secret_key()
-                    self._socket.curve_publickey = self._keystore.curve_public_key()
-                    self._socket.curve_server = True
-                self._socket.bind(self._address)
-                self._ready_event.set()
-                log.info('server', 'P2P server initialised', address=self._address)
-            except Exception as e:
-                raise ConfigurationError(
-                    path='p2p.socket',
-                    expected='socket binding',
-                    actual=str(e),
-                    hint='P2P server socket cannot be created'
-                )
-
-    async def start_service(self, encrypt: bool = True, timeout: int = 5000) -> asyncio.Task:
-        """Starts the P2P server and returns the connection handler task.
-
-        Use this in async contexts where the event loop will keep running.
-        """
-        # Clear events for clean start
-        self._stop_event.clear()
-        self._stopped_event.clear()
-        with self._mutex:
-            self._init_socket(encrypt, timeout)
-        return asyncio.create_task(self._handle_incoming_connections())
-
-    def start_service_background(self, encrypt: bool = True, timeout: int = 5000) -> None:
-        """Starts the P2P server in a background thread with its own event loop.
-
-        Use this in sync contexts (like DefaultNode.create()) where the caller
-        won't maintain a running event loop.
-        """
-        # Store config for socket initialization in the background thread
-        self._bg_encrypt = encrypt
-        self._bg_timeout = timeout
-        self._bg_error = None
-        # Clear events for clean start
-        self._stop_event.clear()
-        self._stopped_event.clear()
-        self._thread = threading.Thread(target=self._run_event_loop, daemon=True)
-        self._thread.start()
-        # Wait for socket to be ready or error using event (outside mutex to avoid deadlock)
-        if not self._ready_event.wait(timeout=10.0):
-            if self._bg_error is not None:
-                raise self._bg_error
-            raise OperationError(
-                operation='p2p_start',
-                stage='initialization',
-                cause='timeout',
-                hint='P2P service failed to start within timeout'
-            )
-
-    def _run_event_loop(self) -> None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    def start_service_background(self) -> None:
+        self._ready_event.clear()
+        host, port = self._parse_addr()
         try:
-            # Initialize socket in this event loop where it will be used
-            with self._mutex:
-                self._init_socket(self._bg_encrypt, self._bg_timeout)
-            loop.run_until_complete(self._handle_incoming_connections())
+            ssl_ctx = build_server_ssl_context(
+                self._keystore.tls_cert_pem(),
+                self._keystore.tls_key_pem(),
+            )
+            self._server = _ThreadedSSLServer((host, port), _ConnHandler, ssl_ctx)
+            self._server.simaas_service = self
         except Exception as e:
-            self._bg_error = e
-        finally:
-            loop.close()
+            raise ConfigurationError(
+                path='p2p.socket', expected='socket binding', actual=str(e),
+                hint='P2P server cannot be created',
+            )
+        log.info('server', 'P2P server listening', address=self._address)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        self._ready_event.set()
+
+    def _parse_addr(self) -> Tuple[str, int]:
+        addr = self._address
+        if addr.startswith('tcp://'):
+            addr = addr[len('tcp://'):]
+        host, port = addr.rsplit(':', 1)
+        return host, int(port)
 
     def stop_service(self) -> None:
-        """Signals the server to stop accepting connections and waits for cleanup."""
+        if self._server is None:
+            return
         log.info('server', 'Initiating P2P service shutdown')
-        self._stop_event.set()
-        self._ready_event.clear()
-
-        # Wait for the handler to signal it has stopped (socket closed)
-        if not self._stopped_event.wait(timeout=5.0):
-            log.warning('server', 'Handler did not stop cleanly, forcing socket close')
-            # Force close the socket from this thread as fallback
-            with self._mutex:
-                if self._socket is not None:
-                    try:
-                        self._socket.close()
-                        self._socket = None
-                    except Exception as e:
-                        log.warning('server', 'Error force-closing socket', exc=e)
-
-        # Wait for the thread to finish
+        try:
+            self._server.shutdown()
+            self._server.server_close()
+        except Exception as e:
+            log.warning('server', 'Error stopping P2P server', exc=e)
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=2.0)
-            if self._thread.is_alive():
-                log.warning('server', 'P2P thread did not exit cleanly')
-
+        self._server = None
         log.info('server', 'P2P service shutdown complete')
 
-    async def wait_until_ready(self, timeout: float = 10.0) -> bool:
-        """Wait until the P2P service is ready.
-
-        Returns True if service is ready, False if timeout occurred.
-        """
-        start = asyncio.get_event_loop().time()
-        while not self._ready_event.is_set():
-            if asyncio.get_event_loop().time() - start > timeout:
-                return False
-            await asyncio.sleep(0.1)
-        return True
-
-    async def _handle_incoming_connections(self):
-        log.info('server', 'Listening for P2P connections')
-        try:
-            with tempfile.TemporaryDirectory() as tempdir:
-                while not self._stop_event.is_set():
-                    try:
-                        frames = await self._socket.recv_multipart(flags=zmq.NOBLOCK)
-                        cid, rid, content = frames[:3]
-
-                        # do we have already a pending transfer?
-                        pending: Optional[Tuple[P2PProtocol, P2PMessage, str]] = self._pending.get(rid)
-
-                        # if not, then treat it as a P2P message frame
-                        if pending is None:
-                            request: str = content.decode('utf-8')
-                            request: dict = json.loads(request)
-                            request: P2PMessage = P2PMessage.model_validate(request)
-
-                            # do we know the protocol?
-                            protocol = self._protocols.get(request.protocol)
-                            if protocol is None:
-                                log.warning('server', 'Unsupported protocol, replying with error', protocol=request.protocol)
-                                await p2p_send_error(
-                                    self._socket, cid, rid, request.protocol,
-                                    f"protocol '{request.protocol}' is not supported by this peer",
-                                )
-                                continue
-
-                            # does this request come with an attachment?
-                            if request.attachment_size > 0:
-                                attachment_path: str = os.path.join(tempdir, rid.decode('utf-8'))
-                                self._pending[rid] = (protocol, request, attachment_path)
-
-                            # if there is no attachment, process the message straight away
-                            else:
-                                await p2p_respond(
-                                    self._socket, cid, rid, protocol, request, download_path=tempdir
-                                )
-
-                        # if it's pending, then we need to keep receiving the contents until the attachment has been
-                        # fully received.
-                        else:
-                            protocol: P2PProtocol = pending[0]
-                            request: P2PMessage = pending[1]
-                            attachment_path: str = pending[2]
-                            with open(attachment_path, 'ab') as f:
-                                f.write(content)
-
-                            # is the file size equal to the size of the attachment?
-                            file_size = os.path.getsize(attachment_path)
-                            if file_size == request.attachment_size:
-                                self._pending.pop(rid)
-                                await p2p_respond(
-                                    self._socket, cid, rid, protocol, request, attachment_path, download_path=tempdir
-                                )
-
-                            elif file_size > request.attachment_size:
-                                log.warning('server', 'Attachment bigger than expected, ignoring', protocol=request.protocol)
-
-                    except Again:
-                        await asyncio.sleep(0.1)
-
-                    except Exception as e:
-                        log.warning('server', 'Exception in server loop', exc=e)
-
-        finally:
-            # Ensure socket is always closed and signal completion
-            log.info('server', 'Stopped listening for P2P connections')
-            with self._mutex:
-                if self._socket is not None:
-                    try:
-                        self._socket.close()
-                        self._socket = None
-                    except Exception as e:
-                        log.warning('server', 'Error closing socket', exc=e)
-            self._stopped_event.set()
+    def wait_until_ready(self, timeout: float = 10.0) -> bool:
+        return self._ready_event.wait(timeout=timeout)

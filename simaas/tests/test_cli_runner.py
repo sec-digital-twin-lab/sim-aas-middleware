@@ -115,38 +115,26 @@ def test_job_worker_error(temp_dir):
 
     assert result.exitcode == ExitCode.ERROR
     assert "ValueError: invalid literal for int() with base 10: 'sdf'" in result.trace
-
-
-@pytest.mark.asyncio
-
-async def test_cli_runner_success_by_value(temp_dir, session_node):
+def test_cli_runner_success_by_value(temp_dir, session_node):
     """Test job runner with input values."""
     a: int = 1
     b: int = 1
     job_id = '398h36g3_00'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 100
-
-
-@pytest.mark.asyncio
-
-async def test_cli_runner_failing_validation(temp_dir, session_node):
+def test_cli_runner_failing_validation(temp_dir, session_node):
     """Test job runner input validation failure."""
     a: int = {'wrong': 55}
     b: int = 1
     job_id = '398h36g3_01'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     assert 'validation failed' in status.errors[0].exception.reason.lower()
-
-
-@pytest.mark.asyncio
-
-async def test_runner_by_reference(temp_dir, session_node):
+def test_runner_by_reference(temp_dir, session_node):
     """Test job runner with data object reference inputs."""
     # prepare input data objects
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
@@ -154,46 +142,34 @@ async def test_runner_by_reference(temp_dir, session_node):
     job_id = '398h36g3_02'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 100
-
-
-@pytest.mark.asyncio
-
-async def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keystores):
+def test_cli_runner_failing_no_access(temp_dir, session_node, extra_keystores):
     """Test job runner access control enforcement."""
     user = extra_keystores[0]
-    await session_node.db.update_identity(user.identity)
+    session_node.db.update_identity(user.identity)
 
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
     job_id = '398h36g3_03'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b, user=user.identity)
+    status = execute_job(temp_dir, session_node, job_id, a, b, user=user.identity)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'AuthorisationError' in trace
-
-
-@pytest.mark.asyncio
-
-async def test_runner_no_signature(temp_dir, session_node):
+def test_runner_no_signature(temp_dir, session_node):
     """Test job runner signature requirement enforcement."""
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, access=[session_node.identity])
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1, access=[session_node.identity])
     job_id = '398h36g3_04'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'AuthorisationError' in trace or 'signature' in trace.lower()
-
-
-@pytest.mark.asyncio
-
-async def test_runner_missing_object(temp_dir, session_node):
+def test_runner_missing_object(temp_dir, session_node):
     """Test job runner missing data object handling."""
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
@@ -204,59 +180,44 @@ async def test_runner_missing_object(temp_dir, session_node):
     proxy.delete_data_object(b.obj_id, session_node.keystore)
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'NotFoundError' in trace or 'unresolved' in trace.lower() or 'not found' in trace.lower()
-
-
-@pytest.mark.asyncio
-
-async def test_runner_wrong_type(temp_dir, session_node):
+def test_runner_wrong_type(temp_dir, session_node):
     """Test job runner data type validation."""
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='wrong')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
     job_id = '398h36g3_06'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'ValidationError' in trace or 'mismatch' in trace.lower() or 'data_type' in trace.lower()
-
-
-@pytest.mark.asyncio
-
-async def test_runner_wrong_format(temp_dir, session_node):
+def test_runner_wrong_format(temp_dir, session_node):
     """Test job runner data format validation."""
     a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1, data_type='data_format')
     b = prepare_data_object(os.path.join(temp_dir, 'b'), session_node, 1)
     job_id = '398h36g3_07'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b)
+    status = execute_job(temp_dir, session_node, job_id, a, b)
     assert status.progress == 0
     trace = status.errors[0].exception.details['trace']
     assert 'ValidationError' in trace or 'mismatch' in trace.lower() or 'data_type' in trace.lower()
-
-
-@pytest.mark.asyncio
-async def test_cli_runner_cancelled(temp_dir, session_node):
+def test_cli_runner_cancelled(temp_dir, session_node):
     """Test job runner cancellation handling."""
     a: int = 5
     b: int = 6
     job_id = '398h36g3_08'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b, cancel=True)
+    status = execute_job(temp_dir, session_node, job_id, a, b, cancel=True)
     assert len(status.errors) == 0
     assert status.progress < 100
     assert status.state == JobStatus.State.CANCELLED
-
-
-@pytest.mark.asyncio
-
-async def test_runner_non_dor(temp_dir, session_node):
+def test_runner_non_dor(temp_dir, session_node):
     """Test job runner target node DOR capability validation."""
     # create a new node as DOR target
     with tempfile.TemporaryDirectory() as target_node_storage_path:
@@ -271,7 +232,7 @@ async def test_runner_non_dor(temp_dir, session_node):
         )
 
         #  make exec-only node known to node
-        await P2PJoinNetwork(target_node).perform(session_node.info)
+        P2PJoinNetwork(target_node).perform(session_node.info)
         time.sleep(1)
 
         a = prepare_data_object(os.path.join(temp_dir, 'a'), session_node, 1)
@@ -279,25 +240,21 @@ async def test_runner_non_dor(temp_dir, session_node):
         job_id = '398h36g3_09'
 
         # execute the job
-        status = await execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
+        status = execute_job(temp_dir, session_node, job_id, a, b, target_node=target_node)
         # Push is rejected client-side via NodeInfo.has_dor() before any network I/O —
         # raised as an OperationError, so the cause shows up in details['cause'].
         assert status.errors[0].exception.details['cause'] == 'target node does not support DOR capabilities'
 
         # leave the network
         protocol = P2PLeaveNetwork(target_node)
-        await protocol.perform(blocking=True)
+        protocol.perform(blocking=True)
 
         # shutdown the target node
         target_node.shutdown()
 
-        network = await session_node.db.get_network()
+        network = session_node.db.get_network()
         assert len(network) == 2
-
-
-@pytest.mark.asyncio
-
-async def test_runner_coupled(temp_dir, session_node):
+def test_runner_coupled(temp_dir, session_node):
     """Test job runner with batch coupling."""
     a: int = 1
     b: int = 1
@@ -305,7 +262,7 @@ async def test_runner_coupled(temp_dir, session_node):
     batch_id = 'batch001'
 
     # execute the job
-    status = await execute_job(temp_dir, session_node, job_id, a, b, batch_id=batch_id)
+    status = execute_job(temp_dir, session_node, job_id, a, b, batch_id=batch_id)
     assert status.progress == 100
 
 

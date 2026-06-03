@@ -13,7 +13,6 @@ from typing import Type
 
 import pytest
 
-from simaas.core.async_helpers import run_coro_safely
 
 import docker
 
@@ -527,7 +526,7 @@ def aws_session_node(aws_available, ssh_tunnel, session_keystore, session_node):
             )
 
             # join the network using the session_node's REST address
-            run_coro_safely(_node.join_network(session_node.rest.address()))
+            _node.join_network(session_node.rest.address())
 
             yield _node
 

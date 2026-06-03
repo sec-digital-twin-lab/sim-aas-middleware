@@ -32,28 +32,26 @@ class P2PLookupDataObject(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
+    def perform(self, peer: NodeInfo, obj_ids: List[str]) -> Dict[str, DataObject]:
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
-        reply, _ = await p2p_request(
+        reply, _ = p2p_request(
             peer_address, self.NAME, LookupRequest(obj_ids=obj_ids), reply_type=LookupResponse
         )
         reply: LookupResponse = reply  # casting for PyCharm
 
         return reply.records
 
-    async def handle(
+    def handle(
             self, request: LookupRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # search for the requested data objects and see if we have any of them
         records: Dict[str, DataObject] = {}
         for obj_id in request.obj_ids:
-            meta: Optional[DataObject] = await self._node.dor.get_meta(obj_id)
+            meta: Optional[DataObject] = self._node.dor.get_meta(obj_id)
             if meta:
                 records[obj_id] = meta
 
@@ -87,19 +85,17 @@ class P2PFetchDataObject(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    async def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
+    def perform(self, peer: NodeInfo, obj_id: str, meta_path: str, content_path: str,
                       user_iid: str = None, user_signature: str = None,
                       timeout: Optional[int] = None) -> DataObject:
         peer_address = P2PAddress(
             address=peer.p2p_address,
-            curve_secret_key=self._node.keystore.curve_secret_key(),
-            curve_public_key=self._node.keystore.curve_public_key(),
-            curve_server_key=peer.identity.c_public_key
+            peer_tls_cert=peer.identity.tls_cert
         )
 
         message = FetchRequest(obj_id=obj_id, user_iid=user_iid, user_signature=user_signature)
 
-        reply, _ = await p2p_request(
+        reply, _ = p2p_request(
             peer_address, self.NAME, message, reply_type=FetchResponse, download_path=content_path,
             timeout=timeout
         )
@@ -116,11 +112,11 @@ class P2PFetchDataObject(P2PProtocol):
         else:
             raise NetworkError(peer_address=peer.p2p_address, operation='fetch', **reply.details)
 
-    async def handle(
+    def handle(
             self, request: FetchRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # check if we have that data object
-        meta = await self._node.dor.get_meta(request.obj_id)
+        meta = self._node.dor.get_meta(request.obj_id)
         if not meta:
             return FetchResponse(
                 successful=False, meta=None, details={
@@ -132,7 +128,7 @@ class P2PFetchDataObject(P2PProtocol):
         # check if the data object access is restricted and (if so) if the user has the required permission
         if meta.access_restricted:
             # get the identity of the user
-            user = await self._node.db.get_identity(request.user_iid)
+            user = self._node.db.get_identity(request.user_iid)
             if user is None:
                 return FetchResponse(
                     successful=False, meta=None, details={
@@ -236,7 +232,7 @@ class P2PPushDataObject(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, p2p_address: str, keystore: Keystore, peer: Identity, content_path: str,
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
             access_restricted: bool, content_encrypted: bool, license: DataObject.License,
@@ -246,9 +242,7 @@ class P2PPushDataObject(P2PProtocol):
     ) -> DataObject:
         peer_address = P2PAddress(
             address=p2p_address,
-            curve_secret_key=keystore.curve_secret_key(),
-            curve_public_key=keystore.curve_public_key(),
-            curve_server_key=peer.c_public_key
+            peer_tls_cert=peer.tls_cert
         )
 
         message = PushRequest(
@@ -263,7 +257,7 @@ class P2PPushDataObject(P2PProtocol):
             tags=tags
         )
 
-        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+        reply: Tuple[Optional[BaseModel], Optional[str]] = p2p_request(
             peer_address, cls.NAME, message, reply_type=PushResponse, attachment_path=content_path,
             timeout=timeout
         )
@@ -275,7 +269,7 @@ class P2PPushDataObject(P2PProtocol):
         else:
             raise NetworkError(peer_address=p2p_address, operation='push', **reply.details)
 
-    async def handle(
+    def handle(
             self, request: PushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # does the node have a DOR?
@@ -288,7 +282,7 @@ class P2PPushDataObject(P2PProtocol):
             ), None
 
         # add the data object
-        meta = await self._node.dor.add(
+        meta = self._node.dor.add(
             attachment_path, request.data_type, request.data_format, request.owner_iid,
             creators_iid=request.creators_iid, access_restricted=request.access_restricted,
             content_encrypted=request.content_encrypted, license=request.license,
@@ -320,7 +314,7 @@ class P2PRelayPushDataObject(P2PProtocol):
         self._node = node
 
     @classmethod
-    async def perform(
+    def perform(
             cls, custodian_p2p_address: str, keystore: Keystore, custodian_identity: Identity,
             target_iid: str, content_path: str,
             data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
@@ -331,9 +325,7 @@ class P2PRelayPushDataObject(P2PProtocol):
     ) -> DataObject:
         peer_address = P2PAddress(
             address=custodian_p2p_address,
-            curve_secret_key=keystore.curve_secret_key(),
-            curve_public_key=keystore.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
 
         message = RelayPushRequest(
@@ -349,7 +341,7 @@ class P2PRelayPushDataObject(P2PProtocol):
             tags=tags
         )
 
-        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+        reply: Tuple[Optional[BaseModel], Optional[str]] = p2p_request(
             peer_address, cls.NAME, message, reply_type=RelayPushResponse,
             attachment_path=content_path, timeout=timeout
         )
@@ -360,11 +352,11 @@ class P2PRelayPushDataObject(P2PProtocol):
         else:
             raise NetworkError(peer_address=custodian_p2p_address, operation='relay-push', **(reply.details or {}))
 
-    async def handle(
+    def handle(
             self, request: RelayPushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # find the target node in the local network view (custodian has full peer connectivity)
-        network = await self._node.db.get_network()
+        network = self._node.db.get_network()
         target_node = next((n for n in network if n.identity.id == request.target_iid), None)
         if target_node is None:
             return RelayPushResponse(
@@ -384,7 +376,7 @@ class P2PRelayPushDataObject(P2PProtocol):
                     successful=False, meta=None,
                     details={'reason': 'relay node does not have DOR locally', 'target_iid': request.target_iid}
                 ), None
-            meta = await self._node.dor.add(
+            meta = self._node.dor.add(
                 attachment_path, request.data_type, request.data_format, request.owner_iid,
                 creators_iid=request.creators_iid, access_restricted=request.access_restricted,
                 content_encrypted=request.content_encrypted, license=request.license,
@@ -394,7 +386,7 @@ class P2PRelayPushDataObject(P2PProtocol):
 
         # forward via the existing push protocol using OUR keystore (the runner cannot reach this peer)
         try:
-            meta = await P2PPushDataObject.perform(
+            meta = P2PPushDataObject.perform(
                 target_node.p2p_address, self._node.keystore, target_node.identity,
                 attachment_path, request.data_type, request.data_format,
                 request.owner_iid, request.creators_iid,

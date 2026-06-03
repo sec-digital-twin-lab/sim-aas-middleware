@@ -16,20 +16,18 @@ class NamespaceDOR(DORInterface):
     def __init__(self, custodian_identity: Identity, custodian_address: str, authority: Keystore):
         self._peer_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=authority.curve_secret_key(),
-            curve_public_key=authority.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
         self._authority = authority
 
     def type(self) -> str:
         return 'namespace-dor'
 
-    async def search(
+    def search(
             self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
             data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
     ) -> List[DataObject]:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'search', args={
                 'patterns': patterns,
                 'owner_iid': owner_iid,
@@ -41,19 +39,19 @@ class NamespaceDOR(DORInterface):
         reply: List[DataObject] = [DataObject.model_validate(item) for item in reply]
         return reply
 
-    async def statistics(self) -> DORStatistics:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def statistics(self) -> DORStatistics:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'statistics'
         )
         reply: DORStatistics = DORStatistics.model_validate(reply)
         return reply
 
-    async def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
+    def add(self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
             tags: Optional[Dict[str, TagValueType]] = None,
             recipe: Optional[DataObjectRecipe] = None) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'add', args={
                 'content_path': '###ATTACHMENT###',
                 'data_type': data_type,
@@ -70,8 +68,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def remove(self, obj_id: str) -> Optional[DataObject]:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def remove(self, obj_id: str) -> Optional[DataObject]:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'remove', args={
                 'obj_id': obj_id
             }
@@ -79,8 +77,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def get_meta(self, obj_id: str) -> Optional[DataObject]:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def get_meta(self, obj_id: str) -> Optional[DataObject]:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'get_meta', args={
                 'obj_id': obj_id
             }
@@ -88,16 +86,16 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply) if reply else None
         return reply
 
-    async def get_content(self, obj_id: str, content_path: str) -> None:
-        await P2PNamespaceServiceCall.perform(
+    def get_content(self, obj_id: str, content_path: str) -> None:
+        P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'get_content', args={
                 'obj_id': obj_id,
                 'content_path': '###REPLY_ATTACHMENT###'
             }, download_path=content_path
         )
 
-    async def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'get_provenance', args={
                 'c_hash': c_hash
             }
@@ -105,8 +103,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObjectProvenance = DataObjectProvenance.model_validate(reply) if reply else None
         return reply
 
-    async def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'grant_access', args={
                 'obj_id': obj_id,
                 'user_iid': user_iid
@@ -115,8 +113,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'revoke_access', args={
                 'obj_id': obj_id,
                 'user_iid': user_iid
@@ -125,8 +123,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'transfer_ownership', args={
                 'obj_id': obj_id,
                 'new_owner_iid': new_owner_iid
@@ -135,8 +133,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'update_tags', args={
                 'obj_id': obj_id,
                 'tags': [tag.model_dump() for tag in tags]
@@ -145,8 +143,8 @@ class NamespaceDOR(DORInterface):
         reply: DataObject = DataObject.model_validate(reply)
         return reply
 
-    async def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'dor', 'remove_tags', args={
                 'obj_id': obj_id,
                 'keys': keys
@@ -160,24 +158,22 @@ class NamespaceRTI(RTIInterface):
     def __init__(self, custodian_identity: Identity, custodian_address: str, authority: Keystore):
         self._peer_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=authority.curve_secret_key(),
-            curve_public_key=authority.curve_public_key(),
-            curve_server_key=custodian_identity.c_public_key
+            peer_tls_cert=custodian_identity.tls_cert
         )
         self._authority = authority
 
     def type(self) -> str:
         return 'namespace-rti'
 
-    async def get_all_procs(self) -> List[Processor]:
-        reply: List[dict] = await P2PNamespaceServiceCall.perform(
+    def get_all_procs(self) -> List[Processor]:
+        reply: List[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'get_all_procs', args={}
         )
         reply: List[Processor] = [Processor.model_validate(item) for item in reply]
         return reply
 
-    async def get_proc(self, proc_id: str) -> Optional[Processor]:
-        reply: Optional[dict] = await P2PNamespaceServiceCall.perform(
+    def get_proc(self, proc_id: str) -> Optional[Processor]:
+        reply: Optional[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'get_proc', args={
                 'proc_id': proc_id
             }
@@ -185,8 +181,8 @@ class NamespaceRTI(RTIInterface):
         reply: Optional[Processor] = Processor.model_validate(reply) if reply else None
         return reply
 
-    async def submit(self, tasks: List[Task]) -> List[Job]:
-        reply: List[dict] = await P2PNamespaceServiceCall.perform(
+    def submit(self, tasks: List[Task]) -> List[Job]:
+        reply: List[dict] = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'submit', args={
                 'tasks': [task.model_dump() for task in tasks]
             }
@@ -194,8 +190,8 @@ class NamespaceRTI(RTIInterface):
         reply: List[Job] = [Job.model_validate(job) for job in reply]
         return reply
 
-    async def get_job_status(self, job_id: str) -> JobStatus:
-        reply: dict = await P2PNamespaceServiceCall.perform(
+    def get_job_status(self, job_id: str) -> JobStatus:
+        reply: dict = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'get_job_status', args={
                 'job_id': job_id
             }
@@ -203,8 +199,8 @@ class NamespaceRTI(RTIInterface):
         reply: JobStatus = JobStatus.model_validate(reply)
         return reply
 
-    async def get_batch_status(self, batch_id: str) -> BatchStatus:
-        reply: dict = await P2PNamespaceServiceCall.perform(
+    def get_batch_status(self, batch_id: str) -> BatchStatus:
+        reply: dict = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'get_batch_status', args={
                 'batch_id': batch_id
             }
@@ -212,8 +208,8 @@ class NamespaceRTI(RTIInterface):
         reply: BatchStatus = BatchStatus.model_validate(reply)
         return reply
 
-    async def job_cancel(self, job_id: str) -> JobStatus:
-        reply: dict = await P2PNamespaceServiceCall.perform(
+    def job_cancel(self, job_id: str) -> JobStatus:
+        reply: dict = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'job_cancel', args={
                 'job_id': job_id
             }
@@ -221,8 +217,8 @@ class NamespaceRTI(RTIInterface):
         reply: JobStatus = JobStatus.model_validate(reply)
         return reply
 
-    async def job_purge(self, job_id: str) -> JobStatus:
-        reply: dict = await P2PNamespaceServiceCall.perform(
+    def job_purge(self, job_id: str) -> JobStatus:
+        reply: dict = P2PNamespaceServiceCall.perform(
             self._peer_address, self._authority, 'rti', 'job_purge', args={
                 'job_id': job_id
             }
