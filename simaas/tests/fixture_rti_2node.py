@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from simaas.core.async_helpers import run_coro_safely
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 from simaas.dor.api import DORProxy
@@ -208,10 +207,10 @@ def execution_node(session_keystore_execution, storage_node):
         )
 
         # Join the storage node's network
-        run_coro_safely(_node.join_network(storage_node.rest.address()))
+        _node.join_network(storage_node.rest.address())
 
         # Verify network connectivity
-        network = run_coro_safely(_node.db.get_network())
+        network = _node.db.get_network()
         assert len(network) == 2, f"Expected 2 nodes in network, got {len(network)}"
 
         log.info(f"Execution node created and joined network: REST={rest_address}, P2P={p2p_address}")

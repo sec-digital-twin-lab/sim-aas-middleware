@@ -34,7 +34,7 @@ class TestAuthenticationErrorHandler:
     def test_returns_401_status(self, app, client):
         """Test that AuthenticationError returns 401 status code."""
         @app.api.get("/test-auth-error")
-        async def raise_auth_error():
+        def raise_auth_error():
             raise AuthenticationError(identity_id='user123', operation='login')
 
         response = client.get("/test-auth-error")
@@ -44,7 +44,7 @@ class TestAuthenticationErrorHandler:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-auth-error-body")
-        async def raise_auth_error():
+        def raise_auth_error():
             raise AuthenticationError(identity_id='user123', operation='login')
 
         response = client.get("/test-auth-error-body")
@@ -61,7 +61,7 @@ class TestAuthorisationErrorHandler:
     def test_returns_403_status(self, app, client):
         """Test that AuthorisationError returns 403 status code."""
         @app.api.get("/test-authz-error")
-        async def raise_authz_error():
+        def raise_authz_error():
             raise AuthorisationError(
                 identity_id='user123',
                 resource_id='doc456',
@@ -75,7 +75,7 @@ class TestAuthorisationErrorHandler:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-authz-error-body")
-        async def raise_authz_error():
+        def raise_authz_error():
             raise AuthorisationError(
                 identity_id='user123',
                 resource_id='doc456',
@@ -96,7 +96,7 @@ class TestNotFoundErrorHandler:
     def test_returns_404_status(self, app, client):
         """Test that NotFoundError returns 404 status code."""
         @app.api.get("/test-not-found")
-        async def raise_not_found():
+        def raise_not_found():
             raise NotFoundError(resource_type='data_object', resource_id='abc123')
 
         response = client.get("/test-not-found")
@@ -106,7 +106,7 @@ class TestNotFoundErrorHandler:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-not-found-body")
-        async def raise_not_found():
+        def raise_not_found():
             raise NotFoundError(
                 resource_type='data_object',
                 resource_id='abc123',
@@ -127,7 +127,7 @@ class TestValidationErrorHandler:
     def test_returns_422_status(self, app, client):
         """Test that ValidationError returns 422 status code."""
         @app.api.get("/test-validation")
-        async def raise_validation():
+        def raise_validation():
             raise ValidationError(
                 field='email',
                 expected='valid email format',
@@ -141,7 +141,7 @@ class TestValidationErrorHandler:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-validation-body")
-        async def raise_validation():
+        def raise_validation():
             raise ValidationError(
                 field='email',
                 expected='valid email format',
@@ -162,7 +162,7 @@ class TestNetworkErrorHandler:
     def test_returns_502_status(self, app, client):
         """Test that NetworkError returns 502 status code."""
         @app.api.get("/test-network")
-        async def raise_network():
+        def raise_network():
             raise NetworkError(peer_address='192.168.1.100', operation='connect')
 
         response = client.get("/test-network")
@@ -172,7 +172,7 @@ class TestNetworkErrorHandler:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-network-body")
-        async def raise_network():
+        def raise_network():
             raise NetworkError(
                 peer_address='192.168.1.100',
                 operation='connect',
@@ -193,7 +193,7 @@ class TestBaseErrorCatchAll:
     def test_configuration_error_returns_500(self, app, client):
         """Test that ConfigurationError returns 500 via catch-all."""
         @app.api.get("/test-config")
-        async def raise_config():
+        def raise_config():
             raise ConfigurationError(path='database.host', expected='hostname', actual=None)
 
         response = client.get("/test-config")
@@ -203,7 +203,7 @@ class TestBaseErrorCatchAll:
     def test_operation_error_returns_500(self, app, client):
         """Test that OperationError returns 500 via catch-all."""
         @app.api.get("/test-operation")
-        async def raise_operation():
+        def raise_operation():
             raise OperationError(operation='deploy', stage='validation', cause='timeout')
 
         response = client.get("/test-operation")
@@ -213,7 +213,7 @@ class TestBaseErrorCatchAll:
     def test_internal_error_returns_500(self, app, client):
         """Test that InternalError returns 500 via catch-all."""
         @app.api.get("/test-internal")
-        async def raise_internal():
+        def raise_internal():
             raise InternalError(component='scheduler', state='deadlock detected')
 
         response = client.get("/test-internal")
@@ -223,7 +223,7 @@ class TestBaseErrorCatchAll:
     def test_response_body_structure(self, app, client):
         """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-catchall-body")
-        async def raise_operation():
+        def raise_operation():
             raise OperationError(operation='deploy', stage='validation')
 
         response = client.get("/test-catchall-body")
@@ -240,7 +240,7 @@ class TestResponseIdFormat:
     def test_id_is_16_char_alphanumeric(self, app, client):
         """Test that response ID is 16 characters alphanumeric."""
         @app.api.get("/test-id-format")
-        async def raise_error():
+        def raise_error():
             raise NotFoundError(resource_type='test', resource_id='123')
 
         response = client.get("/test-id-format")

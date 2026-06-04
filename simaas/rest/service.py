@@ -55,7 +55,7 @@ class RESTApp:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             yield
-            await self.close()
+            self.close()
 
         self.api = FastAPI(
             openapi_url=f"{DOCS_ENDPOINT_PREFIX}/openapi.json",
@@ -65,31 +65,31 @@ class RESTApp:
 
         # New error hierarchy handlers (specific exceptions first)
         @self.api.exception_handler(AuthenticationError)
-        async def auth_error_handler(_: Request, e: AuthenticationError):
+        def auth_error_handler(_: Request, e: AuthenticationError):
             return _error_response(e, status_code=401)
 
         @self.api.exception_handler(AuthorisationError)
-        async def authz_error_handler(_: Request, e: AuthorisationError):
+        def authz_error_handler(_: Request, e: AuthorisationError):
             return _error_response(e, status_code=403)
 
         @self.api.exception_handler(NotFoundError)
-        async def not_found_handler(_: Request, e: NotFoundError):
+        def not_found_handler(_: Request, e: NotFoundError):
             return _error_response(e, status_code=404)
 
         @self.api.exception_handler(ValidationError)
-        async def validation_handler(_: Request, e: ValidationError):
+        def validation_handler(_: Request, e: ValidationError):
             return _error_response(e, status_code=422)
 
         @self.api.exception_handler(NetworkError)
-        async def network_handler(_: Request, e: NetworkError):
+        def network_handler(_: Request, e: NetworkError):
             return _error_response(e, status_code=502)
 
         @self.api.exception_handler(_BaseError)
-        async def base_error_handler(_: Request, e: _BaseError):
+        def base_error_handler(_: Request, e: _BaseError):
             return _error_response(e, status_code=500)
 
         @self.api.exception_handler(Exception)
-        async def generic_exception_handler(_: Request, e: Exception):
+        def generic_exception_handler(_: Request, e: Exception):
             log.error('exception', 'Unexpected exception',
                       trace=''.join(traceback.format_exception(None, e, e.__traceback__)))
             return JSONResponse(
@@ -118,7 +118,7 @@ class RESTApp:
                 hint=f"Route: {route}"
             )
 
-    async def close(self) -> None:
+    def close(self) -> None:
         log.info('shutdown', 'REST app is shutting down')
 
 
@@ -210,14 +210,14 @@ class RESTService:
             self._thread = None
             self._server = None
 
-    async def wait_until_ready(self, timeout: float = 10.0) -> bool:
+    def wait_until_ready(self, timeout: float = 10.0) -> bool:
         """Wait until the REST service is ready.
 
         Returns True if service is ready, False if timeout occurred.
         """
-        start = asyncio.get_event_loop().time()
+        start = time.monotonic()
         while not self._ready_event.is_set():
-            if asyncio.get_event_loop().time() - start > timeout:
+            if time.monotonic() - start > timeout:
                 return False
-            await asyncio.sleep(0.1)
+            time.sleep(0.1)
         return True

@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 from typing import Dict, Optional, List
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from pydantic import BaseModel
 
 from simaas.core.eckeypair import ECKeyPair
@@ -164,6 +170,68 @@ class GithubCredentialsAsset:
 
     def remove(self, name: str) -> Optional[GithubCredentials]:
         return self._credentials.pop(name, None)
+
+
+class TLSCertAsset:
+    class Content(BaseModel):
+        type: str
+        cert_pem: str
+        key_pem: str
+
+    def __init__(self, cert_pem: bytes, key_pem: bytes) -> None:
+        self._cert_pem = cert_pem
+        self._key_pem = key_pem
+
+    @classmethod
+    def create_new(cls) -> TLSCertAsset:
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'simaas-node')])
+        not_before = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+        not_after = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+        cert = (x509.CertificateBuilder()
+                .subject_name(name)
+                .issuer_name(name)
+                .public_key(key.public_key())
+                .serial_number(x509.random_serial_number())
+                .not_valid_before(not_before)
+                .not_valid_after(not_after)
+                .sign(key, hashes.SHA256()))
+
+        cert_pem = cert.public_bytes(serialization.Encoding.PEM)
+        key_pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        return TLSCertAsset(cert_pem, key_pem)
+
+    @classmethod
+    def load(cls, asset: dict, master: KeyPair) -> TLSCertAsset:
+        asset = TLSCertAsset.Content.model_validate(asset)
+        cert_pem = asset.cert_pem.encode('utf-8')
+        key_pem = _decrypt(asset.key_pem, master).encode('utf-8')
+        return TLSCertAsset(cert_pem, key_pem)
+
+    def store(self, protection: KeyPair) -> dict:
+        return {
+            'type': TLSCertAsset.__name__,
+            'cert_pem': self._cert_pem.decode('utf-8'),
+            'key_pem': _encrypt(self._key_pem.decode('utf-8'), protection),
+        }
+
+    def cert_pem(self) -> bytes:
+        return self._cert_pem
+
+    def key_pem(self) -> bytes:
+        return self._key_pem
+
+    def spki_hex(self) -> str:
+        cert = x509.load_pem_x509_certificate(self._cert_pem)
+        spki = cert.public_key().public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        return hashlib.sha256(spki).hexdigest()
 
 
 class SSHCredentialsAsset:

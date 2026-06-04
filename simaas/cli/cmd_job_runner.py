@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -8,9 +7,7 @@ import time
 import traceback
 from typing import Dict, Union, Optional, Tuple, Set, List
 
-from simaas.core.proc_worker import ProcessorWorker
 from simaas.namespace.default import DefaultNamespace
-from simaas.namespace.sync import SyncNamespace
 from simaas.nodedb.schemas import NodeInfo
 
 from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
@@ -41,7 +38,7 @@ class OutputObjectHandler(threading.Thread):
         self._owner: JobRunner = owner
         self._obj_name: str = obj_name
 
-    async def push_data_object(self, obj_name: str) -> DataObject:
+    def push_data_object(self, obj_name: str) -> DataObject:
         # convenience variables
         task_out_items = {item.name: item for item in self._owner.job.task.output}
         task_out = task_out_items.get(obj_name)
@@ -65,7 +62,7 @@ class OutputObjectHandler(threading.Thread):
             )
 
         # get the owner
-        owner = await P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
+        owner = P2PGetIdentity.perform(self._owner.custodian_address, task_out.owner_iid)
         if owner is None:
             raise NotFoundError(
                 resource_type='identity',
@@ -94,7 +91,7 @@ class OutputObjectHandler(threading.Thread):
         #     content_key = encrypt_file(output_content_path, encrypt_for=owner, delete_source=True)
 
         # get the network
-        network: List[NodeInfo] = await P2PGetNetwork.perform(self._owner.custodian_address)
+        network: List[NodeInfo] = P2PGetNetwork.perform(self._owner.custodian_address)
 
         # do we have a target node specified for storing the data object?
         target_node = self._owner.job.custodian
@@ -166,7 +163,7 @@ class OutputObjectHandler(threading.Thread):
             self._logger.info(
                 f"BEGIN push output '{obj_name}' to {target_node.identity.id} at {target_node.p2p_address}"
             )
-            obj = await P2PPushDataObject.perform(
+            obj = P2PPushDataObject.perform(
                 target_node.p2p_address, self._owner.keystore, target_node.identity,
                 output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
                 restricted_access, content_encrypted,
@@ -179,7 +176,7 @@ class OutputObjectHandler(threading.Thread):
                 f"BEGIN relay-push output '{obj_name}' via custodian "
                 f"-> target {target_node.identity.id}"
             )
-            obj = await P2PRelayPushDataObject.perform(
+            obj = P2PRelayPushDataObject.perform(
                 self._owner.custodian_address.address, self._owner.keystore,
                 self._owner.custodian_identity, target_node.identity.id,
                 output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
@@ -195,7 +192,7 @@ class OutputObjectHandler(threading.Thread):
     def run(self) -> None:
         try:
             # upload the data object to the target DOR
-            obj = asyncio.run(self.push_data_object(self._obj_name))
+            obj = self.push_data_object(self._obj_name)
 
             # remove the output from the pending set
             self._logger.info(f"pushing output data object '{self._obj_name}' SUCCESSFUL.")
@@ -282,7 +279,7 @@ class StatusHandler(threading.Thread):
 
             # push the job status to the custodian (unless cancelled - custodian handles that)
             if self._job_status.state != JobStatus.State.CANCELLED:
-                asyncio.run(P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status))
+                P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status)
                 self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
 
         except _BaseError as e:
@@ -326,8 +323,8 @@ class JobRunner(CLICommand, ProgressListener):
                      help="address used by P2P service for secure communication"),
             Argument('--custodian-address', dest='custodian_address', action='store',
                      help="P2P address of the custodian"),
-            Argument('--custodian-pub-key', dest='custodian_pub_key', action='store',
-                     help="Public curve key of custodian"),
+            Argument('--custodian-tls-cert', dest='custodian_tls_cert', action='store',
+                     help="PEM-encoded TLS cert of the custodian"),
             Argument('--job-id', dest='job_id', action='store',
                      help="Id of the job (will be used by the runner to retrieve job information from the custodian)")
         ])
@@ -355,9 +352,6 @@ class JobRunner(CLICommand, ProgressListener):
         self._output_interface: Dict[str, ProcessorDescriptor.IODataObject] = {}
         self._status_handler: Optional[StatusHandler] = None
         self._user: Optional[Identity] = None
-
-        # fork-isolated processor worker (set during execute)
-        self._worker: Optional[ProcessorWorker] = None
 
         # set/used during batch sync
         self._batch_ports: Dict[str, Dict[str, Optional[str]]] = {}
@@ -412,8 +406,8 @@ class JobRunner(CLICommand, ProgressListener):
         with self._mutex:
             try:
                 self._interrupted = True
-                if self._worker:
-                    self._worker.interrupt()
+                if self._proc:
+                    self._proc.interrupt()
                 self._logger.info("Received job cancellation notification")
 
             except Exception as e:
@@ -504,22 +498,20 @@ class JobRunner(CLICommand, ProgressListener):
             raise NotFoundError(resource_type='processor', resource_id=proc_name, searched_locations=[proc_path])
 
     def _initialise_p2p(
-            self, service_address: str, custodian_address: str, custodian_pub_key: str, job_id: str
+            self, service_address: str, custodian_address: str, custodian_tls_cert: str, job_id: str
     ) -> None:
         # start the secured P2P service (keystore already created before fork)
         self._p2p = P2PService(self._keystore, service_address)
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
         self._p2p.add(self._barrier)
-        self._p2p.start_service_background(encrypt=True)
+        self._p2p.start_service_background()
         self._logger.info("P2P service interface is up.")
 
         # determine the full P2P address of the custodian
         self._custodian_address = P2PAddress(
             address=custodian_address,
-            curve_secret_key=self._keystore.curve_secret_key(),
-            curve_public_key=self._keystore.curve_public_key(),
-            curve_server_key=custodian_pub_key
+            peer_tls_cert=custodian_tls_cert,
         )
 
         # figure out the port of the P2P service
@@ -535,9 +527,9 @@ class JobRunner(CLICommand, ProgressListener):
 
         # perform handshake with custodian
         self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address.address}...")
-        self._job, self._custodian, self._batch_status = asyncio.run(P2PRunnerPerformHandshake.perform(
+        self._job, self._custodian, self._batch_status = P2PRunnerPerformHandshake.perform(
             self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
-        ))
+        )
         self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
                           f"has id={self._custodian.id}")
 
@@ -589,9 +581,7 @@ class JobRunner(CLICommand, ProgressListener):
                 member_identity = self._batch_identities[name]
                 member_p2p_address = P2PAddress(
                     address=self._batch_ports[name]['6000/tcp'],
-                    curve_secret_key=self._keystore.curve_secret_key(),
-                    curve_public_key=self._keystore.curve_public_key(),
-                    curve_server_key=member_identity.c_public_key
+                    peer_tls_cert=member_identity.tls_cert
                 )
                 mappings.append((name, member_p2p_address))
 
@@ -606,7 +596,7 @@ class JobRunner(CLICommand, ProgressListener):
                     self._logger.info(
                         f"[barrier] send release for 'initial_barrier' to {name} at {p2p_address.address}"
                     )
-                    asyncio.run(BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status))
+                    BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status)
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                     self._logger.error(f"[barrier] error: {e} -> {trace}")
@@ -658,7 +648,7 @@ class JobRunner(CLICommand, ProgressListener):
             return {}
 
         # obtain a list of nodes in the network and filter by peers with DOR capability
-        network = asyncio.run(P2PGetNetwork.perform(self._custodian_address))
+        network = P2PGetNetwork.perform(self._custodian_address)
         network = [node for node in network if node.dor_service]
 
         # Try the custodian first: it is the only peer guaranteed reachable from the runner's
@@ -666,7 +656,6 @@ class JobRunner(CLICommand, ProgressListener):
         # have registered addresses unreachable from where this runner runs.
         network.sort(key=lambda n: 0 if n.identity.id == self.custodian_identity.id else 1)
 
-        loop = asyncio.new_event_loop()
         try:
             class KeystoreWrapper:
                 def __init__(self, keystore: Keystore):
@@ -688,9 +677,7 @@ class JobRunner(CLICommand, ProgressListener):
                 # does the remote DOR have any of the pending data objects?
                 # NetworkError here means this peer is unreachable from the runner — try the next one.
                 try:
-                    result: Dict[str, DataObject] = loop.run_until_complete(
-                        lookup.perform(peer, list(pending.keys()))
-                    )
+                    result: Dict[str, DataObject] = lookup.perform(peer, list(pending.keys()))
                 except NetworkError as e:
                     self._logger.warning(
                         f"DOR lookup against peer {peer.identity.id} at {peer.p2p_address} failed "
@@ -730,11 +717,9 @@ class JobRunner(CLICommand, ProgressListener):
                         # try to download it. NetworkError means this peer can serve lookup but
                         # not the download — leave obj_id in pending; a later peer may have it.
                         try:
-                            loop.run_until_complete(
-                                fetch.perform(
-                                    peer, obj_id, meta_path, content_path,
-                                    user_iid=self._user.id, user_signature=signature
-                                )
+                            fetch.perform(
+                                peer, obj_id, meta_path, content_path,
+                                user_iid=self._user.id, user_signature=signature,
                             )
                         except NetworkError as e:
                             self._logger.warning(
@@ -746,9 +731,7 @@ class JobRunner(CLICommand, ProgressListener):
                     else:
                         # try to download it
                         try:
-                            loop.run_until_complete(
-                                fetch.perform(peer, obj_id, meta_path, content_path)
-                            )
+                            fetch.perform(peer, obj_id, meta_path, content_path)
                         except NetworkError as e:
                             self._logger.warning(
                                 f"DOR fetch from peer {peer.identity.id} for {obj_id} failed "
@@ -796,9 +779,6 @@ class JobRunner(CLICommand, ProgressListener):
                 trace=trace
             )
 
-        finally:
-            loop.close()
-
     def _verify_inputs_and_outputs(self) -> None:
         proc_descriptor: ProcessorDescriptor = self._gpp.proc_descriptor
         for i in proc_descriptor.input:
@@ -845,7 +825,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # check if the owner identity exists for each output data object
         for o in self._job.task.output:
-            owner = asyncio.run(P2PGetIdentity.perform(self._custodian_address, o.owner_iid))
+            owner = P2PGetIdentity.perform(self._custodian_address, o.owner_iid)
             if owner is None:
                 raise NotFoundError(
                     resource_type='identity',
@@ -875,14 +855,14 @@ class JobRunner(CLICommand, ProgressListener):
         prompt_if_missing(args, 'proc_path', prompt_for_string, message="Enter path to the processor directory:")
         prompt_if_missing(args, 'service_address', prompt_for_string, message="Enter address for the P2P service:")
         env_if_missing(args, 'custodian_address', 'SIMAAS_CUSTODIAN_ADDRESS')
-        env_if_missing(args, 'custodian_pub_key', 'SIMAAS_CUSTODIAN_PUBKEY')
+        env_if_missing(args, 'custodian_tls_cert', 'SIMAAS_CUSTODIAN_TLS_CERT')
         env_if_missing(args, 'job_id', 'JOB_ID')
 
         # check if required args are defined
         print(f"Environment: {os.environ}")
         print(f"Arguments: {args}")
-        if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
-            raise ValidationError(field='arguments', expected='custodian_address, custodian_pub_key, job_id', actual='missing')
+        if not all(key in args for key in ['custodian_address', 'custodian_tls_cert', 'job_id']):
+            raise ValidationError(field='arguments', expected='custodian_address, custodian_tls_cert, job_id', actual='missing')
 
         # determine working directory
         self._wd_path = args['job_path']
@@ -910,21 +890,12 @@ class JobRunner(CLICommand, ProgressListener):
             # initialise processor
             self._initialise_processor(args['proc_path'])
 
-            # create the ephemeral keystore BEFORE forking (uses zmq.curve_public
-            # but does NOT start I/O threads).
             self._keystore = Keystore.new('runner')
             self._logger.info(f"Using runner ephemeral keystore with id={self._keystore.identity.id}")
 
-            # fork the worker process BEFORE ZMQ — the child inherits the
-            # processor and keystore but has zero ZMQ threads, so fork/subprocess
-            # is safe inside adapter code.
-            self._worker = ProcessorWorker(self._proc, self._keystore)
-            self._worker.start()
-            self._logger.info("Fork-isolated worker process started.")
-
             # initialise P2P services
             self._initialise_p2p(
-                args['service_address'], args['custodian_address'], args['custodian_pub_key'], args['job_id']
+                args['service_address'], args['custodian_address'], args['custodian_tls_cert'], args['job_id']
             )
 
             # if, for some reason, we have not received a job, then we can't proceed.
@@ -951,8 +922,8 @@ class JobRunner(CLICommand, ProgressListener):
                     return
 
             # fetch the user identity
-            self._user: Optional[Identity] = asyncio.run(
-                P2PGetIdentity.perform(self._custodian_address, self._job.task.user_iid)
+            self._user: Optional[Identity] = P2PGetIdentity.perform(
+                self._custodian_address, self._job.task.user_iid,
             )
             if self._user is None:
                 raise NotFoundError(resource_type='identity', resource_id=self._job.task.user_iid)
@@ -976,19 +947,7 @@ class JobRunner(CLICommand, ProgressListener):
                 self._job.task.namespace, self._custodian, self.custodian_address.address, self._keystore
             )
 
-            # Collect secrets that were injected into os.environ during the
-            # P2P handshake (after the fork).  The worker needs them explicitly.
-            secrets = {
-                key: os.environ[key]
-                for key in self._gpp.proc_descriptor.required_secrets
-                if key in os.environ
-            }
-
-            self._worker.run(
-                self._wd_path, self._job, self, SyncNamespace(namespace),
-                log_level=args.get('log_level', 'info'),
-                env=secrets,
-            )
+            self._proc.run(self._wd_path, self._job, self, namespace, self._logger)
 
             # was the processor interrupted?
             if self._interrupted:
@@ -1020,9 +979,7 @@ class JobRunner(CLICommand, ProgressListener):
                 self._write_exitcode(ExitCode.DONE)
 
         except _BaseError as e:
-            # create error information (prefer worker trace if the error came from the child process)
-            trace = getattr(e, '__worker_trace__', None) or \
-                    (''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None)
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             exception = e.content
             exception.details = exception.details if exception.details else {}
             exception.details['trace'] = trace
@@ -1036,9 +993,7 @@ class JobRunner(CLICommand, ProgressListener):
             self._write_exitcode(ExitCode.ERROR, e)
 
         except Exception as e:
-            # create error information (prefer worker trace if the error came from the child process)
-            trace = getattr(e, '__worker_trace__', None) or \
-                    (''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None)
+            trace = ''.join(traceback.format_exception(None, e, e.__traceback__)) if e else None
             exception = ExceptionContent(id='none', reason=str(e), details={'trace': trace})
             error = JobStatus.Error(message="Job failed", exception=exception)
 
@@ -1052,5 +1007,3 @@ class JobRunner(CLICommand, ProgressListener):
         finally:
             if self._status_handler:
                 self._status_handler.join(5)
-            if self._worker:
-                self._worker.stop()

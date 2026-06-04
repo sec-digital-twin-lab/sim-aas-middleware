@@ -69,20 +69,20 @@ class NodeDBService(abc.ABC):
 
     @abc.abstractmethod
     @public_access
-    async def get_node(self) -> NodeInfo:
+    def get_node(self) -> NodeInfo:
         """
         Retrieves information about the node.
         """
 
     @abc.abstractmethod
     @public_access
-    async def get_network(self) -> List[NodeInfo]:
+    def get_network(self) -> List[NodeInfo]:
         """
         Retrieves information about all peers known to the node.
         """
 
     @abc.abstractmethod
-    async def update_network(self, node: NodeInfo) -> None:
+    def update_network(self, node: NodeInfo) -> None:
         """
         Adds information about a node to the db. If there is already information about this node in the database, the
         db is updated accordingly.
@@ -90,14 +90,14 @@ class NodeDBService(abc.ABC):
 
     @abc.abstractmethod
     @public_access
-    async def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
+    def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
         """
         Retrieves the identity given its id (if the node db knows about it).
         """
 
     @abc.abstractmethod
     @public_access
-    async def get_identities(self) -> List[Identity]:
+    def get_identities(self) -> List[Identity]:
         """
         Retrieves a list of all identities known to the node.
         """
@@ -109,27 +109,27 @@ class NodeDBService(abc.ABC):
     # which checks the record's own signature against its embedded public key,
     # and a monotonic nonce blocks rollback. This is the web3 self-signed
     # registration pattern.
-    async def update_identity(self, identity: Identity) -> Identity:
+    def update_identity(self, identity: Identity) -> Identity:
         """
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
         """
 
     @abc.abstractmethod
-    async def delete_identity(self, iid: str) -> None:
+    def delete_identity(self, iid: str) -> None:
         """
         Deletes an identity from the database if it exists.
         """
 
     @abc.abstractmethod
     @public_access
-    async def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
+    def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
         """
         Returns information of a specific namespace.
         """
 
     @abc.abstractmethod
     @public_access
-    async def get_namespaces(self) -> List[NamespaceInfo]:
+    def get_namespaces(self) -> List[NamespaceInfo]:
         """
         Returns a list of all namespaces.
         """
@@ -140,19 +140,19 @@ class NodeDBService(abc.ABC):
     # can rewrite any namespace's budget. Decide the ownership model (node-admin
     # only, or first-caller-owns) and tighten this check. P2PUpdateNamespaceBudget
     # in nodedb/protocol.py needs the same rule.
-    async def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
+    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
         """
 
     @abc.abstractmethod
-    async def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
+    def reserve_namespace_resources(self, name: str, job_id: str, resources: ResourceDescriptor) -> None:
         """
         Attempts to reserve namespace resources for a job.
         """
 
     @abc.abstractmethod
-    async def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
+    def cancel_namespace_reservation(self, name: str, job_id: str) -> bool:
         """
         Cancels a namespace resource reservation (if it exists).
         """

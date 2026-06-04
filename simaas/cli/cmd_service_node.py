@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import signal
@@ -275,13 +274,9 @@ class Service(CLICommand):
                            retain_job_history=args['retain-job-history'],
                            strict_deployment=args['strict-deployment'])
 
-        # startup and join the network using single event loop
-        async def _startup_and_join():
-            await node.startup(p2p_service_address, rest_address=rest_service_address,
-                               bind_all_address=args['bind-all-address'])
-            await node.join_network(boot_node_address)
-
-        asyncio.run(_startup_and_join())
+        node.startup(p2p_service_address, rest_address=rest_service_address,
+                     bind_all_address=args['bind-all-address'])
+        node.join_network(boot_node_address)
 
         # print info message
         if args['rti'] == 'none':

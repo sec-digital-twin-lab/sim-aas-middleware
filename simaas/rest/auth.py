@@ -60,7 +60,7 @@ class VerifyAuthorisation:
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
-        identity: Identity = await self.node.db.get_identity(iid)
+        identity: Identity = self.node.db.get_identity(iid)
         if identity is None:
             raise AuthorisationError(
                 identity_id=iid,
@@ -79,7 +79,7 @@ class VerifyAuthorisation:
             )
 
         # touch the identity
-        await self.node.db.touch_identity(identity)
+        self.node.db.touch_identity(identity)
 
         # stash the verified identity for handlers that need it (e.g. rest_add
         # derives owner_iid from the signer rather than trusting the body)
@@ -94,7 +94,7 @@ class VerifyIsOwner:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-        await self.node.check_dor_ownership(obj_id, identity)
+        self.node.check_dor_ownership(obj_id, identity)
 
 
 class VerifyUserHasAccess:
@@ -103,33 +103,33 @@ class VerifyUserHasAccess:
 
     async def __call__(self, obj_id: str, request: Request):
         identity, body = await VerifyAuthorisation(self.node).__call__(request)
-        await self.node.check_dor_has_access(obj_id, identity)
+        self.node.check_dor_has_access(obj_id, identity)
 
 
 class VerifyTasksSupported:
     def __init__(self, node):
         self.node = node
 
-    async def __call__(self, tasks: List[Task]):
+    def __call__(self, tasks: List[Task]):
         for task in tasks:
-            await self.node.check_rti_is_deployed(task.proc_id)
-            await self.node.check_rti_not_busy(task.proc_id)
+            self.node.check_rti_is_deployed(task.proc_id)
+            self.node.check_rti_not_busy(task.proc_id)
 
 
 class VerifyProcessorDeployed:
     def __init__(self, node):
         self.node = node
 
-    async def __call__(self, proc_id: str):
-        await self.node.check_rti_is_deployed(proc_id)
+    def __call__(self, proc_id: str):
+        self.node.check_rti_is_deployed(proc_id)
 
 
 class VerifyProcessorNotBusy:
     def __init__(self, node):
         self.node = node
 
-    async def __call__(self, proc_id: str):
-        await self.node.check_rti_not_busy(proc_id)
+    def __call__(self, proc_id: str):
+        self.node.check_rti_not_busy(proc_id)
 
 
 class VerifyUserIsJobOwnerOrNodeOwner:
@@ -138,7 +138,7 @@ class VerifyUserIsJobOwnerOrNodeOwner:
 
     async def __call__(self, job_id: str, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        await self.node.check_rti_job_or_node_owner(job_id, identity)
+        self.node.check_rti_job_or_node_owner(job_id, identity)
 
 
 class VerifyUserIsBatchOwnerOrNodeOwner:
@@ -147,7 +147,7 @@ class VerifyUserIsBatchOwnerOrNodeOwner:
 
     async def __call__(self, batch_id: str, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        await self.node.check_rti_batch_or_node_owner(batch_id, identity)
+        self.node.check_rti_batch_or_node_owner(batch_id, identity)
 
 
 class VerifyUserIsNodeOwner:
@@ -156,7 +156,7 @@ class VerifyUserIsNodeOwner:
 
     async def __call__(self, request: Request):
         identity, _ = await VerifyAuthorisation(self.node).__call__(request)
-        await self.node.check_rti_node_owner(identity)
+        self.node.check_rti_node_owner(identity)
 
 
 _AUTH_MARKERS = (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import abc
 from typing import Optional, List, Tuple, Dict
-from fastapi import Response, Form, UploadFile, File, Request
+from fastapi import Response, Form, UploadFile, File
 
 from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe, TagValueType
 from simaas.core.identity import Identity
@@ -22,7 +22,7 @@ class DORInterface(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def search(
+    def search(
             self, patterns: Optional[List[str]] = None, owner_iid: Optional[str] = None,
             data_type: Optional[str] = None, data_format: Optional[str] = None, c_hashes: Optional[List[str]] = None
     ) -> List[DataObject]:
@@ -38,13 +38,13 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @public_access
-    async def statistics(self) -> DORStatistics:
+    def statistics(self) -> DORStatistics:
         """
         Retrieves some statistics from the DOR. This includes a list of all data types and formats found in the DOR.
         """
 
     @abc.abstractmethod
-    async def add(
+    def add(
             self, content_path: str, data_type: str, data_format: str, owner_iid: str,
             creators_iid: Optional[List[str]] = None, access_restricted: Optional[bool] = False,
             content_encrypted: Optional[bool] = False, license: Optional[DataObject.License] = None,
@@ -58,7 +58,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def remove(self, obj_id: str) -> Optional[DataObject]:
+    def remove(self, obj_id: str) -> Optional[DataObject]:
         """
         Deletes a data object from the DOR and returns the meta information of that data object. Authorisation by the
         data object owner is required.
@@ -66,7 +66,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @public_access
-    async def get_meta(self, obj_id: str) -> Optional[DataObject]:
+    def get_meta(self, obj_id: str) -> Optional[DataObject]:
         """
         Retrieves the meta information of a data object. Depending on the type of the data object, either a
         `CDataObject` or a `GPPDataObject` is returned, providing meta information for content and GPP data objects,
@@ -75,12 +75,12 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_access
-    async def get_content(self, obj_id: str, content_path: str) -> None:
+    def get_content(self, obj_id: str, content_path: str) -> None:
         ...
 
     @abc.abstractmethod
     @public_access
-    async def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
+    def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
         """
         Retrieves the provenance information of a data object (identified by its content hash `c_hash`). Provenance
         data includes detailed information how the content of a data object has been produced. In principle, this
@@ -92,7 +92,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
+    def grant_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Grants a user the right to access the contents of a restricted data object. Authorisation required by the owner
         of the data object. Note that access rights only matter if the data object has access restrictions.
@@ -100,7 +100,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
+    def revoke_access(self, obj_id: str, user_iid: str) -> DataObject:
         """
         Revokes the right to access the contents of a restricted data object from a user. Authorisation required by the
         owner of the data object. Note that access rights only matter if the data object has access restrictions.
@@ -108,7 +108,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
+    def transfer_ownership(self, obj_id: str, new_owner_iid: str) -> DataObject:
         """
         Transfers the ownership of a data object to another user. Authorisation required by the current owner of the
         data object.
@@ -116,7 +116,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
+    def update_tags(self, obj_id: str, tags: List[DataObject.Tag]) -> DataObject:
         """
         Adds tags to a data object or updates tags in case they already exist. Authorisation required by the owner of
         the data object.
@@ -124,7 +124,7 @@ class DORInterface(abc.ABC):
 
     @abc.abstractmethod
     @requires_ownership
-    async def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
+    def remove_tags(self, obj_id: str, keys: List[str]) -> DataObject:
         """
         Removes tags from a data object. Authorisation required by the owner of the data object.
         """
@@ -150,8 +150,7 @@ class DORRESTService(DORInterface):
 
     @abc.abstractmethod
     @requires_authentication
-    async def rest_add(self, request: Request, body: str = Form(...),
-                       attachment: UploadFile = File(...)) -> DataObject:
+    def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
         of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
@@ -160,14 +159,14 @@ class DORRESTService(DORInterface):
 
     @abc.abstractmethod
     @requires_access
-    async def rest_get_content(self, obj_id: str) -> Response:
+    def rest_get_content(self, obj_id: str) -> Response:
         """
         Retrieves the content of a data object. Authorisation required by a user who has been granted access to the
         data object.
         """
 
     @public_access
-    async def rest_search(self, p: SearchParameters) -> List[DataObject]:
+    def rest_search(self, p: SearchParameters) -> List[DataObject]:
         """
         Searches a DOR for data objects that match the search criteria. There are two kinds of criteria: constraints
         and patterns. Search constraints are conjunctive, i.e., all constraints have to be matched in order for a data
@@ -177,7 +176,7 @@ class DORRESTService(DORInterface):
         patterns is matched, the data object is included in the final result set. Search patterns are applied to the
         data object tags only. A search pattern is considered matched if it is a substring of either tag key or value.
         """
-        return await self.search(
+        return self.search(
             patterns=p.patterns, owner_iid=p.owner_iid, data_type=p.data_type, data_format=p.data_format,
             c_hashes=p.c_hashes
         )

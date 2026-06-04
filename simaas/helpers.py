@@ -202,7 +202,7 @@ def docker_get_exposed_ports(image_name) -> List[Tuple[int, str]]:
 
 
 def docker_run_job_container(
-        image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_pubkey: str, job_id: str,
+        image_name: str, p2p_address: Tuple[str, int], custodian_address: str, custodian_tls_cert: str, job_id: str,
         budget: Optional[ResourceDescriptor] = None, custom_ports: List[Tuple[int, str, str, int]] = None,
         volumes: Optional[Dict[str, dict]] = None
 ) -> str:
@@ -215,7 +215,7 @@ def docker_run_job_container(
 
         environment = {
             'SIMAAS_CUSTODIAN_ADDRESS': custodian_address,
-            'SIMAAS_CUSTODIAN_PUBKEY': custodian_pubkey,
+            'SIMAAS_CUSTODIAN_TLS_CERT': custodian_tls_cert,
             'JOB_ID': job_id,
             'EXTERNAL_P2P_ADDRESS': f"tcp://{p2p_address[0]}:{p2p_address[1]}"
         }

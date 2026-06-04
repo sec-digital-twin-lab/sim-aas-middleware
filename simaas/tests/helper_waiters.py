@@ -1,8 +1,4 @@
-"""Wait utilities for polling conditions in tests.
-
-This module provides utilities for waiting on asynchronous operations
-such as job completion and processor readiness.
-"""
+"""Wait utilities for polling conditions in tests, such as job completion and processor readiness."""
 
 import time
 from typing import Callable, TypeVar
