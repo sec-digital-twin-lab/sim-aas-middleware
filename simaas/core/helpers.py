@@ -2,7 +2,7 @@ import os
 import shutil
 import datetime
 import json
-import random
+import secrets
 import string
 import jsonschema
 import canonicaljson
@@ -64,7 +64,10 @@ def write_json_to_file(content: Union[list, dict], path: str, schema: dict = Non
 
 
 def generate_random_string(length: int, characters: str = string.ascii_letters+string.digits):
-    return ''.join(random.choice(characters) for _ in range(length))
+    # secrets.choice — not random.choice — because some callers feed this
+    # straight into keystore identity ids and exception ids that should be
+    # unguessable. The throughput difference vs stdlib random is negligible.
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 
 def symmetric_encrypt(content: bytes) -> (bytes, bytes):

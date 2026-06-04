@@ -304,9 +304,13 @@ class Keystore:
             content_hash = hash_json_object(self._content.model_dump(), exclusions=['signature'])
             self._content.signature = self._s_key.sign(content_hash)
 
-            # write contents to disk
+            # write contents to disk with owner-only permissions — the keystore
+            # holds encrypted private keys but the on-disk envelope still
+            # contains identity metadata + ciphertext that we don't want any
+            # other user on the host to read.
             if self._path is not None:
                 write_json_to_file(self._content.model_dump(), self._path)
+                os.chmod(self._path, 0o600)
 
             # update identity
             self._update_identity()
