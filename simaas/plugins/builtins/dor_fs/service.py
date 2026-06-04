@@ -7,7 +7,7 @@ from stat import S_IREAD, S_IRGRP
 from threading import Lock
 from typing import Optional, List, Dict
 
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import Column, String, Boolean, BigInteger, JSON
 from sqlalchemy import create_engine
@@ -406,13 +406,19 @@ class FilesystemDORService(DORRESTService):
 
         return await self.get_meta(obj_id)
 
-    async def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
+    async def rest_add(self, request: Request, body: str = Form(...),
+                       attachment: UploadFile = File(...)) -> Optional[DataObject]:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
         of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
         size of the content.
         """
         body = json.loads(body)
+
+        # ownership is derived from the verified signer, not the body — whoever
+        # signs the request owns the new object. VerifyAuthorisation stashes
+        # the identity on request.state before this handler runs.
+        body['owner_iid'] = request.state.identity.id
 
         # is this request part of a multipart add?
         if '__part_info' in body:

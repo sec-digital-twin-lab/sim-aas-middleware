@@ -7,7 +7,7 @@ from fastapi import Request
 
 from simaas.decorators import requires_proc_deployed, requires_authentication, requires_job_or_node_ownership, \
     requires_proc_not_busy, requires_node_ownership_if_strict, requires_tasks_supported, \
-    requires_batch_or_node_ownership
+    requires_batch_or_node_ownership, public_access
 from simaas.rest.schemas import EndpointDefinition
 from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
 
@@ -61,12 +61,14 @@ class RTIInterface(abc.ABC):
         ...
 
     @abc.abstractmethod
+    @public_access
     async def get_all_procs(self) -> List[Processor]:
         """
         Retrieves a dict of all deployed processors by their id.
         """
 
     @abc.abstractmethod
+    @public_access
     async def get_proc(self, proc_id: str) -> Optional[Processor]:
         """
         Retrieves a specific processors given its id.

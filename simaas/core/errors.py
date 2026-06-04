@@ -36,7 +36,7 @@ class ExceptionContent(BaseModel):
     """Exception content for API response serialization."""
     id: str = Field(..., title="Id", description="The unique identifier of this exception.")
     reason: str = Field(..., title="Reason", description="The reason that caused this exception.")
-    details: Optional[dict] = Field(title="Details", description="Supporting information about this exception.")
+    details: Optional[dict] = Field(default=None, title="Details", description="Supporting information about this exception. May be absent — REST responses omit details for security; the field is kept on the wire model for backwards compatibility.")
 
 
 class _BaseError(Exception):

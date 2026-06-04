@@ -4,6 +4,7 @@ import os
 import traceback
 from datetime import datetime, timezone
 from typing import Union, Optional, Tuple
+from urllib.parse import urlencode
 
 import canonicaljson
 import pydantic
@@ -134,6 +135,12 @@ class Session:
     @property
     def credentials(self) -> (str, str):
         return self._credentials
+
+    def __repr__(self) -> str:
+        # Suppress credentials so the session can't accidentally leak them
+        # via logging, str(), repr(), or pretty-printing.
+        return (f"Session(endpoint_prefix_base={self._endpoint_prefix_base!r}, "
+                f"address={self._remote_address!r}, credentials=<redacted>)")
 
     def refresh_token(self) -> Token:
         data = {
@@ -329,6 +336,6 @@ class EndpointProxy:
                     eligible[k] = v
 
             if eligible:
-                url += '?' + '&'.join(f"{k}={v}" for k, v in eligible.items())
+                url += '?' + urlencode(eligible)
 
         return url

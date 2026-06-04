@@ -6,6 +6,7 @@ from tabulate import tabulate
 from simaas.core.errors import CLIError
 from simaas.cli.helpers import CLICommand, prompt_for_string, prompt_if_missing, prompt_for_selection, \
     extract_address, prompt_for_integer, Argument, print_json
+from simaas.cli.helpers.keystore import load_keystore
 from simaas.helpers import determine_default_rest_address
 from simaas.nodedb.api import NodeDBProxy
 from simaas.nodedb.schemas import NamespaceInfo, ResourceDescriptor
@@ -123,7 +124,9 @@ class NamespaceUpdate(CLICommand):
                            f"-> vCPUs/memory must be positive integers.")
 
         budget = ResourceDescriptor(vcpus=int(args['vcpus']), memory=int(args['memory']))
-        namespace: NamespaceInfo = proxy.update_namespace_budget(args['name'], budget)
+        keystore = load_keystore(args, ensure_publication=True)
+        namespace: NamespaceInfo = proxy.update_namespace_budget(args['name'], budget,
+                                                                 with_authorisation_by=keystore)
 
         used = ResourceDescriptor(vcpus=0, memory=0)
         for r in namespace.reservations.values():

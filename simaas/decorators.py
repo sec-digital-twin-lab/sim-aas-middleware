@@ -1,3 +1,13 @@
+def public_access(func):
+    """Mark an endpoint as intentionally unauthenticated.
+
+    Routes without any auth marker (this or one of the ``requires_*`` markers)
+    are rejected at node startup so missing decorators can't slip into production.
+    """
+    func._public_access = True
+    return func
+
+
 def requires_authentication(func):
     func._require_authentication = True
     return func

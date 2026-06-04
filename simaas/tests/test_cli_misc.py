@@ -93,13 +93,29 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
     vcpus = 4
     memory = 2048
 
+    # NamespaceUpdate requires a signing keystore (auth on update_namespace_budget).
+    password = 'password'
+    identity_result = IdentityCreate().execute({
+        'keystore': temp_dir,
+        'name': 'ns-test',
+        'email': 'ns-test@example.com',
+        'password': password,
+    })
+    ns_keystore: Keystore = identity_result['keystore']
+    auth_args = {
+        'keystore': temp_dir,
+        'keystore-id': ns_keystore.identity.id,
+        'password': password,
+    }
+
     # create a namespace (with invalid resource specification)
     try:
         args = {
             'address': f"{address[0]}:{address[1]}",
             'name': name,
             'vcpus': -4,
-            'memory': 2048
+            'memory': 2048,
+            **auth_args,
         }
         cmd = NamespaceUpdate()
         cmd.execute(args)
@@ -114,7 +130,8 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
             'address': f"{address[0]}:{address[1]}",
             'name': name,
             'vcpus': 4,
-            'memory': '2048asdf'
+            'memory': '2048asdf',
+            **auth_args,
         }
         cmd = NamespaceUpdate()
         cmd.execute(args)
@@ -142,7 +159,8 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
             'address': f"{address[0]}:{address[1]}",
             'name': name,
             'vcpus': vcpus,
-            'memory': memory
+            'memory': memory,
+            **auth_args,
         }
         cmd = NamespaceUpdate()
         result = cmd.execute(args)
@@ -203,7 +221,8 @@ def test_cli_namespace_create_list_update(docker_available, session_node, temp_d
             'address': f"{address[0]}:{address[1]}",
             'name': name,
             'vcpus': 2*vcpus,
-            'memory': 2*memory
+            'memory': 2*memory,
+            **auth_args,
         }
         cmd = NamespaceUpdate()
         result = cmd.execute(args)

@@ -409,7 +409,7 @@ def test_defg_provenance_chain(
         f"{generate_random_string(4)}.json", json.dumps({'v': 1})
     )
     d0 = dor_proxy.add_data_object(
-        d0_path, owner.identity, False, False, 'JSONObject', 'json'
+        d0_path, owner, False, False, 'JSONObject', 'json'
     )
 
     prev_obj = d0

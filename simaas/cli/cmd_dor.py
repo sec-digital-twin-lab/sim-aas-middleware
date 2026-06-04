@@ -86,7 +86,7 @@ class DORAdd(CLICommand):
 
         # connect to the DOR and add the data object
         dor = DORProxy(extract_address(args['address']))
-        meta = dor.add_data_object(obj_path, keystore.identity, restrict_access, content_encrypted,
+        meta = dor.add_data_object(obj_path, keystore, restrict_access, content_encrypted,
                                    args['data-type'], args['data-format'], creators)
         obj_id = meta.obj_id
 

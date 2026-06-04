@@ -172,9 +172,9 @@ async def test_p2p_join_leave_network(p2p_server, p2p_client):
 async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
     """Test P2P data object lookup and fetch operations."""
     # client is supposed to be the owner of the data object -> make the server aware of the identity
-    owner = p2p_client.identity
+    owner_ks = p2p_client.keystore
     nodedb = NodeDBProxy(p2p_server.rest.address())
-    nodedb.update_identity(owner)
+    nodedb.update_identity(owner_ks.identity)
 
     # upload the data object
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -184,7 +184,7 @@ async def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())
-        meta = dor.add_data_object(content_path, owner, False, False, 'JSONObject', 'json')
+        meta = dor.add_data_object(content_path, owner_ks, False, False, 'JSONObject', 'json')
         obj_id = meta.obj_id
 
     # perform the lookup
@@ -246,7 +246,7 @@ async def test_p2p_fetch_restricted(p2p_server):
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())
-        meta = dor.add_data_object(content_path, owner.identity, True, False, 'JSONObject', 'json')
+        meta = dor.add_data_object(content_path, owner, True, False, 'JSONObject', 'json')
         obj_id = meta.obj_id
 
         protocol = P2PFetchDataObject(client)
