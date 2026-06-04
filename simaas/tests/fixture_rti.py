@@ -249,8 +249,11 @@ def add_test_processor(
             with open(gpp_path, 'w') as f:
                 json.dump(gpp.model_dump(), f, indent=2)
 
-            # get the credentials
-            credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+            # get the credentials (if available)
+            if {'GITHUB_USERNAME', 'GITHUB_TOKEN'}.issubset(os.environ):
+                credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+            else:
+                credentials = None
 
             # build the image from the isolated temp copy
             build_processor_image(
