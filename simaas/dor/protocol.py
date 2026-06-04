@@ -164,6 +164,8 @@ class P2PFetchDataObject(P2PProtocol):
             # get the identity of the user
             user = self._node.db.get_identity(request.user_iid)
             if user is None:
+                log.warning('fetch.deny', 'restricted fetch rejected — unknown user identity',
+                            obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
                     successful=False, meta=None, details={
                         'reason': 'user id not found',
@@ -174,6 +176,8 @@ class P2PFetchDataObject(P2PProtocol):
 
             # check if the user has permission to access this data object
             if user.id not in meta.access:
+                log.warning('fetch.deny', 'restricted fetch rejected — user not in ACL',
+                            obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
                     successful=False, meta=None, details={
                         'reason': 'user does not have access',
@@ -185,13 +189,18 @@ class P2PFetchDataObject(P2PProtocol):
             # verify the access request
             token = f"{user.id}:{request.obj_id}".encode('utf-8')
             if not user.verify(token, request.user_signature):
+                # Audit-log the failed signature: an invalid signature for an
+                # otherwise-allowed user is a sign of an attempted access by
+                # someone who doesn't hold the user's private key. Don't echo
+                # the token or the failing signature back over the wire — the
+                # caller doesn't need them and they help nobody but an attacker.
+                log.warning('fetch.deny', 'restricted fetch rejected — invalid signature',
+                            obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
                     successful=False, meta=None, details={
                         'reason': 'authorisation failed',
                         'user_iid': request.user_iid,
                         'obj_id': request.obj_id,
-                        'token': token.decode('utf-8'),
-                        'signature': request.user_signature
                     }
                 ), None
 
