@@ -879,8 +879,6 @@ class JobRunner(CLICommand, ProgressListener):
         env_if_missing(args, 'job_id', 'JOB_ID')
 
         # check if required args are defined
-        print(f"Environment: {os.environ}")
-        print(f"Arguments: {args}")
         if not all(key in args for key in ['custodian_address', 'custodian_pub_key', 'job_id']):
             raise ValidationError(field='arguments', expected='custodian_address, custodian_pub_key, job_id', actual='missing')
 
