@@ -127,15 +127,22 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     auth_token = base64.b64decode(auth_data["authorizationToken"]).decode()  # Decode base64 token
     username, password = auth_token.split(":")
 
-    # Perform ECR login
+    # Perform ECR login. The docker login subprocess can include the registry
+    # host, IAM hints, or even partial credentials in its stderr — log it
+    # server-side and pass a sanitised hint via the exception that won't carry
+    # those details through whatever consumes the error.
     result = subprocess.run(
         ['docker', 'login', '--username', 'AWS', '--password-stdin', ecr_url],
         input=password.encode(), capture_output=True
     )
     if result.returncode != 0:
+        log.error('ecr.login', 'ECR login failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise OperationError(
             operation='ecr_login', stage='authentication', cause='login failed',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker login exited with code {result.returncode}",
         )
 
     # Tag the local image for ECR
@@ -143,18 +150,26 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     ecr_image = get_ecr_image_name(repository_uri, get_ecr_tag(image_name))
     result = subprocess.run(['docker', 'tag', image_name, ecr_image], capture_output=True)
     if result.returncode != 0:
+        log.error('ecr.tag', 'docker tag failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise OperationError(
             operation='tag_image', stage='tagging', cause='failed',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker tag exited with code {result.returncode}",
         )
 
     # Push the image to ECR
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     result = subprocess.run(['docker', 'push', '--platform', 'linux/amd64', ecr_image], capture_output=True)
     if result.returncode != 0:
+        log.error('ecr.push', 'docker push failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise NetworkError(
             operation='ecr_push',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker push exited with code {result.returncode}",
         )
 
     return ecr_image

@@ -141,12 +141,19 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
 
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(e.stderr)
+                # Log the full docker output server-side under the structured
+                # logger so operators see it locally, but do not propagate it
+                # through CLIError.details — the build output can include
+                # BuildKit secret material or internal registry hints, and the
+                # error object travels through other layers before display.
+                log.error('image.build',
+                          'docker build failed',
+                          returncode=e.returncode,
+                          stdout=e.stdout,
+                          stderr=e.stderr)
                 raise CLIError("Creating docker image failed", details={
-                    'stdout': e.stdout,
-                    'stderr': e.stderr,
-                    'exception': str(e),
-                    'trace': trace
+                    'returncode': e.returncode,
+                    'trace': trace,
                 })
 
             except Exception as e:
