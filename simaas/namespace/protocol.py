@@ -15,6 +15,7 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.errors import ExceptionContent
 from simaas.core.logging import get_logger
+from simaas.decorators import p2p_public_access
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
 
 log = get_logger('simaas.ns', 'ns')
@@ -83,6 +84,11 @@ def verify_request_authorisation(identity: Identity, request: NamespaceServiceRe
     return identity.verify(token, request.authorisation.signature)
 
 
+@p2p_public_access
+# Authorisation is enforced inside handle() via the body-level signed token
+# (request.authorisation.iid + signature, verified against the canonicalised
+# service+method+args). The top-level P2PMessage signature is therefore not
+# additionally required.
 class P2PNamespaceServiceCall(P2PProtocol):
     NAME = 'namespace-service-call'
 
@@ -171,7 +177,7 @@ class P2PNamespaceServiceCall(P2PProtocol):
 
     def handle(
             self, request: NamespaceServiceRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
 
         try:
@@ -254,9 +260,12 @@ class P2PNamespaceServiceCall(P2PProtocol):
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            # Log the trace server-side; do not echo it back over the wire — peers
+            # are untrusted with respect to internal call paths.
+            log.error('namespace', 'Unexpected exception in service call',
+                      trace=''.join(traceback.format_exception(None, e, e.__traceback__)))
             return NamespaceServiceResponse(
-                result=None, exception=ExceptionContent(id="unknown", reason=str(e), details={'trace': trace})
+                result=None, exception=ExceptionContent(id="unknown", reason=str(e))
             ), None
 
     @staticmethod

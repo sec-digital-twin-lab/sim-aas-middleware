@@ -4,9 +4,11 @@ from typing import Optional, List, Tuple, Dict
 from pydantic import BaseModel
 
 from simaas.core.identity import Identity
+from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
+from simaas.decorators import p2p_public_access, p2p_requires_authentication
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
-from simaas.core.errors import NetworkError
+from simaas.core.errors import NetworkError, AuthorisationError
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
 
 log = get_logger('simaas.nodedb', 'nodedb')
@@ -22,6 +24,11 @@ class UpdateIdentityMessage(BaseModel):
     identity: Identity
 
 
+@p2p_public_access
+# No header auth needed: the identity record is self-authenticating —
+# Identity.verify_integrity() (called by node.db.update_identity) checks the
+# embedded body signature against the record's own public key, and the
+# monotonic nonce blocks rollback. Same model as the REST update_identity route.
 class P2PUpdateIdentity(P2PProtocol):
     NAME = 'nodedb-update-id'
 
@@ -68,7 +75,7 @@ class P2PUpdateIdentity(P2PProtocol):
 
     def handle(
             self, request: UpdateIdentityMessage, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         log.info('identity', 'Received identity update from node', name=request.identity.name, id=request.identity.id)
         self._node.db.update_identity(request.identity)
@@ -91,6 +98,7 @@ class GetIdentityResponse(BaseModel):
     identity: Identity
 
 
+@p2p_public_access
 class P2PGetIdentity(P2PProtocol):
     NAME = 'nodedb-get-id'
 
@@ -109,10 +117,10 @@ class P2PGetIdentity(P2PProtocol):
 
     def handle(
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        identity: Optional[Identity] = self._node.db.get_identity(request.iid)
-        return GetIdentityResponse(identity=identity), None
+        looked_up: Optional[Identity] = self._node.db.get_identity(request.iid)
+        return GetIdentityResponse(identity=looked_up), None
 
     @staticmethod
     def request_type():
@@ -131,6 +139,7 @@ class GetNetworkResponse(BaseModel):
     network: List[NodeInfo]
 
 
+@p2p_public_access
 class P2PGetNetwork(P2PProtocol):
     NAME = 'nodedb-get-network'
 
@@ -149,7 +158,7 @@ class P2PGetNetwork(P2PProtocol):
 
     def handle(
             self, request: GetIdentityRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         network: List[NodeInfo] = self._node.db.get_network()
         return GetNetworkResponse(network=network), None
@@ -168,6 +177,7 @@ class PeerUpdateMessage(BaseModel):
     snapshot: NodeDBSnapshot
 
 
+@p2p_public_access
 class P2PJoinNetwork(P2PProtocol):
     NAME = 'nodedb-join'
 
@@ -240,7 +250,8 @@ class P2PJoinNetwork(P2PProtocol):
         return boot_node
 
     def handle(
-            self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            self, request: PeerUpdateMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         # update the db information about the originator
         self._node.db.update_identity(request.origin.identity)
@@ -248,8 +259,8 @@ class P2PJoinNetwork(P2PProtocol):
 
         # process the snapshot identities (if any)
         if request.snapshot.update_identity:
-            for identity in request.snapshot.update_identity:
-                self._node.db.update_identity(identity)
+            for snap_identity in request.snapshot.update_identity:
+                self._node.db.update_identity(snap_identity)
 
         # process the snapshot nodes (if any)
         if request.snapshot.update_network:
@@ -279,6 +290,11 @@ class PeerLeaveMessage(BaseModel):
     origin: NodeInfo
 
 
+@p2p_public_access
+# TODO(security): leave notification is currently anonymous. A hostile peer could
+# announce that any other node has left, prompting the receiver to remove that
+# node from its db. Long-term: require @p2p_requires_authentication and check
+# request.origin.identity.id == signer.id.
 class P2PLeaveNetwork(P2PProtocol):
     NAME = 'nodedb-leave'
 
@@ -307,7 +323,8 @@ class P2PLeaveNetwork(P2PProtocol):
                     threading.Thread(target=_fire_and_forget, daemon=True).start()
 
     def handle(
-            self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._node.db.update_identity(request.origin.identity)
         self._node.db.remove_node_by_id(request.origin.identity)
@@ -327,6 +344,11 @@ class UpdateNamespaceBudgetRequest(BaseModel):
     budget: ResourceDescriptor
 
 
+@p2p_requires_authentication
+# TODO(security): mirrors the REST update_namespace_budget endpoint. Until the
+# namespace ownership model is decided, any authenticated peer can rewrite
+# any namespace's budget. P2PReserveNamespaceResources / Cancel below use the
+# same trust model and inherit the same TODO.
 class P2PUpdateNamespaceBudget(P2PProtocol):
     NAME = 'nodedb-namespace-update'
 
@@ -336,7 +358,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
 
     @classmethod
     def perform(
-            cls, node, peer: NodeInfo, namespace: str, budget: ResourceDescriptor
+            cls, node, peer: NodeInfo, namespace: str, budget: ResourceDescriptor,
     ) -> None:
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
@@ -345,9 +367,10 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
         )
 
         try:
-            # send the request
+            # send the request, signed by the local node's keystore
             reply, _ = p2p_request(
-                peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget)
+                peer_address, cls.NAME, UpdateNamespaceBudgetRequest(namespace=namespace, budget=budget),
+                with_authorisation_by=node.keystore,
             )
 
         except NetworkError as e:
@@ -355,7 +378,7 @@ class P2PUpdateNamespaceBudget(P2PProtocol):
 
     def handle(
             self, request: UpdateNamespaceBudgetRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._node.db.handle_namespace_update(request.namespace, request.budget)
         return None, None
@@ -379,6 +402,7 @@ class ResourceReservationReply(BaseModel):
     accepted: bool
 
 
+@p2p_requires_authentication
 class P2PReserveNamespaceResources(P2PProtocol):
     NAME = 'nodedb-namespace-reserve'
 
@@ -388,7 +412,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
 
     @classmethod
     def perform(
-            cls, node, peer: NodeInfo, namespace: str, job_id: str, resources: ResourceDescriptor
+            cls, node, peer: NodeInfo, namespace: str, job_id: str, resources: ResourceDescriptor,
     ) -> bool:
         # get the fully qualified P2P address for the peer
         peer_address = P2PAddress(
@@ -397,11 +421,12 @@ class P2PReserveNamespaceResources(P2PProtocol):
         )
 
         try:
-            # send the request
+            # send the request signed by the local node's keystore
             reply, _ = p2p_request(
                 peer_address, cls.NAME, ResourceReservationRequest(
                     namespace=namespace, job_id=job_id, resources=resources
-                ), reply_type=ResourceReservationReply
+                ), reply_type=ResourceReservationReply,
+                with_authorisation_by=node.keystore,
             )
             reply: ResourceReservationReply = reply  # casting for PyCharm
             return reply.accepted
@@ -412,7 +437,7 @@ class P2PReserveNamespaceResources(P2PProtocol):
 
     def handle(
             self, request: ResourceReservationRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         accepted: bool = self._node.db.handle_namespace_reservation(
             request.namespace, request.job_id, request.resources
@@ -433,6 +458,7 @@ class ResourceReservationCancellation(BaseModel):
     job_id: str
 
 
+@p2p_requires_authentication
 class P2PCancelNamespaceReservation(P2PProtocol):
     NAME = 'nodedb-namespace-cancel'
 
@@ -449,9 +475,10 @@ class P2PCancelNamespaceReservation(P2PProtocol):
         )
 
         try:
-            # send the request
+            # send the request signed by the local node's keystore
             reply, _ = p2p_request(
-                peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id)
+                peer_address, cls.NAME, ResourceReservationCancellation(namespace=namespace, job_id=job_id),
+                with_authorisation_by=node.keystore,
             )
 
         except NetworkError as e:
@@ -459,7 +486,7 @@ class P2PCancelNamespaceReservation(P2PProtocol):
 
     def handle(
             self, request: ResourceReservationCancellation, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         self._node.db.handle_namespace_cancellation(request.namespace, request.job_id)
         return None, None

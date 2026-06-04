@@ -267,7 +267,7 @@ def add_test_processor(
             content_hash = hashlib.sha256(image_name.encode()).hexdigest()
 
             # upload to DOR
-            meta = dor.add_data_object(image_path, keystore.identity, False, False, 'ProcessorDockerImage', 'tar',
+            meta = dor.add_data_object(image_path, keystore, False, False, 'ProcessorDockerImage', 'tar',
                                        tags=[
                                            DataObject.Tag(key='repository', value=gpp.repository),
                                            DataObject.Tag(key='commit_id', value=gpp.commit_id),

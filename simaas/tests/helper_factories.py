@@ -347,7 +347,7 @@ def execute_job(
         P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             peer_tls_cert=runner_identity.tls_cert
-        ))
+        ), custodian.keystore)
 
     # Wait for job completion with timeout
     timeout = 60  # seconds

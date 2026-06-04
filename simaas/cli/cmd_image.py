@@ -427,7 +427,7 @@ class PDIImport(CLICommand):
         # upload the image to the DOR and set GPP tags
         dor = DORProxy(args['address'])
         pdi = dor.add_data_object(
-            tmp_file.name, keystore.identity, False, False, 'ProcessorDockerImage', 'tar', tags=tags
+            tmp_file.name, keystore, False, False, 'ProcessorDockerImage', 'tar', tags=tags
         )
 
         print(f"Importing PDI at {args['pdi_path']}' done -> object id: {pdi.obj_id}")

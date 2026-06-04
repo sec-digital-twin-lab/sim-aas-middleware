@@ -594,7 +594,7 @@ class AWSRTIService(RTIServiceBase):
             # send P2P interrupt (best effort)
             if peer_address:
                 try:
-                    P2PInterruptJob.perform(peer_address)
+                    P2PInterruptJob.perform(peer_address, self._node.keystore)
                 except Exception:
                     pass
 

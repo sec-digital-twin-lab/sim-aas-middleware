@@ -11,7 +11,7 @@ from simaas.core.errors import ConfigurationError, OperationError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 from simaas.p2p.base import (
-    P2PProtocol, P2PMessage, build_server_ssl_context,
+    P2PProtocol, P2PMessage, build_server_ssl_context, identity_from_peercert,
     p2p_respond, p2p_send_error,
 )
 
@@ -27,6 +27,13 @@ class _ConnHandler(socketserver.BaseRequestHandler):
         service: P2PService = self.server.simaas_service
         sock: ssl.SSLSocket = self.request
         try:
+            # Resolve the TLS peer cert (if any) to a known identity. The TLS
+            # handshake has already validated the cert against the trust bundle,
+            # so any cert we see here is from a peer the node trusts; mapping
+            # it to an Identity gives the application layer the verified caller.
+            peer_cert_der: Optional[bytes] = sock.getpeercert(binary_form=True)
+            peer_identity = identity_from_peercert(service.node, peer_cert_der)
+
             raw_len = _recv_exact(sock, 4)
             (header_len,) = struct.unpack('>I', raw_len)
             header = _recv_exact(sock, header_len)
@@ -53,7 +60,8 @@ class _ConnHandler(socketserver.BaseRequestHandler):
                             f.write(chunk)
                             remaining -= len(chunk)
 
-                p2p_respond(sock, protocol, request, attachment_path, download_path=tempdir)
+                p2p_respond(sock, protocol, request, peer_identity=peer_identity,
+                            attachment_path=attachment_path, download_path=tempdir)
 
         except (IOError, ssl.SSLError, socket.error) as e:
             log.info('server', 'Connection error', exc=e)
@@ -77,15 +85,19 @@ class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, server_address: Tuple[str, int], handler_cls, ssl_ctx: ssl.SSLContext):
+    def __init__(self, server_address: Tuple[str, int], handler_cls, ctx_builder):
         super().__init__(server_address, handler_cls, bind_and_activate=True)
-        self._ssl_ctx = ssl_ctx
+        # Built per-accept so the trust bundle reflects the current identity DB
+        # — a new peer can join the network and be authenticated on its next call
+        # without restarting the server. Context creation is cheap (microseconds).
+        self._ctx_builder = ctx_builder
         self.simaas_service: Optional[P2PService] = None
 
     def get_request(self):
         raw_sock, addr = self.socket.accept()
         try:
-            tls_sock = self._ssl_ctx.wrap_socket(raw_sock, server_side=True)
+            ssl_ctx = self._ctx_builder()
+            tls_sock = ssl_ctx.wrap_socket(raw_sock, server_side=True)
         except (ssl.SSLError, OSError) as e:
             log.warning('server', 'TLS handshake failed', addr=addr, exc=e)
             try:
@@ -109,11 +121,39 @@ class P2PService:
         self._server: Optional[_ThreadedSSLServer] = None
         self._thread: Optional[threading.Thread] = None
         self._ready_event = threading.Event()
+        self._node = None
+
+    def set_node(self, node) -> None:
+        """Wire the back-reference to the owning node.
+
+        Required for the mTLS trust bundle and post-handshake identity lookups
+        — both read from ``node.db``. Called by ``Node.startup`` after the
+        node's DB is initialised.
+        """
+        self._node = node
+
+    @property
+    def node(self):
+        return self._node
 
     def is_ready(self) -> bool:
         return self._server is not None
 
     def add(self, protocol: P2PProtocol) -> None:
+        cls = type(protocol)
+        public = getattr(cls, "_p2p_public_access", False)
+        auth_required = getattr(cls, "_p2p_requires_authentication", False)
+        if public and auth_required:
+            raise RuntimeError(
+                f"P2P protocol {cls.__name__} carries both @p2p_public_access "
+                f"and @p2p_requires_authentication; pick one"
+            )
+        if not public and not auth_required:
+            raise RuntimeError(
+                f"P2P protocol {cls.__name__} has no auth marker; add "
+                f"@p2p_public_access or @p2p_requires_authentication from "
+                f"simaas.decorators"
+            )
         log.info('protocol', 'Adding P2P protocol', name=protocol.name())
         self._protocols[protocol.name()] = protocol
 
@@ -130,15 +170,25 @@ class P2PService:
         fqdn = socket.getfqdn()
         return f"tcp://{fqdn}:{self._port}"
 
+    def _current_trust_bundle(self) -> Optional[str]:
+        """Concatenate every known peer's TLS cert into a PEM bundle for mTLS verification."""
+        if self._node is None:
+            return None
+        parts = [i.tls_cert for i in self._node.db.get_identities() if i.tls_cert]
+        return "\n".join(parts) if parts else None
+
+    def _build_server_ctx(self) -> ssl.SSLContext:
+        return build_server_ssl_context(
+            self._keystore.tls_cert_pem(),
+            self._keystore.tls_key_pem(),
+            trusted_peer_certs_pem=self._current_trust_bundle(),
+        )
+
     def start_service_background(self) -> None:
         self._ready_event.clear()
         host, port = self._parse_addr()
         try:
-            ssl_ctx = build_server_ssl_context(
-                self._keystore.tls_cert_pem(),
-                self._keystore.tls_key_pem(),
-            )
-            self._server = _ThreadedSSLServer((host, port), _ConnHandler, ssl_ctx)
+            self._server = _ThreadedSSLServer((host, port), _ConnHandler, self._build_server_ctx)
             self._server.simaas_service = self
         except Exception as e:
             raise ConfigurationError(

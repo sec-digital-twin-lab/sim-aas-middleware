@@ -8,6 +8,29 @@ def public_access(func):
     return func
 
 
+def p2p_public_access(cls):
+    """Mark a P2PProtocol subclass as anonymously callable.
+
+    Protocols without either this marker or ``@p2p_requires_authentication`` are
+    rejected when ``P2PService.add`` registers them, mirroring the REST endpoint
+    assertion. Identity discovery, topology lookups, and similar read-only or
+    self-authenticating protocols belong here.
+    """
+    cls._p2p_public_access = True
+    return cls
+
+
+def p2p_requires_authentication(cls):
+    """Mark a P2PProtocol subclass as requiring a signed request.
+
+    The server rejects unsigned requests for these protocols and passes the
+    verified sender identity into ``handle()`` via the ``identity`` keyword.
+    The caller side must invoke ``perform()`` with a signing keystore.
+    """
+    cls._p2p_requires_authentication = True
+    return cls
+
+
 def requires_authentication(func):
     func._require_authentication = True
     return func
