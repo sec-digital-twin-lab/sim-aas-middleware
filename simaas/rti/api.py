@@ -9,7 +9,7 @@ from simaas.decorators import requires_proc_deployed, requires_authentication, r
     requires_proc_not_busy, requires_node_ownership_if_strict, requires_tasks_supported, \
     requires_batch_or_node_ownership, public_access
 from simaas.rest.schemas import EndpointDefinition
-from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
+from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 
 from simaas.core.keystore import Keystore
 from simaas.rti.schemas import Job, JobStatus, Processor, Task, BatchStatus, ProcessorVolume
@@ -184,14 +184,9 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
 
 
 class RTIProxy(EndpointProxy):
-    @classmethod
-    def from_session(cls, session: Session) -> RTIProxy:
-        return RTIProxy(remote_address=session.address, credentials=session.credentials,
-                        endpoint_prefix=(session.endpoint_prefix_base, 'rti'))
-
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
+    def __init__(self, remote_address: (str, int),
                  endpoint_prefix: Tuple[str, str] = get_proxy_prefix(RTI_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
+        super().__init__(endpoint_prefix, remote_address)
 
     def get_all_procs(self) -> List[Processor]:
         results = self.get("proc")

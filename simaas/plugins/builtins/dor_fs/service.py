@@ -183,8 +183,7 @@ class FilesystemDORService(DORRESTService):
                     dor = DORProxy(node.rest_address)
                     provenance = dor.get_provenance(c_hash)
                     if provenance is not None:
-                        # TODO: change once proxy has been refactored
-                        result.append(DataObjectProvenance.model_validate(provenance))
+                        result.append(provenance)
             except Exception:
                 log.warning('provenance', 'Failed to send request to node', id=node.identity.id, address=str(node.rest_address))
 
@@ -414,9 +413,6 @@ class FilesystemDORService(DORRESTService):
         """
         body = json.loads(body)
 
-        # Owner = verified signer (set by VerifyAuthorisation on request.state).
-        body['owner_iid'] = request.state.identity.id
-
         # is this request part of a multipart add?
         if '__part_info' in body:
             # read the part information
@@ -487,7 +483,7 @@ class FilesystemDORService(DORRESTService):
         p = AddDataObjectParameters.model_validate(body)
 
         return self.add(
-            attachment_path, p.data_type, p.data_format, p.owner_iid,
+            attachment_path, p.data_type, p.data_format, request.state.identity.id,
             creators_iid=p.creators_iid, access_restricted=p.access_restricted,
             content_encrypted=p.content_encrypted, license=p.license, tags=p.tags,
             recipe=p.recipe

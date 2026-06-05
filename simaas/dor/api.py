@@ -7,7 +7,7 @@ from fastapi import Response, Form, UploadFile, File
 from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe, TagValueType
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
+from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 from simaas.decorators import (
     requires_ownership, requires_access, requires_authentication, public_access,
@@ -199,14 +199,9 @@ class DORRESTService(DORInterface):
 
 
 class DORProxy(EndpointProxy):
-    @classmethod
-    def from_session(cls, session: Session) -> DORProxy:
-        return DORProxy(remote_address=session.address, credentials=session.credentials,
-                        endpoint_prefix=(session.endpoint_prefix_base, 'dor'))
-
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
+    def __init__(self, remote_address: (str, int),
                  endpoint_prefix: Tuple[str, str] = get_proxy_prefix(DOR_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
+        super().__init__(endpoint_prefix, remote_address)
 
     def search(self, patterns: list[str] = None, owner_iid: str = None,
                data_type: str = None, data_format: str = None,

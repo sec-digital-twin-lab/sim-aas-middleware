@@ -242,7 +242,6 @@ class P2PFetchDataObject(P2PProtocol):
 
 
 class PushRequest(BaseModel):
-    owner_iid: str
     creators_iid: List[str]
     data_type: str
     data_format: str
@@ -268,12 +267,6 @@ class RelayPushRequest(PushRequest):
     target_iid: str
 
 
-class RelayPushResponse(BaseModel):
-    successful: bool
-    meta: Optional[DataObject]
-    details: Optional[Dict]
-
-
 class PushResponse(BaseModel):
     successful: bool
     meta: Optional[DataObject]
@@ -296,9 +289,6 @@ class P2PPushDataObject(P2PProtocol):
             recipe: Optional[DataObjectRecipe] = None,
             tags: Optional[Dict[str, TagValueType]] = None,
             timeout: Optional[int] = None,
-            # owner_iid is ignored on the wire — server derives it from the
-            # verified signer (direct push) or the attestation (relay push).
-            owner_iid: Optional[str] = None,
             # Set on a relay-forwarded push; lets the target attribute ownership
             # to the attester rather than the immediate (relay) sender.
             attestation: Optional[RelayAttestation] = None,
@@ -309,7 +299,6 @@ class P2PPushDataObject(P2PProtocol):
         )
 
         message = PushRequest(
-            owner_iid=keystore.identity.id,
             creators_iid=creators_iid,
             data_type=data_type,
             data_format=data_format,
@@ -431,9 +420,6 @@ class P2PRelayPushDataObject(P2PProtocol):
             recipe: Optional[DataObjectRecipe] = None,
             tags: Optional[Dict[str, TagValueType]] = None,
             timeout: Optional[int] = None,
-            # Ignored on the wire — server-side ownership comes from the
-            # verified signer or the relay attestation.
-            owner_iid: Optional[str] = None,
     ) -> DataObject:
         peer_address = P2PAddress(
             address=custodian_p2p_address,
@@ -458,7 +444,6 @@ class P2PRelayPushDataObject(P2PProtocol):
 
         message = RelayPushRequest(
             target_iid=target_iid,
-            owner_iid=keystore.identity.id,
             creators_iid=creators_iid,
             data_type=data_type,
             data_format=data_format,
@@ -471,10 +456,10 @@ class P2PRelayPushDataObject(P2PProtocol):
         )
 
         reply: Tuple[Optional[BaseModel], Optional[str]] = p2p_request(
-            peer_address, cls.NAME, message, reply_type=RelayPushResponse,
+            peer_address, cls.NAME, message, reply_type=PushResponse,
             attachment_path=content_path, timeout=timeout, with_authorisation_by=keystore,
         )
-        reply: RelayPushResponse = reply[0]
+        reply: PushResponse = reply[0]
 
         if reply.successful:
             return reply.meta
@@ -494,12 +479,12 @@ class P2PRelayPushDataObject(P2PProtocol):
         network = self._node.db.get_network()
         target_node = next((n for n in network if n.identity.id == request.target_iid), None)
         if target_node is None:
-            return RelayPushResponse(
+            return PushResponse(
                 successful=False, meta=None,
                 details={'reason': 'target node not found in network', 'target_iid': request.target_iid}
             ), None
         if not target_node.has_dor():
-            return RelayPushResponse(
+            return PushResponse(
                 successful=False, meta=None,
                 details={'reason': 'target node does not support DOR capabilities', 'target_iid': request.target_iid}
             ), None
@@ -507,7 +492,7 @@ class P2PRelayPushDataObject(P2PProtocol):
         # if the target is THIS node, push locally via the DOR add path instead of round-tripping
         if target_node.identity.id == self._node.identity.id:
             if self._node.dor is None:
-                return RelayPushResponse(
+                return PushResponse(
                     successful=False, meta=None,
                     details={'reason': 'relay node does not have DOR locally', 'target_iid': request.target_iid}
                 ), None
@@ -517,7 +502,7 @@ class P2PRelayPushDataObject(P2PProtocol):
                 content_encrypted=request.content_encrypted, license=request.license,
                 tags=request.tags, recipe=request.recipe
             )
-            return RelayPushResponse(successful=True, meta=meta, details=None), None
+            return PushResponse(successful=True, meta=meta, details=None), None
 
         # forward via the existing push protocol using OUR keystore. The
         # attestation is carried verbatim — the target verifies it independently.
@@ -530,9 +515,9 @@ class P2PRelayPushDataObject(P2PProtocol):
                 recipe=request.recipe, tags=request.tags,
                 attestation=request.attestation,
             )
-            return RelayPushResponse(successful=True, meta=meta, details=None), None
+            return PushResponse(successful=True, meta=meta, details=None), None
         except NetworkError as e:
-            return RelayPushResponse(
+            return PushResponse(
                 successful=False, meta=None,
                 details={
                     'reason': f'relay-push to target failed: {e.reason}',
@@ -547,4 +532,4 @@ class P2PRelayPushDataObject(P2PProtocol):
 
     @staticmethod
     def response_type():
-        return RelayPushResponse
+        return PushResponse

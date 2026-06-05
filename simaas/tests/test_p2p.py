@@ -305,7 +305,6 @@ def _relay_push_kwargs(custodian, runner_keystore, target_iid, content_path):
         content_path=content_path,
         data_type='JSONObject',
         data_format='json',
-        owner_iid=runner_keystore.identity.id,
         creators_iid=[runner_keystore.identity.id],
         access_restricted=False,
         content_encrypted=False,

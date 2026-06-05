@@ -658,7 +658,7 @@ class JobRunner(CLICommand, ProgressListener):
                     self._logger.info(
                         f"[barrier] send release for 'initial_barrier' to {name} at {p2p_address.address}"
                     )
-                    BatchBarrier.perform(p2p_address, self._keystore, 'initial_barrier', self._batch_status)
+                    BatchBarrier.perform(p2p_address, 'initial_barrier', self._batch_status)
                 except Exception as e:
                     trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
                     self._logger.error(f"[barrier] error: {e} -> {trace}")

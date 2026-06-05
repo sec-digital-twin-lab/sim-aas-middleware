@@ -7,7 +7,7 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.decorators import public_access, requires_authentication
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
-from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
+from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 
 DB_ENDPOINT_PREFIX = "/api/v1/db"
@@ -154,14 +154,9 @@ class NodeDBService(abc.ABC):
 
 
 class NodeDBProxy(EndpointProxy):
-    @classmethod
-    def from_session(cls, session: Session) -> NodeDBProxy:
-        return NodeDBProxy(remote_address=session.address, credentials=session.credentials,
-                           endpoint_prefix=(session.endpoint_prefix_base, 'db'))
-
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
+    def __init__(self, remote_address: (str, int),
                  endpoint_prefix: Tuple[str, str] = get_proxy_prefix(DB_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
+        super().__init__(endpoint_prefix, remote_address)
 
     def get_node(self) -> NodeInfo:
         result = self.get("node")

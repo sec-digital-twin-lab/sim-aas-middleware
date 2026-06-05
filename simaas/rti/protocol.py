@@ -131,14 +131,8 @@ class BatchBarrier(P2PProtocol):
         self._node = getattr(runner, 'node', runner)
 
     @classmethod
-    def perform(cls, peer_address: P2PAddress, keystore: Keystore, barrier_name: str,
+    def perform(cls, peer_address: P2PAddress, barrier_name: str,
                 batch_status: BatchStatus) -> None:
-        # ``keystore`` is kept in the signature for source compatibility, but
-        # we don't present a client cert — BatchBarrier is @p2p_public_access
-        # precisely because the receiving runner has no way to put us in its
-        # trust bundle before receiving this very message (chicken-and-egg).
-        # If we presented a cert, the receiver's TLS layer would reject it for
-        # being unknown and we'd never reach the application handler.
         p2p_request(
             peer_address, cls.NAME, BatchBarrierRequest(
                 barrier_name=barrier_name, batch_status=batch_status
