@@ -1,9 +1,9 @@
-import os
 import threading
 from typing import Optional, List, Tuple, Dict
 
 from pydantic import BaseModel
 
+from simaas.core.helpers import env_int
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
@@ -186,7 +186,7 @@ class P2PJoinNetwork(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
-    _MAX_JOIN_PEERS = int(os.environ.get('SIMAAS_JOIN_MAX_PEERS', 10000))
+    _MAX_JOIN_PEERS = env_int('SIMAAS_JOIN_MAX_PEERS', 10000, min_value=1, max_value=10_000_000)
 
     def perform(self, boot_node: NodeInfo) -> NodeInfo:
         # send an update to the boot node, then proceed to send updates to all peers that discovered along the way

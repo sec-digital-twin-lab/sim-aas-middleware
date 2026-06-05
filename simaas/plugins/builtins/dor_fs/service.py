@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from simaas.core.helpers import hash_string_object, hash_json_object, hash_file_content
 from simaas.dor.api import DORProxy, DORRESTService
 from simaas.core.errors import NotFoundError, OperationError
-from simaas.core.helpers import get_timestamp_now, generate_random_string
+from simaas.core.helpers import env_int, get_timestamp_now, generate_random_string
 from simaas.core.logging import get_logger
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
@@ -421,7 +421,7 @@ class FilesystemDORService(DORRESTService):
         if '__part_info' in body:
             # read the part information
             part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
-            max_parts = int(os.environ.get('SIMAAS_DOR_MAX_PARTS', 100000))
+            max_parts = env_int('SIMAAS_DOR_MAX_PARTS', 100000, min_value=1, max_value=10_000_000)
             if part_info.n <= 0 or part_info.n > max_parts:
                 raise OperationError(operation='multipart_add', stage='validation',
                                      cause=f'declared part count {part_info.n} outside [1, {max_parts}]')

@@ -1,5 +1,4 @@
 import json
-import os
 import time
 from typing import List, Any
 
@@ -9,47 +8,21 @@ from cryptography.hazmat.primitives import hashes
 from fastapi import Request
 from simaas.rti.schemas import Task
 
+from simaas.core.helpers import env_int
 from simaas.core.identity import Identity
 from simaas.core.errors import AuthorisationError
+from simaas.core.logging import get_logger
+from simaas.rest.canonical import REST_AUTH_DOMAIN, canonical_auth_url
 
-
-REST_AUTH_DOMAIN = b'simaas-rest-auth:v1:'
+log = get_logger('simaas.rest', 'rest')
 
 
 def signature_window_seconds() -> int:
-    raw = os.environ.get('SIMAAS_SIG_WINDOW_SECONDS')
-    if raw:
-        try:
-            v = int(raw)
-            if v > 0:
-                return v
-        except ValueError:
-            pass
-    return 300
+    return env_int('SIMAAS_SIG_WINDOW_SECONDS', 300, min_value=10, max_value=3600)
 
 
 def timestamp_within_window(issued_at: int) -> bool:
     return abs(int(time.time()) - issued_at) <= signature_window_seconds()
-
-
-def canonical_auth_url(url: str) -> str:
-    """Stable representation of ``METHOD:URL`` so signer and verifier hash the same bytes.
-
-    Normalises method case, lowercases scheme + host, strips a trailing slash
-    from the path (root excepted), and sorts query parameters alphabetically.
-    """
-    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
-    method, _, raw = url.partition(':')
-    method = method.upper()
-    parts = urlsplit(raw)
-    scheme = parts.scheme.lower()
-    netloc = parts.netloc.lower()
-    path = parts.path
-    if len(path) > 1 and path.endswith('/'):
-        path = path[:-1]
-    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True))) if parts.query else ''
-    normalised = urlunsplit((scheme, netloc, path, query, ''))
-    return f"{method}:{normalised}"
 
 
 def verify_authorisation_token(identity: Identity, signature: str, url: str,
@@ -96,46 +69,53 @@ class VerifyAuthorisation:
         # check if there is the required saasauth header information
         required = ('saasauth-iid', 'saasauth-signature', 'saasauth-timestamp')
         if not all(h in request.headers for h in required):
+            log.warning('auth', 'auth header missing', operation='authenticate')
             raise AuthorisationError(
                 identity_id='unknown',
                 operation='authenticate',
-                hint='saasauth header information missing'
+                hint='authentication failed'
             )
 
         # parse + window-check the timestamp before any DB work
         try:
             issued_at = int(request.headers['saasauth-timestamp'])
         except ValueError:
+            log.warning('auth', 'auth timestamp not an integer',
+                        iid=request.headers['saasauth-iid'], operation='authenticate')
             raise AuthorisationError(
                 identity_id='unknown',
                 operation='authenticate',
-                hint='saasauth-timestamp not an integer',
+                hint='authentication failed',
             )
         if not timestamp_within_window(issued_at):
+            log.warning('auth', 'auth signature outside time window',
+                        iid=request.headers['saasauth-iid'], operation='authenticate')
             raise AuthorisationError(
                 identity_id=request.headers['saasauth-iid'],
                 operation='authenticate',
-                hint='request signature outside the allowed time window',
+                hint='authentication failed',
             )
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
         identity: Identity = self.node.db.get_identity(iid)
         if identity is None:
+            log.warning('auth', 'auth unknown identity', iid=iid, operation='authenticate')
             raise AuthorisationError(
                 identity_id=iid,
                 operation='authenticate',
-                hint='unknown identity'
+                hint='authentication failed'
             )
 
         # verify the signature
         signature = request.headers['saasauth-signature']
         body = await _extract_signed_body(request)
         if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", issued_at, body):
+            log.warning('auth', 'auth invalid signature', iid=iid, operation='authenticate')
             raise AuthorisationError(
                 identity_id=iid,
                 operation='verify_signature',
-                hint='invalid signature'
+                hint='authentication failed'
             )
 
         # touch the identity

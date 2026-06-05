@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from pydantic import BaseModel
 
 from simaas.core.errors import NetworkError
+from simaas.core.helpers import env_int
 from simaas.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -107,18 +108,15 @@ _CHUNK_SIZE = 1024 * 1024
 
 # Inbound P2P attachment ceiling; tune via ``SIMAAS_P2P_MAX_ATTACHMENT_BYTES``.
 _DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 * 1024
+_MIN_ATTACHMENT_BYTES = 1024 * 1024
+_MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024 * 1024
 
 
 def max_attachment_bytes() -> int:
-    raw = os.environ.get('SIMAAS_P2P_MAX_ATTACHMENT_BYTES')
-    if raw:
-        try:
-            value = int(raw)
-            if value > 0:
-                return value
-        except ValueError:
-            pass
-    return _DEFAULT_MAX_ATTACHMENT_BYTES
+    return env_int(
+        'SIMAAS_P2P_MAX_ATTACHMENT_BYTES', _DEFAULT_MAX_ATTACHMENT_BYTES,
+        min_value=_MIN_ATTACHMENT_BYTES, max_value=_MAX_ATTACHMENT_BYTES,
+    )
 
 
 def _parse_tcp_address(address: str) -> Tuple[str, int]:

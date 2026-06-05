@@ -239,7 +239,7 @@ def test_p2p_fetch_restricted(p2p_server):
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
-            assert 'user id not found' in e.details['reason']
+            assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
 
@@ -251,7 +251,7 @@ def test_p2p_fetch_restricted(p2p_server):
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
-            assert 'user does not have access' in e.details['reason']
+            assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
 

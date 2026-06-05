@@ -17,6 +17,28 @@ from simaas.core.logging import get_logger
 log = get_logger('simaas.core', 'core')
 
 
+def env_int(name: str, default: int, *,
+            min_value: int = None, max_value: int = None) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        log.warning('config', 'Env var not an integer; using default',
+                    name=name, raw=raw, default=default)
+        return default
+    if min_value is not None and value < min_value:
+        log.warning('config', 'Env var below allowed minimum; using default',
+                    name=name, raw=value, minimum=min_value, default=default)
+        return default
+    if max_value is not None and value > max_value:
+        log.warning('config', 'Env var above allowed maximum; using default',
+                    name=name, raw=value, maximum=max_value, default=default)
+        return default
+    return value
+
+
 def get_timestamp_now() -> int:
     """
     Returns the current time (UTC) in milliseconds since the beginning of the epoch

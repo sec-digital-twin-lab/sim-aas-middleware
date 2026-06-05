@@ -7,9 +7,12 @@ from simaas.core.eckeypair import ECKeyPair
 from simaas.core.rsakeypair import RSAKeyPair
 
 
+_IDENTITY_DOMAIN = 'simaas-identity:v1:'
+
+
 def generate_identity_token(iid: str, name: str, email: str, nonce: int,
                             s_public_key: str, e_public_key: str, tls_cert: str) -> str:
-    return f"{iid}:{name}:{email}:{nonce}:{s_public_key}:{e_public_key}:{tls_cert}"
+    return f"{_IDENTITY_DOMAIN}{iid}:{name}:{email}:{nonce}:{s_public_key}:{e_public_key}:{tls_cert}"
 
 
 class Identity(BaseModel):

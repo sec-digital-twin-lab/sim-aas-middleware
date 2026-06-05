@@ -181,7 +181,7 @@ class P2PFetchDataObject(P2PProtocol):
                             obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
                     successful=False, meta=None, details={
-                        'reason': 'user id not found',
+                        'reason': 'authorisation failed',
                         'user_iid': request.user_iid,
                         'obj_id': request.obj_id
                     }
@@ -193,7 +193,7 @@ class P2PFetchDataObject(P2PProtocol):
                             obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
                     successful=False, meta=None, details={
-                        'reason': 'user does not have access',
+                        'reason': 'authorisation failed',
                         'user_iid': request.user_iid,
                         'obj_id': request.obj_id
                     }

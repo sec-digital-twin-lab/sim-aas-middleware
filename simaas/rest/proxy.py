@@ -5,7 +5,7 @@ import time
 import traceback
 from datetime import datetime, timezone
 from typing import Union, Optional, Tuple
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode
 
 import canonicaljson
 import pydantic
@@ -19,6 +19,7 @@ from simaas.core.errors import (
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.dor.schemas import DORFilePartInfo
+from simaas.rest.canonical import REST_AUTH_DOMAIN, canonical_auth_url
 from simaas.rest.schemas import Token
 
 
@@ -86,28 +87,11 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
         )
 
 
-_REST_AUTH_DOMAIN = b'simaas-rest-auth:v1:'
-
-
-def _canonical_auth_url(url: str) -> str:
-    method, _, raw = url.partition(':')
-    method = method.upper()
-    parts = urlsplit(raw)
-    scheme = parts.scheme.lower()
-    netloc = parts.netloc.lower()
-    path = parts.path
-    if len(path) > 1 and path.endswith('/'):
-        path = path[:-1]
-    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True))) if parts.query else ''
-    normalised = urlunsplit((scheme, netloc, path, query, ''))
-    return f"{method}:{normalised}"
-
-
 def generate_authorisation_token(authority: Keystore, url: str, issued_at: int,
                                  body: dict = None) -> str:
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-    digest.update(_REST_AUTH_DOMAIN)
-    digest.update(_canonical_auth_url(url).encode('utf-8'))
+    digest.update(REST_AUTH_DOMAIN)
+    digest.update(canonical_auth_url(url).encode('utf-8'))
     digest.update(str(issued_at).encode('utf-8'))
     if body:
         digest.update(canonicaljson.encode_canonical_json(body))

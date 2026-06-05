@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import secrets
 import threading
@@ -9,14 +10,62 @@ import sqlalchemy
 from fastapi import HTTPException, Header, Request
 from sqlalchemy import JSON
 from sqlalchemy.ext.mutable import MutableDict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from simaas.core.helpers import env_int
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
+from simaas.core.logging import get_logger
 from simaas.core.schemas import KeystoreContent
 from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+log = get_logger('simaas.gateway', 'gw')
+
 Base = declarative_base()
+
+
+def _parse_trusted_proxies(spec: str) -> List[ipaddress._BaseNetwork]:
+    nets: List[ipaddress._BaseNetwork] = []
+    for entry in spec.split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            log.warning('config', 'Ignoring invalid CIDR in SIMAAS_TRUSTED_PROXIES', entry=entry)
+    return nets
+
+
+_TRUSTED_PROXIES: List[ipaddress._BaseNetwork] = _parse_trusted_proxies(
+    os.environ.get('SIMAAS_TRUSTED_PROXIES', '')
+)
+
+
+def _is_trusted_proxy(host: str) -> bool:
+    if not _TRUSTED_PROXIES:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return any(addr in net for net in _TRUSTED_PROXIES)
+
+
+def _client_source(request: Request) -> str:
+    peer = request.client.host if request.client else 'unknown'
+    if peer == 'unknown' or not _is_trusted_proxy(peer):
+        return peer
+
+    xff = request.headers.get('x-forwarded-for', '')
+    if not xff:
+        return peer
+
+    ips = [ip.strip() for ip in xff.split(',') if ip.strip()]
+    for ip in reversed(ips):
+        if not _is_trusted_proxy(ip):
+            return ip
+    return ips[0] if ips else peer
 
 
 class UserRecord(Base):
@@ -44,10 +93,10 @@ class User(BaseModel):
     uuid: UUID
     name: str
     email: str
-    hashed_password: str
+    hashed_password: str = Field(..., repr=False)
     failed_login_attempts: int
     enabled: bool
-    keystore: Optional[Keystore]
+    keystore: Optional[Keystore] = Field(default=None, repr=False)
 
     @property
     def identity(self) -> Identity:
@@ -61,7 +110,7 @@ class User(BaseModel):
 
 class APIKey(BaseModel):
     id: int
-    key: str
+    key: str = Field(..., repr=False)
     uuid: UUID
     description: str
 
@@ -206,8 +255,9 @@ class DatabaseWrapper:
             session.query(APIKeyRecord).filter(APIKeyRecord.id.in_(key_ids)).delete()
             session.commit()
 
-    _MAX_FAILED_ATTEMPTS = int(os.environ.get('SIMAAS_API_KEY_MAX_FAILS', 5))
-    _COOLDOWN_SECONDS = int(os.environ.get('SIMAAS_API_KEY_COOLDOWN_SECONDS', 900))
+    _MAX_FAILED_ATTEMPTS = env_int('SIMAAS_API_KEY_MAX_FAILS', 5, min_value=1, max_value=1000)
+    _COOLDOWN_SECONDS = env_int('SIMAAS_API_KEY_COOLDOWN_SECONDS', 900, min_value=1, max_value=86400)
+    _FAILURES_MAX_SIZE = env_int('SIMAAS_API_KEY_FAILURES_MAX', 4096, min_value=64, max_value=1_000_000)
     _failures: Dict[str, Tuple[int, float]] = {}  # source -> (count, first_failure_ts)
     _failures_lock = threading.Lock()
 
@@ -230,6 +280,9 @@ class DatabaseWrapper:
             count, first_ts = cls._failures.get(source, (0, time.time()))
             if time.time() - first_ts > cls._COOLDOWN_SECONDS:
                 count, first_ts = 0, time.time()
+            if source not in cls._failures and len(cls._failures) >= cls._FAILURES_MAX_SIZE:
+                oldest = min(cls._failures.items(), key=lambda kv: kv[1][1])[0]
+                cls._failures.pop(oldest, None)
             cls._failures[source] = (count + 1, first_ts)
 
     @classmethod
@@ -240,24 +293,27 @@ class DatabaseWrapper:
     @classmethod
     def verify_key(cls, request: Request,
                    api_key: str = Header(..., alias="Authorization")) -> Tuple[str, User]:
-        source = request.client.host if request.client else 'unknown'
+        source = _client_source(request)
         cls._check_cooldown(source)
 
         if not api_key.startswith("Bearer "):
+            log.warning('gateway', 'auth header format invalid', source=source)
             cls._record_failure(source)
-            raise HTTPException(status_code=401, detail="Invalid authorization header format")
+            raise HTTPException(status_code=401, detail="authentication failed")
         api_key = api_key[len("Bearer "):]
 
         with cls._session_maker() as session:
             record = session.query(APIKeyRecord).filter(APIKeyRecord.key == api_key).first()
             if record is None:
+                log.warning('gateway', 'auth invalid api key', source=source)
                 cls._record_failure(source)
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                raise HTTPException(status_code=401, detail="authentication failed")
 
             user = cls.get_user(record.uuid)
             if user is None:
+                log.warning('gateway', 'auth user not found for api key', source=source)
                 cls._record_failure(source)
-                raise HTTPException(status_code=401, detail="User not found for API key")
+                raise HTTPException(status_code=401, detail="authentication failed")
 
             if not user.enabled:
                 cls._record_failure(source)

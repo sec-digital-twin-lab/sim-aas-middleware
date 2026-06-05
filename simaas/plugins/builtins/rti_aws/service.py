@@ -39,15 +39,25 @@ REQUIRED_AWS_CONFIG_ENV = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_ROLE_ARN']
 REQUIRED_ENV = REQUIRED_AWS_CONFIG_ENV + ['SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH']
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
-    if all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
-        return AWSConfiguration(
-            aws_region=os.environ['SIMAAS_AWS_REGION'],
-            aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN'],
-            aws_access_key_id=os.environ.get('SIMAAS_AWS_ACCESS_KEY_ID'),
-            aws_secret_access_key=os.environ.get('SIMAAS_AWS_SECRET_ACCESS_KEY'),
-        )
-    else:
+    if not all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
         return None
+
+    access_key = os.environ.get('SIMAAS_AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('SIMAAS_AWS_SECRET_ACCESS_KEY')
+    if bool(access_key) != bool(secret_key):
+        raise ConfigurationError(
+            path='SIMAAS_AWS_ACCESS_KEY_ID,SIMAAS_AWS_SECRET_ACCESS_KEY',
+            expected='both set or neither set',
+            actual='only one set',
+            hint='set both to use explicit static credentials, or unset both to use the default credential chain',
+        )
+
+    return AWSConfiguration(
+        aws_region=os.environ['SIMAAS_AWS_REGION'],
+        aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN'],
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
 
 
 def _boto_kwargs(config: AWSConfiguration) -> dict:

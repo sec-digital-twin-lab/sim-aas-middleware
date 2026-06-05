@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Union, Tuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 @dataclass
@@ -14,7 +14,7 @@ class EndpointDefinition:
 
 
 class Token(BaseModel):
-    access_token: str
+    access_token: str = Field(..., repr=False)
     token_type: str
     expiry: int
 

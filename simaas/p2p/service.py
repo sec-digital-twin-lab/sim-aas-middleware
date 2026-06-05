@@ -8,6 +8,7 @@ import threading
 from typing import Optional, Dict, Tuple
 
 from simaas.core.errors import ConfigurationError, OperationError
+from simaas.core.helpers import env_int
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 from simaas.p2p.base import (
@@ -86,8 +87,9 @@ def _recv_exact(sock: ssl.SSLSocket, n: int) -> bytes:
     return bytes(buf)
 
 
-_MAX_CONCURRENT_CONNECTIONS = int(os.environ.get('SIMAAS_P2P_MAX_CONNS', 512))
+_MAX_CONCURRENT_CONNECTIONS = env_int('SIMAAS_P2P_MAX_CONNS', 512, min_value=1, max_value=65535)
 _CONN_SEM = threading.BoundedSemaphore(_MAX_CONCURRENT_CONNECTIONS)
+_HANDSHAKE_TIMEOUT_SECONDS = env_int('SIMAAS_P2P_HANDSHAKE_TIMEOUT_SECONDS', 10, min_value=1, max_value=300)
 
 
 class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
@@ -111,8 +113,10 @@ class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
                 pass
             raise OSError('connection cap reached')
         try:
+            raw_sock.settimeout(_HANDSHAKE_TIMEOUT_SECONDS)
             ssl_ctx = self._ctx_builder()
             tls_sock = ssl_ctx.wrap_socket(raw_sock, server_side=True)
+            tls_sock.settimeout(None)
         except (ssl.SSLError, OSError) as e:
             log.warning('server', 'TLS handshake failed', addr=addr, exc=e)
             try:

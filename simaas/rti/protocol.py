@@ -2,7 +2,7 @@ import os
 import time
 from typing import Optional, Tuple, Dict, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from simaas.core.errors import NetworkError, OperationError
 from simaas.core.keystore import Keystore
@@ -26,7 +26,7 @@ class RunnerHandshakeRequest(BaseModel):
 class RunnerHandshakeResponse(BaseModel):
     job: Optional[Job]
     custodian_identity: Identity
-    secrets: Dict[str, Optional[str]]
+    secrets: Dict[str, Optional[str]] = Field(..., repr=False)
     join_batch: Optional[BatchStatus]
 
     def __repr__(self) -> str:
