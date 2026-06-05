@@ -1,9 +1,12 @@
+import os
 import secrets
+import threading
+import time
 from typing import Optional, Tuple, List, Dict
 from uuid import UUID, uuid4
 
 import sqlalchemy
-from fastapi import HTTPException, Header
+from fastapi import HTTPException, Header, Request
 from sqlalchemy import JSON
 from sqlalchemy.ext.mutable import MutableDict
 from pydantic import BaseModel
@@ -21,7 +24,7 @@ class UserRecord(Base):
     uuid = Column(sqlalchemy.UUID, primary_key=True)
     name = Column(String, nullable=False)
     email = Column(String, nullable=False, unique=True)
-    hashed_password = Column(String(64), nullable=False)
+    hashed_password = Column(String(255), nullable=False)
     failed_login_attempts = Column(Integer, nullable=False)
     enabled = Column(Boolean, nullable=False)
     keystore_content = Column(MutableDict.as_mutable(JSON), nullable=False)
@@ -203,22 +206,62 @@ class DatabaseWrapper:
             session.query(APIKeyRecord).filter(APIKeyRecord.id.in_(key_ids)).delete()
             session.commit()
 
+    _MAX_FAILED_ATTEMPTS = int(os.environ.get('SIMAAS_API_KEY_MAX_FAILS', 5))
+    _COOLDOWN_SECONDS = int(os.environ.get('SIMAAS_API_KEY_COOLDOWN_SECONDS', 900))
+    _failures: Dict[str, Tuple[int, float]] = {}  # source -> (count, first_failure_ts)
+    _failures_lock = threading.Lock()
+
     @classmethod
-    def verify_key(cls, api_key: str = Header(..., alias="Authorization")) -> Tuple[str, User]:
+    def _check_cooldown(cls, source: str) -> None:
+        with cls._failures_lock:
+            entry = cls._failures.get(source)
+            if entry is None:
+                return
+            count, first_ts = entry
+            if time.time() - first_ts > cls._COOLDOWN_SECONDS:
+                cls._failures.pop(source, None)
+                return
+            if count >= cls._MAX_FAILED_ATTEMPTS:
+                raise HTTPException(status_code=429, detail="Too many failed attempts; retry later")
+
+    @classmethod
+    def _record_failure(cls, source: str) -> None:
+        with cls._failures_lock:
+            count, first_ts = cls._failures.get(source, (0, time.time()))
+            if time.time() - first_ts > cls._COOLDOWN_SECONDS:
+                count, first_ts = 0, time.time()
+            cls._failures[source] = (count + 1, first_ts)
+
+    @classmethod
+    def _record_success(cls, source: str) -> None:
+        with cls._failures_lock:
+            cls._failures.pop(source, None)
+
+    @classmethod
+    def verify_key(cls, request: Request,
+                   api_key: str = Header(..., alias="Authorization")) -> Tuple[str, User]:
+        source = request.client.host if request.client else 'unknown'
+        cls._check_cooldown(source)
+
         if not api_key.startswith("Bearer "):
+            cls._record_failure(source)
             raise HTTPException(status_code=401, detail="Invalid authorization header format")
         api_key = api_key[len("Bearer "):]
 
         with cls._session_maker() as session:
             record = session.query(APIKeyRecord).filter(APIKeyRecord.key == api_key).first()
             if record is None:
+                cls._record_failure(source)
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
             user = cls.get_user(record.uuid)
             if user is None:
+                cls._record_failure(source)
                 raise HTTPException(status_code=401, detail="User not found for API key")
 
             if not user.enabled:
+                cls._record_failure(source)
                 raise HTTPException(status_code=403, detail="Account disabled")
 
+            cls._record_success(source)
             return api_key, user

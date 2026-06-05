@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import List, Optional, Dict, Tuple
 
 from pydantic import BaseModel
@@ -18,17 +19,25 @@ from simaas.p2p.base import (
     P2PProtocol, P2PAddress, p2p_request, RelayAttestation,
     sign_relay_attestation, verify_relay_attestation,
 )
+from simaas.rest.auth import timestamp_within_window
+
+
+_DOR_FETCH_DOMAIN = b'simaas-dor-fetch:v1:'
+
+
+def dor_fetch_token(user_iid: str, obj_id: str) -> bytes:
+    """Token a user signs to assert access to a restricted DOR object."""
+    return _DOR_FETCH_DOMAIN + f"{user_iid}:{obj_id}".encode('utf-8')
 
 
 def _push_attestation_payload(*, target_iid: str, owner_iid: str, data_type: str, data_format: str,
                               creators_iid: List[str], access_restricted: bool,
-                              content_encrypted: bool, content_hash: str) -> dict:
-    """Build the canonical fields a runner signs to attest a forwarded push.
-
-    Covers the ownership-relevant request shape AND the content hash, so the
-    attestation can't be repurposed against a different target, different
-    settings, or different content.
-    """
+                              content_encrypted: bool, content_hash: str,
+                              license: 'DataObject.License',
+                              recipe: Optional['DataObjectRecipe'],
+                              tags: Optional[Dict[str, 'TagValueType']],
+                              issued_at: int) -> dict:
+    """Canonical fields a runner signs to attest a forwarded push."""
     return {
         'target_iid': target_iid,
         'owner_iid': owner_iid,
@@ -38,6 +47,10 @@ def _push_attestation_payload(*, target_iid: str, owner_iid: str, data_type: str
         'access_restricted': access_restricted,
         'content_encrypted': content_encrypted,
         'content_hash': content_hash,
+        'license': license.model_dump(mode='json'),
+        'recipe': recipe.model_dump(mode='json') if recipe is not None else None,
+        'tags': tags if tags is not None else None,
+        'issued_at': issued_at,
     }
 
 log = get_logger('simaas.dor', 'dor')
@@ -187,7 +200,7 @@ class P2PFetchDataObject(P2PProtocol):
                 ), None
 
             # verify the access request
-            token = f"{user.id}:{request.obj_id}".encode('utf-8')
+            token = dor_fetch_token(user.id, request.obj_id)
             if not user.verify(token, request.user_signature):
                 log.warning('fetch.deny', 'restricted fetch rejected — invalid signature',
                             obj_id=request.obj_id, user_iid=request.user_iid)
@@ -346,6 +359,13 @@ class P2PPushDataObject(P2PProtocol):
                     }
                 ), None
             content_hash = hash_file_content(attachment_path).hex() if attachment_path else ''
+            if not timestamp_within_window(request.attestation.issued_at):
+                return PushResponse(
+                    successful=False, meta=None, details={
+                        'reason': 'relay attestation outside time window',
+                        'attester_iid': request.attestation.iid,
+                    }
+                ), None
             expected_payload = _push_attestation_payload(
                 target_iid=self._node.identity.id,
                 owner_iid=request.attestation.iid,
@@ -355,6 +375,10 @@ class P2PPushDataObject(P2PProtocol):
                 access_restricted=request.access_restricted,
                 content_encrypted=request.content_encrypted,
                 content_hash=content_hash,
+                license=request.license,
+                recipe=request.recipe,
+                tags=request.tags,
+                issued_at=request.attestation.issued_at,
             )
             if not verify_relay_attestation(attester, expected_payload, request.attestation.signature):
                 return PushResponse(
@@ -425,6 +449,10 @@ class P2PRelayPushDataObject(P2PProtocol):
             access_restricted=access_restricted,
             content_encrypted=content_encrypted,
             content_hash=hash_file_content(content_path).hex(),
+            license=license,
+            recipe=recipe,
+            tags=tags,
+            issued_at=int(time.time()),
         )
         attestation = sign_relay_attestation(keystore, attestation_payload)
 

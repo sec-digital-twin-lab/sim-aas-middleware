@@ -1,4 +1,6 @@
 import json
+import os
+import time
 from typing import List, Any
 
 import canonicaljson
@@ -11,10 +13,51 @@ from simaas.core.identity import Identity
 from simaas.core.errors import AuthorisationError
 
 
-def verify_authorisation_token(identity: Identity, signature: str, url: str, body: dict = None) -> bool:
-    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+REST_AUTH_DOMAIN = b'simaas-rest-auth:v1:'
 
-    digest.update(url.encode('utf-8'))
+
+def signature_window_seconds() -> int:
+    raw = os.environ.get('SIMAAS_SIG_WINDOW_SECONDS')
+    if raw:
+        try:
+            v = int(raw)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    return 300
+
+
+def timestamp_within_window(issued_at: int) -> bool:
+    return abs(int(time.time()) - issued_at) <= signature_window_seconds()
+
+
+def canonical_auth_url(url: str) -> str:
+    """Stable representation of ``METHOD:URL`` so signer and verifier hash the same bytes.
+
+    Normalises method case, lowercases scheme + host, strips a trailing slash
+    from the path (root excepted), and sorts query parameters alphabetically.
+    """
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    method, _, raw = url.partition(':')
+    method = method.upper()
+    parts = urlsplit(raw)
+    scheme = parts.scheme.lower()
+    netloc = parts.netloc.lower()
+    path = parts.path
+    if len(path) > 1 and path.endswith('/'):
+        path = path[:-1]
+    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True))) if parts.query else ''
+    normalised = urlunsplit((scheme, netloc, path, query, ''))
+    return f"{method}:{normalised}"
+
+
+def verify_authorisation_token(identity: Identity, signature: str, url: str,
+                               issued_at: int, body: dict = None) -> bool:
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(REST_AUTH_DOMAIN)
+    digest.update(canonical_auth_url(url).encode('utf-8'))
+    digest.update(str(issued_at).encode('utf-8'))
     if body:
         digest.update(canonicaljson.encode_canonical_json(body))
 
@@ -51,11 +94,28 @@ class VerifyAuthorisation:
 
     async def __call__(self, request: Request) -> (Identity, dict):
         # check if there is the required saasauth header information
-        if 'saasauth-iid' not in request.headers or 'saasauth-signature' not in request.headers:
+        required = ('saasauth-iid', 'saasauth-signature', 'saasauth-timestamp')
+        if not all(h in request.headers for h in required):
             raise AuthorisationError(
                 identity_id='unknown',
                 operation='authenticate',
                 hint='saasauth header information missing'
+            )
+
+        # parse + window-check the timestamp before any DB work
+        try:
+            issued_at = int(request.headers['saasauth-timestamp'])
+        except ValueError:
+            raise AuthorisationError(
+                identity_id='unknown',
+                operation='authenticate',
+                hint='saasauth-timestamp not an integer',
+            )
+        if not timestamp_within_window(issued_at):
+            raise AuthorisationError(
+                identity_id=request.headers['saasauth-iid'],
+                operation='authenticate',
+                hint='request signature outside the allowed time window',
             )
 
         # check if the node knows about the identity
@@ -71,7 +131,7 @@ class VerifyAuthorisation:
         # verify the signature
         signature = request.headers['saasauth-signature']
         body = await _extract_signed_body(request)
-        if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", body):
+        if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", issued_at, body):
             raise AuthorisationError(
                 identity_id=iid,
                 operation='verify_signature',

@@ -43,6 +43,7 @@ class RelayAttestation(BaseModel):
     """
     iid: str
     signature: str
+    issued_at: int
 
 
 _RELAY_ATTESTATION_DOMAIN = b'p2p-relay-attestation:v1:'
@@ -61,6 +62,7 @@ def sign_relay_attestation(keystore: "Keystore", payload: dict) -> RelayAttestat
     return RelayAttestation(
         iid=keystore.identity.id,
         signature=keystore.sign(_relay_attestation_token(payload)),
+        issued_at=payload['issued_at'],
     )
 
 

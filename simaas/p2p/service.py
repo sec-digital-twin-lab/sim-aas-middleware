@@ -86,6 +86,10 @@ def _recv_exact(sock: ssl.SSLSocket, n: int) -> bytes:
     return bytes(buf)
 
 
+_MAX_CONCURRENT_CONNECTIONS = int(os.environ.get('SIMAAS_P2P_MAX_CONNS', 512))
+_CONN_SEM = threading.BoundedSemaphore(_MAX_CONCURRENT_CONNECTIONS)
+
+
 class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -98,6 +102,14 @@ class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
 
     def get_request(self):
         raw_sock, addr = self.socket.accept()
+        if not _CONN_SEM.acquire(blocking=False):
+            log.warning('server', 'Connection cap reached; rejecting', addr=addr,
+                        cap=_MAX_CONCURRENT_CONNECTIONS)
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
+            raise OSError('connection cap reached')
         try:
             ssl_ctx = self._ctx_builder()
             tls_sock = ssl_ctx.wrap_socket(raw_sock, server_side=True)
@@ -107,8 +119,15 @@ class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
                 raw_sock.close()
             except Exception:
                 pass
+            _CONN_SEM.release()
             raise
         return tls_sock, addr
+
+    def shutdown_request(self, request):
+        try:
+            super().shutdown_request(request)
+        finally:
+            _CONN_SEM.release()
 
     def handle_error(self, request, client_address):
         # Suppress noisy tracebacks for failed TLS handshakes and dropped clients.

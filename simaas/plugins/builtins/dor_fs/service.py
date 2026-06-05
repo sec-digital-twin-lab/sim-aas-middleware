@@ -421,6 +421,13 @@ class FilesystemDORService(DORRESTService):
         if '__part_info' in body:
             # read the part information
             part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
+            max_parts = int(os.environ.get('SIMAAS_DOR_MAX_PARTS', 100000))
+            if part_info.n <= 0 or part_info.n > max_parts:
+                raise OperationError(operation='multipart_add', stage='validation',
+                                     cause=f'declared part count {part_info.n} outside [1, {max_parts}]')
+            if part_info.idx < 0 or part_info.idx >= part_info.n:
+                raise OperationError(operation='multipart_add', stage='validation',
+                                     cause=f'part idx {part_info.idx} outside [0, {part_info.n})')
             if part_info.idx == 0:
                 attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
                 f = open(attachment_path, 'wb')

@@ -1,10 +1,11 @@
 import json
 import math
 import os
+import time
 import traceback
 from datetime import datetime, timezone
 from typing import Union, Optional, Tuple
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import canonicaljson
 import pydantic
@@ -85,10 +86,29 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
         )
 
 
-def generate_authorisation_token(authority: Keystore, url: str, body: dict = None) -> str:
-    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+_REST_AUTH_DOMAIN = b'simaas-rest-auth:v1:'
 
-    digest.update(url.encode('utf-8'))
+
+def _canonical_auth_url(url: str) -> str:
+    method, _, raw = url.partition(':')
+    method = method.upper()
+    parts = urlsplit(raw)
+    scheme = parts.scheme.lower()
+    netloc = parts.netloc.lower()
+    path = parts.path
+    if len(path) > 1 and path.endswith('/'):
+        path = path[:-1]
+    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True))) if parts.query else ''
+    normalised = urlunsplit((scheme, netloc, path, query, ''))
+    return f"{method}:{normalised}"
+
+
+def generate_authorisation_token(authority: Keystore, url: str, issued_at: int,
+                                 body: dict = None) -> str:
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(_REST_AUTH_DOMAIN)
+    digest.update(_canonical_auth_url(url).encode('utf-8'))
+    digest.update(str(issued_at).encode('utf-8'))
     if body:
         digest.update(canonicaljson.encode_canonical_json(body))
 
@@ -102,8 +122,10 @@ def _make_headers(url: str, body: Union[dict, list] = None, authority: Keystore 
     headers = {}
 
     if authority:
+        issued_at = int(time.time())
         headers['saasauth-iid'] = authority.identity.id
-        headers['saasauth-signature'] = generate_authorisation_token(authority, url, body)
+        headers['saasauth-timestamp'] = str(issued_at)
+        headers['saasauth-signature'] = generate_authorisation_token(authority, url, issued_at, body)
 
     if token:
         headers['Authorization'] = f"Bearer {token.access_token}"

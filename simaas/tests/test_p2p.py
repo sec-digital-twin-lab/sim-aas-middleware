@@ -262,8 +262,8 @@ def test_p2p_fetch_restricted(p2p_server):
 
         # the client does not have a valid permission at this point to receive the data object
         try:
-            token = f"{client.identity.id}:12343245"
-            invalid_signature = client.keystore.sign(token.encode('utf-8'))
+            from simaas.dor.protocol import dor_fetch_token
+            invalid_signature = client.keystore.sign(dor_fetch_token(client.identity.id, '12343245'))
 
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
                                    user_signature=invalid_signature)
@@ -274,8 +274,7 @@ def test_p2p_fetch_restricted(p2p_server):
             assert False
 
         # create valid user signature
-        token = f"{client.identity.id}:{obj_id}"
-        signature = client.keystore.sign(token.encode('utf-8'))
+        signature = client.keystore.sign(dor_fetch_token(client.identity.id, obj_id))
 
         # the client does not have permission at this point to receive the data object
         try:

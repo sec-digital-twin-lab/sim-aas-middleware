@@ -30,26 +30,33 @@ log = get_logger('simaas.rti', 'rti')
 
 class AWSConfiguration(BaseModel):
     aws_region: str
-    aws_access_key_id: str
-    aws_secret_access_key: str
     aws_role_arn: str
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
 
 
-REQUIRED_AWS_CONFIG_ENV = [
-    'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN'
-]
+REQUIRED_AWS_CONFIG_ENV = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_ROLE_ARN']
 REQUIRED_ENV = REQUIRED_AWS_CONFIG_ENV + ['SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH']
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
     if all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
         return AWSConfiguration(
             aws_region=os.environ['SIMAAS_AWS_REGION'],
-            aws_access_key_id=os.environ['SIMAAS_AWS_ACCESS_KEY_ID'],
-            aws_secret_access_key=os.environ['SIMAAS_AWS_SECRET_ACCESS_KEY'],
-            aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN']
+            aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN'],
+            aws_access_key_id=os.environ.get('SIMAAS_AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.environ.get('SIMAAS_AWS_SECRET_ACCESS_KEY'),
         )
     else:
         return None
+
+
+def _boto_kwargs(config: AWSConfiguration) -> dict:
+    """boto3 client kwargs; explicit keys when set, otherwise fall through to the default credential chain."""
+    kwargs = {'region_name': config.aws_region}
+    if config.aws_access_key_id and config.aws_secret_access_key:
+        kwargs['aws_access_key_id'] = config.aws_access_key_id
+        kwargs['aws_secret_access_key'] = config.aws_secret_access_key
+    return kwargs
 
 
 def get_ecr_tag(image_name: str) -> str:
@@ -69,10 +76,7 @@ def get_ecr_client(config: Optional[AWSConfiguration] = None) -> Tuple[boto3.cli
     if config is None:
         raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
-    return boto3.client(
-        "ecr", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key
-    ), config
+    return boto3.client("ecr", **_boto_kwargs(config)), config
 
 
 def get_ecr_repository(repository_name: str, config: Optional[AWSConfiguration] = None) -> str:
@@ -205,10 +209,7 @@ def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
     if config is None:
         raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
-    return boto3.client(
-        "batch", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key
-    ), config
+    return boto3.client("batch", **_boto_kwargs(config)), config
 
 
 def batch_ensure_job_def(

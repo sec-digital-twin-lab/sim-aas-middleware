@@ -1,3 +1,4 @@
+import os
 import threading
 from typing import Optional, List, Tuple, Dict
 
@@ -185,11 +186,17 @@ class P2PJoinNetwork(P2PProtocol):
         super().__init__(self.NAME)
         self._node = node
 
+    _MAX_JOIN_PEERS = int(os.environ.get('SIMAAS_JOIN_MAX_PEERS', 10000))
+
     def perform(self, boot_node: NodeInfo) -> NodeInfo:
         # send an update to the boot node, then proceed to send updates to all peers that discovered along the way
         remaining: List[NodeInfo] = [boot_node]
         processed: Dict[str, NodeInfo] = {self._node.identity.id: self._node.db.get_node()}
         while len(remaining) > 0:
+            if len(processed) >= self._MAX_JOIN_PEERS:
+                log.warning('join', 'Join peer cap reached; stopping discovery',
+                            cap=self._MAX_JOIN_PEERS)
+                break
             # have we already processed that peer?
             peer: NodeInfo = remaining.pop(0)
             if peer.identity.id in processed:
@@ -290,8 +297,7 @@ class PeerLeaveMessage(BaseModel):
     origin: NodeInfo
 
 
-@p2p_public_access
-# TODO(security): require auth + check request.origin.identity.id == signer.id.
+@p2p_requires_authentication
 class P2PLeaveNetwork(P2PProtocol):
     NAME = 'nodedb-leave'
 
@@ -309,11 +315,12 @@ class P2PLeaveNetwork(P2PProtocol):
                 )
 
                 if blocking:
-                    p2p_request(peer_address, self.NAME, message)
+                    p2p_request(peer_address, self.NAME, message,
+                                with_authorisation_by=self._node.keystore)
                 else:
-                    def _fire_and_forget(addr=peer_address, msg=message):
+                    def _fire_and_forget(addr=peer_address, msg=message, ks=self._node.keystore):
                         try:
-                            p2p_request(addr, self.NAME, msg)
+                            p2p_request(addr, self.NAME, msg, with_authorisation_by=ks)
                         except Exception as e:
                             log.warning('leave', 'Failed to notify peer of leave', exc=e)
 
@@ -323,6 +330,12 @@ class P2PLeaveNetwork(P2PProtocol):
             self, request: PeerLeaveMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
             identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        if identity is None or identity.id != request.origin.identity.id:
+            raise AuthorisationError(
+                identity_id=identity.id if identity else 'unknown',
+                operation='leave_network',
+                hint='signer must match request.origin.identity',
+            )
         self._node.db.update_identity(request.origin.identity)
         self._node.db.remove_node_by_id(request.origin.identity)
         return None, None
