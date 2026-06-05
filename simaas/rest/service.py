@@ -33,12 +33,10 @@ DOCS_ENDPOINT_PREFIX = "/api/v1"
 
 
 def _error_response(e: _BaseError, status_code: int) -> JSONResponse:
-    """Create a JSON error response from a _BaseError exception.
+    """JSON error response: wire carries ``reason`` + ``id`` only.
 
-    ``details`` is intentionally omitted from the wire response — kwargs passed
-    to errors often contain paths, identity ids, or internal state that a
-    malicious caller could probe. The full details are logged server-side under
-    the error ``id``; clients can quote the id when reporting issues.
+    Full ``details`` are logged server-side under the same ``id`` — clients
+    can quote the id when reporting issues.
     """
     log.error('error', f'Exception: {e.reason}', id=e.id, details=e.details)
     return JSONResponse(

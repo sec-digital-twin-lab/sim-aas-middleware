@@ -291,10 +291,7 @@ class PeerLeaveMessage(BaseModel):
 
 
 @p2p_public_access
-# TODO(security): leave notification is currently anonymous. A hostile peer could
-# announce that any other node has left, prompting the receiver to remove that
-# node from its db. Long-term: require @p2p_requires_authentication and check
-# request.origin.identity.id == signer.id.
+# TODO(security): require auth + check request.origin.identity.id == signer.id.
 class P2PLeaveNetwork(P2PProtocol):
     NAME = 'nodedb-leave'
 
@@ -345,10 +342,8 @@ class UpdateNamespaceBudgetRequest(BaseModel):
 
 
 @p2p_requires_authentication
-# TODO(security): mirrors the REST update_namespace_budget endpoint. Until the
-# namespace ownership model is decided, any authenticated peer can rewrite
-# any namespace's budget. P2PReserveNamespaceResources / Cancel below use the
-# same trust model and inherit the same TODO.
+# TODO(security): tighten once namespaces have an ownership model;
+# P2PReserveNamespaceResources / Cancel inherit the same TODO.
 class P2PUpdateNamespaceBudget(P2PProtocol):
     NAME = 'nodedb-namespace-update'
 

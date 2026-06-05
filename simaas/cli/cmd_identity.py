@@ -555,10 +555,6 @@ class CredentialsTestGithubCredentials(CLICommand):
         # get the credentials
         github_credentials = keystore.github_credentials.get(args['url'])
 
-        # Extract repo_name from the URL without ever embedding the PAT in it —
-        # the legacy code built a "https://login:PAT@github.com/..." string,
-        # which would expose the token in any URL-bearing log line and in the
-        # cloned repo's git config.
         plain_url = args['url']
         index = plain_url.find('github.com')
         if index < 0:
@@ -567,8 +563,8 @@ class CredentialsTestGithubCredentials(CLICommand):
         if not args.get('json_output'):
             print(f"repo_name: {repo_name}")
 
-        # Pass the Authorization header via stdin (curl reads `-H @-`) so the
-        # PAT never appears in /proc/<pid>/cmdline or `ps aux`.
+        # The Authorization header is fed via stdin (curl reads `-H @-`) to
+        # keep the PAT out of argv.
         result = subprocess.run(
             ['curl', '-H', '@-', f"https://api.github.com/repos/{repo_name}"],
             input=f"Authorization: token {github_credentials.personal_access_token}\n".encode(),

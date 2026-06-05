@@ -514,15 +514,19 @@ class JobRunner(CLICommand, ProgressListener):
         class _RunnerIdentityDB:
             def __init__(self):
                 self._identities: Dict[str, Identity] = {}
+                self._lock = threading.Lock()
 
             def add(self, identity: Identity) -> None:
-                self._identities[identity.id] = identity
+                with self._lock:
+                    self._identities[identity.id] = identity
 
             def get_identities(self) -> List[Identity]:
-                return list(self._identities.values())
+                with self._lock:
+                    return list(self._identities.values())
 
             def get_identity(self, iid: str) -> Optional[Identity]:
-                return self._identities.get(iid)
+                with self._lock:
+                    return self._identities.get(iid)
 
         class _RunnerNodeAdapter:
             def __init__(self, ks: Keystore):

@@ -12,7 +12,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 from simaas.p2p.base import (
     P2PProtocol, P2PMessage, build_server_ssl_context, identity_from_peercert,
-    p2p_respond, p2p_send_error,
+    max_attachment_bytes, p2p_respond, p2p_send_error,
 )
 
 log = get_logger('simaas.p2p', 'p2p')
@@ -27,10 +27,6 @@ class _ConnHandler(socketserver.BaseRequestHandler):
         service: P2PService = self.server.simaas_service
         sock: ssl.SSLSocket = self.request
         try:
-            # Resolve the TLS peer cert (if any) to a known identity. The TLS
-            # handshake has already validated the cert against the trust bundle,
-            # so any cert we see here is from a peer the node trusts; mapping
-            # it to an Identity gives the application layer the verified caller.
             peer_cert_der: Optional[bytes] = sock.getpeercert(binary_form=True)
             peer_identity = identity_from_peercert(service.node, peer_cert_der)
 
@@ -49,6 +45,15 @@ class _ConnHandler(socketserver.BaseRequestHandler):
             with tempfile.TemporaryDirectory() as tempdir:
                 attachment_path: Optional[str] = None
                 if request.attachment_size > 0:
+                    cap = max_attachment_bytes()
+                    if request.attachment_size > cap:
+                        log.warning('server', 'Attachment too large',
+                                    protocol=request.protocol,
+                                    declared_size=request.attachment_size, cap=cap)
+                        p2p_send_error(sock, request.protocol,
+                                       f"attachment_size {request.attachment_size} "
+                                       f"exceeds cap {cap}")
+                        return
                     attachment_path = os.path.join(tempdir, 'attachment')
                     remaining = request.attachment_size
                     with open(attachment_path, 'wb') as f:
@@ -87,9 +92,7 @@ class _ThreadedSSLServer(socketserver.ThreadingTCPServer):
 
     def __init__(self, server_address: Tuple[str, int], handler_cls, ctx_builder):
         super().__init__(server_address, handler_cls, bind_and_activate=True)
-        # Built per-accept so the trust bundle reflects the current identity DB
-        # — a new peer can join the network and be authenticated on its next call
-        # without restarting the server. Context creation is cheap (microseconds).
+        # Called per-accept so the trust bundle stays current with the identity DB.
         self._ctx_builder = ctx_builder
         self.simaas_service: Optional[P2PService] = None
 
@@ -124,12 +127,7 @@ class P2PService:
         self._node = None
 
     def set_node(self, node) -> None:
-        """Wire the back-reference to the owning node.
-
-        Required for the mTLS trust bundle and post-handshake identity lookups
-        — both read from ``node.db``. Called by ``Node.startup`` after the
-        node's DB is initialised.
-        """
+        """Back-reference for trust bundle building and identity lookups (reads node.db)."""
         self._node = node
 
     @property

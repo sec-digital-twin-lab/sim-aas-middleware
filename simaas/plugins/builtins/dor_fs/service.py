@@ -414,9 +414,7 @@ class FilesystemDORService(DORRESTService):
         """
         body = json.loads(body)
 
-        # ownership is derived from the verified signer, not the body — whoever
-        # signs the request owns the new object. VerifyAuthorisation stashes
-        # the identity on request.state before this handler runs.
+        # Owner = verified signer (set by VerifyAuthorisation on request.state).
         body['owner_iid'] = request.state.identity.id
 
         # is this request part of a multipart add?

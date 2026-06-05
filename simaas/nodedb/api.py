@@ -104,11 +104,8 @@ class NodeDBService(abc.ABC):
 
     @abc.abstractmethod
     @public_access
-    # No header-level auth needed: the identity record is self-authenticating —
-    # update_identity (see nodedb/default.py) calls Identity.verify_integrity()
-    # which checks the record's own signature against its embedded public key,
-    # and a monotonic nonce blocks rollback. This is the web3 self-signed
-    # registration pattern.
+    # Self-authenticating via Identity.verify_integrity() and a monotonic nonce
+    # — no header-level auth required.
     def update_identity(self, identity: Identity) -> Identity:
         """
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
@@ -136,10 +133,8 @@ class NodeDBService(abc.ABC):
 
     @abc.abstractmethod
     @requires_authentication
-    # TODO(security): namespaces have no owner field today, so any known identity
-    # can rewrite any namespace's budget. Decide the ownership model (node-admin
-    # only, or first-caller-owns) and tighten this check. P2PUpdateNamespaceBudget
-    # in nodedb/protocol.py needs the same rule.
+    # TODO(security): tighten once namespaces have an ownership model. The same
+    # rule applies to P2PUpdateNamespaceBudget in nodedb/protocol.py.
     def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.

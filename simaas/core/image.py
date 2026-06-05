@@ -20,18 +20,14 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
     if not simulate_only:
         original_url = repository_url
 
-        # When credentials are supplied we let git pick them up via the
-        # GIT_ASKPASS helper instead of stuffing user:pat@ into the URL. The
-        # URL form leaks the PAT into git's local config (origin remote) and
-        # into any log line that prints the remote URL; askpass keeps the PAT
-        # in env vars scoped to the subprocess only.
         askpass_dir: Optional[str] = None
         clone_env = dict(os.environ)
         try:
             if credentials:
                 askpass_dir = tempfile.mkdtemp(prefix='simaas-askpass-')
                 askpass_path = os.path.join(askpass_dir, 'askpass.sh')
-                with open(askpass_path, 'w') as f:
+                fd = os.open(askpass_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o700)
+                with os.fdopen(fd, 'w') as f:
                     f.write(
                         '#!/bin/sh\n'
                         'case "$1" in\n'
@@ -39,11 +35,9 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
                         '  *) printf "%s\\n" "$SIMAAS_GIT_PAT" ;;\n'
                         'esac\n'
                     )
-                os.chmod(askpass_path, 0o700)
                 clone_env['GIT_ASKPASS'] = askpass_path
                 clone_env['SIMAAS_GIT_LOGIN'] = credentials[0]
                 clone_env['SIMAAS_GIT_PAT'] = credentials[1]
-                # Suppress any interactive prompts that bypass GIT_ASKPASS.
                 clone_env['GIT_TERMINAL_PROMPT'] = '0'
 
             try:
@@ -53,7 +47,6 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
                 except OSError as e:
                     log.warning('clone', 'Failed to remove directory', path=repository_path, error=str(e))
 
-                # clone the repo (env carries GIT_ASKPASS when credentials are set)
                 Repo.clone_from(repository_url, repository_path, env=clone_env)
 
             except Exception as e:
@@ -121,10 +114,6 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
                 if platform:
                     command.extend(['--platform', platform])
                 if credentials:
-                    # Write the credentials to a tempfile that docker BuildKit
-                    # mounts as a build secret (kept off image layers). Create
-                    # with mode 0600 from the start so concurrent processes on
-                    # the host can't read it during the build window.
                     fd = os.open(credentials_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
                     try:
                         os.write(fd, f"{credentials[0]}:{credentials[1]}".encode())
@@ -141,11 +130,6 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
 
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                # Log the full docker output server-side under the structured
-                # logger so operators see it locally, but do not propagate it
-                # through CLIError.details — the build output can include
-                # BuildKit secret material or internal registry hints, and the
-                # error object travels through other layers before display.
                 log.error('image.build',
                           'docker build failed',
                           returncode=e.returncode,

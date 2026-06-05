@@ -36,13 +36,10 @@ class P2PAddress(BaseModel):
 
 
 class RelayAttestation(BaseModel):
-    """Body-level proof from the original sender for a relayed action.
+    """Signed assertion identifying the original sender for a relayed action.
 
-    mTLS authenticates each hop of a relay chain but not the original requester
-    that the relay is acting on behalf of. The attestation carries the original
-    sender's identity + a signature over the action's invariant fields, so the
-    final target can verify the original authorisation independently of the
-    transport-level identity it sees (which is the relay's).
+    Lets the target verify the original authorisation directly, separately from
+    the immediate (relay) sender's transport-level identity.
     """
     iid: str
     signature: str
@@ -52,11 +49,7 @@ _RELAY_ATTESTATION_DOMAIN = b'p2p-relay-attestation:v1:'
 
 
 def _relay_attestation_token(payload: dict) -> bytes:
-    """Canonical token bytes for a relay attestation signature.
-
-    Domain-separated so an attestation signature can't be repurposed as a
-    plain message signature elsewhere.
-    """
+    """Domain-separated canonical token for a relay attestation signature."""
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
     digest.update(_RELAY_ATTESTATION_DOMAIN)
     digest.update(canonicaljson.encode_canonical_json(payload))
@@ -109,6 +102,21 @@ class P2PProtocol(abc.ABC):
 # Minimum assumed throughput for size-aware timeout (bytes per second).
 _THROUGHPUT_FLOOR = 10 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
+
+# Inbound P2P attachment ceiling; tune via ``SIMAAS_P2P_MAX_ATTACHMENT_BYTES``.
+_DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 * 1024
+
+
+def max_attachment_bytes() -> int:
+    raw = os.environ.get('SIMAAS_P2P_MAX_ATTACHMENT_BYTES')
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return _DEFAULT_MAX_ATTACHMENT_BYTES
 
 
 def _parse_tcp_address(address: str) -> Tuple[str, int]:
@@ -237,6 +245,9 @@ def _recv_header(sock: socket.socket) -> P2PMessage:
 def _recv_attachment(sock: socket.socket, size: int, download_path: Optional[str]) -> Optional[str]:
     if size <= 0:
         return None
+    cap = max_attachment_bytes()
+    if size > cap:
+        raise IOError(f'attachment_size {size} exceeds cap {cap}')
     if download_path is None:
         download_path = os.devnull
     remaining = size
@@ -260,10 +271,6 @@ def p2p_request(
     effective_timeout_s = max(base_timeout_ms, int(attachment_size / _THROUGHPUT_FLOOR * 1000)) / 1000.0
 
     host, port = _parse_tcp_address(peer.address)
-    # Pass the keystore through to the TLS context: when present, the client
-    # presents its cert during the handshake and the server resolves it to a
-    # known identity (mTLS). When absent, the call goes through anonymously —
-    # only usable against @p2p_public_access protocols.
     ssl_ctx = build_client_ssl_context(peer.peer_tls_cert, client_keystore=with_authorisation_by)
 
     raw_sock: Optional[socket.socket] = None

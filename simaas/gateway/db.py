@@ -50,12 +50,20 @@ class User(BaseModel):
     def identity(self) -> Identity:
         return self.keystore.identity
 
+    def __repr__(self) -> str:
+        return (f"User(uuid={self.uuid.hex}, name={self.name!r}, email={self.email!r}, "
+                f"hashed_password=<redacted>, failed_login_attempts={self.failed_login_attempts}, "
+                f"enabled={self.enabled}, keystore=<redacted>)")
+
 
 class APIKey(BaseModel):
     id: int
     key: str
     uuid: UUID
     description: str
+
+    def __repr__(self) -> str:
+        return f"APIKey(id={self.id}, uuid={self.uuid.hex}, key=<redacted>, description={self.description!r})"
 
 
 class DatabaseWrapper:

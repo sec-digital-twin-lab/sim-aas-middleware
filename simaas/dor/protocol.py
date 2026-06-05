@@ -189,11 +189,6 @@ class P2PFetchDataObject(P2PProtocol):
             # verify the access request
             token = f"{user.id}:{request.obj_id}".encode('utf-8')
             if not user.verify(token, request.user_signature):
-                # Audit-log the failed signature: an invalid signature for an
-                # otherwise-allowed user is a sign of an attempted access by
-                # someone who doesn't hold the user's private key. Don't echo
-                # the token or the failing signature back over the wire — the
-                # caller doesn't need them and they help nobody but an attacker.
                 log.warning('fetch.deny', 'restricted fetch rejected — invalid signature',
                             obj_id=request.obj_id, user_iid=request.user_iid)
                 return FetchResponse(
@@ -288,14 +283,11 @@ class P2PPushDataObject(P2PProtocol):
             recipe: Optional[DataObjectRecipe] = None,
             tags: Optional[Dict[str, TagValueType]] = None,
             timeout: Optional[int] = None,
-            # owner_iid was previously a separate field on the wire; ownership
-            # is now derived server-side from the verified signer (direct push)
-            # or from the embedded relay attestation (forwarded push).
+            # owner_iid is ignored on the wire — server derives it from the
+            # verified signer (direct push) or the attestation (relay push).
             owner_iid: Optional[str] = None,
-            # Set by ``P2PRelayPushDataObject.handle`` when this is a forwarded
-            # push — the runner's signed attestation telling the target that
-            # the immediate mTLS sender (the relay) is acting on the runner's
-            # behalf. Direct callers leave this ``None``.
+            # Set on a relay-forwarded push; lets the target attribute ownership
+            # to the attester rather than the immediate (relay) sender.
             attestation: Optional[RelayAttestation] = None,
     ) -> DataObject:
         peer_address = P2PAddress(
@@ -304,7 +296,7 @@ class P2PPushDataObject(P2PProtocol):
         )
 
         message = PushRequest(
-            owner_iid=keystore.identity.id,  # ignored by server; kept for schema compatibility
+            owner_iid=keystore.identity.id,
             creators_iid=creators_iid,
             data_type=data_type,
             data_format=data_format,
@@ -341,9 +333,8 @@ class P2PPushDataObject(P2PProtocol):
                 }
             ), None
 
-        # Default: ownership is the mTLS-verified immediate sender. If a relay
-        # attestation is present and valid, it overrides — the immediate sender
-        # is a relay acting on behalf of the attester named in the attestation.
+        # Ownership = mTLS-verified sender, unless a valid relay attestation
+        # names the attester as the rightful owner instead.
         owner_iid = identity.id
         if request.attestation is not None:
             attester = self._node.db.get_identity(request.attestation.iid)
@@ -416,9 +407,8 @@ class P2PRelayPushDataObject(P2PProtocol):
             recipe: Optional[DataObjectRecipe] = None,
             tags: Optional[Dict[str, TagValueType]] = None,
             timeout: Optional[int] = None,
-            # owner_iid was previously a separate wire field; ownership is now
-            # derived server-side from the verified signer (direct push) or the
-            # attester (relay push). The keystore identity is the source of truth.
+            # Ignored on the wire — server-side ownership comes from the
+            # verified signer or the relay attestation.
             owner_iid: Optional[str] = None,
     ) -> DataObject:
         peer_address = P2PAddress(
@@ -426,9 +416,6 @@ class P2PRelayPushDataObject(P2PProtocol):
             peer_tls_cert=custodian_identity.tls_cert
         )
 
-        # Build the runner-signed attestation that the custodian forwards to the
-        # target. Binds the attested owner+target+content; the target verifies
-        # it against the runner's known identity and records owner = runner.
         attestation_payload = _push_attestation_payload(
             target_iid=target_iid,
             owner_iid=keystore.identity.id,
@@ -443,7 +430,7 @@ class P2PRelayPushDataObject(P2PProtocol):
 
         message = RelayPushRequest(
             target_iid=target_iid,
-            owner_iid=keystore.identity.id,  # ignored server-side; kept for schema compat
+            owner_iid=keystore.identity.id,
             creators_iid=creators_iid,
             data_type=data_type,
             data_format=data_format,
@@ -470,10 +457,9 @@ class P2PRelayPushDataObject(P2PProtocol):
             self, request: RelayPushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
             identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        # The verified mTLS sender (runner) is the rightful owner of this object.
-        # For the target == self path we record ownership directly here. For the
-        # forward path the target instead reads it from the relay attestation
-        # that the runner included in this request.
+        # target == self: record ownership = mTLS sender directly.
+        # target != self: forward + carry the attestation so the target attributes
+        # ownership to the runner rather than this relay.
         owner_iid = identity.id
 
         # find the target node in the local network view (custodian has full peer connectivity)
@@ -505,9 +491,8 @@ class P2PRelayPushDataObject(P2PProtocol):
             )
             return RelayPushResponse(successful=True, meta=meta, details=None), None
 
-        # forward via the existing push protocol using OUR keystore (the runner cannot reach this peer).
-        # The runner's attestation is carried verbatim so the target can record
-        # ownership as the runner, not as us (the relay).
+        # forward via the existing push protocol using OUR keystore. The
+        # attestation is carried verbatim — the target verifies it independently.
         try:
             meta = P2PPushDataObject.perform(
                 target_node.p2p_address, self._node.keystore, target_node.identity,

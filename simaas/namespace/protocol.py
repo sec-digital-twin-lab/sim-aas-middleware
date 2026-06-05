@@ -260,8 +260,6 @@ class P2PNamespaceServiceCall(P2PProtocol):
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:
-            # Log the trace server-side; do not echo it back over the wire — peers
-            # are untrusted with respect to internal call paths.
             log.error('namespace', 'Unexpected exception in service call',
                       trace=''.join(traceback.format_exception(None, e, e.__traceback__)))
             return NamespaceServiceResponse(

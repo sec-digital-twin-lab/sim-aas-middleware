@@ -29,6 +29,12 @@ class RunnerHandshakeResponse(BaseModel):
     secrets: Dict[str, Optional[str]]
     join_batch: Optional[BatchStatus]
 
+    def __repr__(self) -> str:
+        return (f"RunnerHandshakeResponse(job={self.job!r}, "
+                f"custodian_identity={self.custodian_identity!r}, "
+                f"secrets=<{len(self.secrets)} redacted keys>, "
+                f"join_batch={self.join_batch!r})")
+
 
 @p2p_requires_authentication
 class P2PRunnerPerformHandshake(P2PProtocol):
@@ -112,14 +118,7 @@ class BatchBarrierRequest(BaseModel):
 
 
 @p2p_public_access
-# TODO(security): BatchBarrier is the mechanism by which one runner first learns
-# about its batch peers' identities and addresses. Until that message arrives
-# the receiving runner has no way to put the sender into its mTLS trust bundle,
-# so requiring auth here is a chicken-and-egg lock-out. The long-term fix is to
-# have the custodian (already mutually trusted) broadcast barrier releases on
-# the runners' behalf — keeping the runner↔runner channel out of the loop. For
-# now, the barrier carries an unauthenticated BatchStatus; a malicious party on
-# the runner's reachable network could spoof a release with a bogus mapping.
+# TODO(security): replace with a custodian-relayed release so this can be auth'd.
 class BatchBarrier(P2PProtocol):
     NAME = 'rti-batch-barrier'
 

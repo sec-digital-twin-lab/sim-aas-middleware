@@ -17,3 +17,6 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     expiry: int
+
+    def __repr__(self) -> str:
+        return f"Token(access_token=<redacted>, token_type={self.token_type!r}, expiry={self.expiry})"

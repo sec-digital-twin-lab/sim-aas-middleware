@@ -81,8 +81,7 @@ class VerifyAuthorisation:
         # touch the identity
         self.node.db.touch_identity(identity)
 
-        # stash the verified identity for handlers that need it (e.g. rest_add
-        # derives owner_iid from the signer rather than trusting the body)
+        # expose the verified identity to handlers via request.state
         request.state.identity = identity
 
         return identity, body
