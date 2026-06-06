@@ -207,6 +207,23 @@ class RTIServiceBase(RTIRESTService):
             if record is None:
                 raise NotFoundError(resource_type='job', resource_id=job_id)
 
+            # Reject handshakes for terminal jobs: if a runner starts up after
+            # cancellation, its identity would be registered but never cleaned
+            # up (update_job_status early-returns for terminal jobs). The
+            # handshake handler turns this into job=None and the runner exits.
+            status = JobStatus.model_validate(record.status)
+            if status.state in [
+                JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED,
+            ]:
+                log.warning(
+                    'handshake', 'Runner handshake rejected — job already terminal',
+                    job=job_id, state=str(status.state), runner=runner_identity.id,
+                )
+                raise ValidationError(
+                    field='job.state', expected='non-terminal', actual=str(status.state),
+                    hint='Job already terminal; runner should exit without registering',
+                )
+
             # update the runner information
             record.runner['identity'] = runner_identity.model_dump()
             record.runner['address'] = runner_address
@@ -582,7 +599,9 @@ class RTIServiceBase(RTIRESTService):
                         )
                     ))
                     record = session.get(DBJobInfo, job.id)
-                    record.status = status
+                    # status column is MutableDict(JSON) — must assign a dict,
+                    # not the Pydantic instance, for the mutation to land.
+                    record.status = status.model_dump()
 
                 session.commit()
 
