@@ -230,23 +230,32 @@ def test_processor_deploy_and_undeploy(docker_available, docker_non_strict_node,
 
 
 @pytest.mark.integration
-def test_processor_deploy_with_volume(rti_context: RTIContext, deploy_volume_factory):
-    """Deploy a processor with a backend-appropriate volume reference.
+@pytest.mark.docker_only
+def test_processor_deploy_with_volume(docker_available, docker_non_strict_node):
+    """Test processor deployment with a mounted volume.
 
-    Backend-agnostic via ``rti_context``; ``deploy_volume_factory`` is
-    overridden per backend to yield the right reference shape. Uses
-    ``proc-ping`` so the test owns the full deploy/undeploy cycle of its
-    processor (``proc-abc`` is already deployed by a session fixture).
+    Skipped against this repo's AWS RTI: the volume reference is a
+    local bind-mount path, incompatible with our AWS RTI's EFS-backed
+    volumes. Other non-Docker RTIs that accept bind-mount references
+    can run this test as-is.
     """
-    user: Keystore = rti_context.session_node.keystore
-    dor = rti_context.dor_proxy
-    rti = rti_context.rti_proxy
+    if not docker_available:
+        pytest.skip("Docker is not available")
 
-    proc: DataObject = add_test_processor(dor, user, 'proc-ping', 'examples/simple/ping')
+    user: Keystore = docker_non_strict_node.keystore
+    dor = DORProxy(docker_non_strict_node.rest.address())
+    rti = RTIProxy(docker_non_strict_node.rest.address())
+
+    # upload the test proc GCC
+    proc: DataObject = add_test_processor(dor, user, 'proc-abc', 'examples/simple/abc')
     proc_id = proc.obj_id
 
-    with deploy_volume_factory(name='data_volume', mount_point='/data') as volume:
-        rti.deploy(proc_id, user, volumes=[volume])
+    with tempfile.TemporaryDirectory() as temp_dir:
+        rti.deploy(proc_id, user, volumes=[
+            ProcessorVolume(name='data_volume', mount_point='/data', read_only=False, reference={
+                'path': temp_dir,
+            })
+        ])
 
         # wait for deployment to be done
         proc_status = wait_for_processor_ready(rti, proc_id)
@@ -316,52 +325,55 @@ def test_job_submit_and_retrieve(rti_context: RTIContext, test_context, extra_ke
 
 
 @pytest.mark.integration
-def test_job_cancel_by_owner(rti_context: RTIContext, extra_keystores):
+@pytest.mark.docker_only
+def test_job_cancel_by_owner(docker_available, session_node, rti_proxy, deployed_abc_processor, known_user, node_db_proxy):
     """Test job cancellation by the job owner.
 
-    Backend-agnostic: runs against every backend the host conftest
-    enables. The original ``@docker_only`` marker assumed the custodian
-    could not reach the runner, which no longer holds for backends with
-    bidirectional P2P.
+    Skipped against this repo's AWS RTI: the local custodian cannot
+    reach a runner on the AWS-internal network to send the P2P cancel
+    signal. Other non-Docker RTIs with bidirectional custodian-runner
+    P2P can run this test as-is.
     """
-    proc_id = rti_context.deployed_abc_processor.obj_id
-    wrong_user = rti_context.get_known_user(extra_keystores)
-    owner = rti_context.session_node.keystore
+    if not docker_available:
+        pytest.skip("Docker is not available")
+
+    proc_id = deployed_abc_processor.obj_id
+    wrong_user = known_user
+    owner = session_node.keystore
 
     # Count runner identities before job submission
-    runner_count_before = count_runner_identities(rti_context.node_db_proxy)
+    runner_count_before = count_runner_identities(node_db_proxy)
 
     # Create task with large input values for longer execution
-    task = create_abc_task(proc_id, owner, a=100, b=100,
-                          memory=rti_context.default_memory)
+    task = create_abc_task(proc_id, owner, a=100, b=100)
 
     # submit the job
-    results = rti_context.rti_proxy.submit([task], with_authorisation_by=owner)
+    results = rti_proxy.submit([task], owner)
     assert results is not None
 
     job_id = results[0].id
 
     # try to cancel the job (wrong user)
     with pytest.raises(RemoteError) as e:
-        rti_context.rti_proxy.cancel_job(job_id, with_authorisation_by=wrong_user)
+        rti_proxy.cancel_job(job_id, wrong_user)
     assert 'authorisation denied' in e.value.reason.lower() or 'job' in e.value.reason.lower()
 
     # wait until the job is running
     while True:
-        status: JobStatus = rti_context.rti_proxy.get_job_status(job_id, owner)
+        status: JobStatus = rti_proxy.get_job_status(job_id, owner)
         if status.state == JobStatus.State.RUNNING:
             break
         time.sleep(0.5)
 
     # cancel the job (correct user)
-    rti_context.rti_proxy.cancel_job(job_id, with_authorisation_by=owner)
+    rti_proxy.cancel_job(job_id, owner)
 
     # Wait for cancellation to complete
-    status = wait_for_job_completion(rti_context.rti_proxy, job_id, owner)
+    status = wait_for_job_completion(rti_proxy, job_id, owner)
     assert_job_cancelled(status)
 
     # Verify runner identity was cleaned up after job cancellation
-    assert_runner_identities_cleaned_up(rti_context.node_db_proxy, runner_count_before)
+    assert_runner_identities_cleaned_up(node_db_proxy, runner_count_before)
 
 
 @pytest.mark.integration
