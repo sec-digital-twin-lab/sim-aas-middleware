@@ -206,6 +206,22 @@ class PushRequest(BaseModel):
     tags: Optional[Dict[str, TagValueType]]
 
 
+class RelayPushRequest(PushRequest):
+    """Push request that asks the recipient (custodian) to relay-push to ``target_iid``.
+
+    Used by runners whose network position prevents them from reaching the actual target node
+    directly (e.g. cloud functions, behind NAT). The custodian — which has full peer connectivity
+    by construction — performs the downstream ``P2PPushDataObject`` on the runner's behalf.
+    """
+    target_iid: str
+
+
+class RelayPushResponse(BaseModel):
+    successful: bool
+    meta: Optional[DataObject]
+    details: Optional[Dict]
+
+
 class PushResponse(BaseModel):
     successful: bool
     meta: Optional[DataObject]
@@ -288,3 +304,118 @@ class P2PPushDataObject(P2PProtocol):
     @staticmethod
     def response_type():
         return PushResponse
+
+
+class P2PRelayPushDataObject(P2PProtocol):
+    """Custodian-side relay for a runner's data-object push.
+
+    Runners whose network position cannot reach the actual target node directly send the push
+    to their custodian — which has full peer connectivity — and the custodian forwards it via
+    the existing ``P2PPushDataObject`` protocol.
+    """
+    NAME = 'dor-relay-push'
+
+    def __init__(self, node) -> None:
+        super().__init__(self.NAME)
+        self._node = node
+
+    @classmethod
+    async def perform(
+            cls, custodian_p2p_address: str, keystore: Keystore, custodian_identity: Identity,
+            target_iid: str, content_path: str,
+            data_type: str, data_format: str, owner_iid: str, creators_iid: List[str],
+            access_restricted: bool, content_encrypted: bool, license: DataObject.License,
+            recipe: Optional[DataObjectRecipe] = None,
+            tags: Optional[Dict[str, TagValueType]] = None,
+            timeout: Optional[int] = None
+    ) -> DataObject:
+        peer_address = P2PAddress(
+            address=custodian_p2p_address,
+            curve_secret_key=keystore.curve_secret_key(),
+            curve_public_key=keystore.curve_public_key(),
+            curve_server_key=custodian_identity.c_public_key
+        )
+
+        message = RelayPushRequest(
+            target_iid=target_iid,
+            owner_iid=owner_iid,
+            creators_iid=creators_iid,
+            data_type=data_type,
+            data_format=data_format,
+            access_restricted=access_restricted,
+            content_encrypted=content_encrypted,
+            license=license,
+            recipe=recipe,
+            tags=tags
+        )
+
+        reply: Tuple[Optional[BaseModel], Optional[str]] = await p2p_request(
+            peer_address, cls.NAME, message, reply_type=RelayPushResponse,
+            attachment_path=content_path, timeout=timeout
+        )
+        reply: RelayPushResponse = reply[0]
+
+        if reply.successful:
+            return reply.meta
+        else:
+            raise NetworkError(peer_address=custodian_p2p_address, operation='relay-push', **(reply.details or {}))
+
+    async def handle(
+            self, request: RelayPushRequest, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
+        # find the target node in the local network view (custodian has full peer connectivity)
+        network = await self._node.db.get_network()
+        target_node = next((n for n in network if n.identity.id == request.target_iid), None)
+        if target_node is None:
+            return RelayPushResponse(
+                successful=False, meta=None,
+                details={'reason': 'target node not found in network', 'target_iid': request.target_iid}
+            ), None
+        if not target_node.has_dor():
+            return RelayPushResponse(
+                successful=False, meta=None,
+                details={'reason': 'target node does not support DOR capabilities', 'target_iid': request.target_iid}
+            ), None
+
+        # if the target is THIS node, push locally via the DOR add path instead of round-tripping
+        if target_node.identity.id == self._node.identity.id:
+            if self._node.dor is None:
+                return RelayPushResponse(
+                    successful=False, meta=None,
+                    details={'reason': 'relay node does not have DOR locally', 'target_iid': request.target_iid}
+                ), None
+            meta = await self._node.dor.add(
+                attachment_path, request.data_type, request.data_format, request.owner_iid,
+                creators_iid=request.creators_iid, access_restricted=request.access_restricted,
+                content_encrypted=request.content_encrypted, license=request.license,
+                tags=request.tags, recipe=request.recipe
+            )
+            return RelayPushResponse(successful=True, meta=meta, details=None), None
+
+        # forward via the existing push protocol using OUR keystore (the runner cannot reach this peer)
+        try:
+            meta = await P2PPushDataObject.perform(
+                target_node.p2p_address, self._node.keystore, target_node.identity,
+                attachment_path, request.data_type, request.data_format,
+                request.owner_iid, request.creators_iid,
+                request.access_restricted, request.content_encrypted, request.license,
+                recipe=request.recipe, tags=request.tags
+            )
+            return RelayPushResponse(successful=True, meta=meta, details=None), None
+        except NetworkError as e:
+            return RelayPushResponse(
+                successful=False, meta=None,
+                details={
+                    'reason': f'relay-push to target failed: {e.reason}',
+                    'target_iid': request.target_iid,
+                    'target_address': target_node.p2p_address,
+                }
+            ), None
+
+    @staticmethod
+    def request_type():
+        return RelayPushRequest
+
+    @staticmethod
+    def response_type():
+        return RelayPushResponse

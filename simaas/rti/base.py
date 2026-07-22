@@ -19,9 +19,9 @@ from simaas.core.logging import get_logger
 from simaas.p2p.base import P2PAddress
 from simaas.rti.api import RTIRESTService
 
-from sqlalchemy import Column, String, create_engine
+from sqlalchemy import Column, String, JSON, create_engine
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy_json import NestedMutableJson
 
 log = get_logger('simaas.rti', 'rti')
 
@@ -34,9 +34,9 @@ class DBDeployedProcessor(Base):
     id = Column(String(64), primary_key=True)
     state = Column(String, nullable=False)
     image_name = Column(String, nullable=True)
-    ports = Column(NestedMutableJson, nullable=False)
-    volumes = Column(NestedMutableJson, nullable=False)
-    gpp = Column(NestedMutableJson, nullable=True)
+    ports = Column(MutableList.as_mutable(JSON), nullable=False)
+    volumes = Column(MutableList.as_mutable(JSON), nullable=False)
+    gpp = Column(MutableDict.as_mutable(JSON), nullable=True)
     error = Column(String, nullable=True)
 
 
@@ -46,9 +46,9 @@ class DBJobInfo(Base):
     batch_id = Column(String(64), nullable=True)
     proc_id = Column(String(64), nullable=False)
     user_iid = Column(String(64), nullable=False)
-    status = Column(NestedMutableJson, nullable=False)
-    job = Column(NestedMutableJson, nullable=False)
-    runner = Column(NestedMutableJson, nullable=False)
+    status = Column(MutableDict.as_mutable(JSON), nullable=False)
+    job = Column(MutableDict.as_mutable(JSON), nullable=False)
+    runner = Column(MutableDict.as_mutable(JSON), nullable=False)
 
 
 @dataclass
@@ -153,7 +153,10 @@ class RTIServiceBase(RTIRESTService):
                 record.state = proc.state.value
                 record.image_name = proc.image_name
                 record.ports = proc.ports
-                record.gpp = proc.gpp.model_dump()
+                # gpp may legitimately be None on the FAILED path: deploy() creates a placeholder
+                # record with gpp=None before perform_deploy populates it. Without this guard, a
+                # failure before gpp is set would mask the real cause with an AttributeError.
+                record.gpp = proc.gpp.model_dump() if proc.gpp else None
                 record.error = proc.error
                 record.volumes = [volume.model_dump() for volume in proc.volumes]
 
@@ -203,6 +206,23 @@ class RTIServiceBase(RTIRESTService):
             record = session.get(DBJobInfo, job_id)
             if record is None:
                 raise NotFoundError(resource_type='job', resource_id=job_id)
+
+            # Reject handshakes for terminal jobs: if a runner starts up after
+            # cancellation, its identity would be registered but never cleaned
+            # up (update_job_status early-returns for terminal jobs). The
+            # handshake handler turns this into job=None and the runner exits.
+            status = JobStatus.model_validate(record.status)
+            if status.state in [
+                JobStatus.State.SUCCESSFUL, JobStatus.State.CANCELLED, JobStatus.State.FAILED,
+            ]:
+                log.warning(
+                    'handshake', 'Runner handshake rejected — job already terminal',
+                    job=job_id, state=str(status.state), runner=runner_identity.id,
+                )
+                raise ValidationError(
+                    field='job.state', expected='non-terminal', actual=str(status.state),
+                    hint='Job already terminal; runner should exit without registering',
+                )
 
             # update the runner information
             record.runner['identity'] = runner_identity.model_dump()
@@ -579,7 +599,9 @@ class RTIServiceBase(RTIRESTService):
                         )
                     ))
                     record = session.get(DBJobInfo, job.id)
-                    record.status = status
+                    # status column is MutableDict(JSON) — must assign a dict,
+                    # not the Pydantic instance, for the mutation to land.
+                    record.status = status.model_dump()
 
                 session.commit()
 

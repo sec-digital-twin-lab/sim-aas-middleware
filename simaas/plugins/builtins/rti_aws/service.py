@@ -369,7 +369,7 @@ class AWSRTIService(RTIServiceBase):
             protocol = P2PLookupDataObject(self._node)
             custodian = None
             proc_obj: Optional[DataObject] = None
-            for node in [node for node in await self._node.db.get_network() if node.dor_service and node.dor_service.lower() != 'none']:
+            for node in [node for node in await self._node.db.get_network() if node.has_dor()]:
                 result: Dict[str, DataObject] = await protocol.perform(node, [proc.id])
                 proc_obj = result.get(proc.id)
                 if proc_obj:

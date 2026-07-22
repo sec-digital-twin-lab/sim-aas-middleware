@@ -1,10 +1,10 @@
 import threading
 from typing import Optional, List, Tuple
 
-from sqlalchemy import Column, String, BigInteger, Integer, Boolean
+from sqlalchemy import Column, String, BigInteger, Integer, Boolean, JSON
 from sqlalchemy import create_engine
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy_json import NestedMutableJson
 
 from simaas.core.helpers import get_timestamp_now
 from simaas.core.identity import Identity
@@ -55,9 +55,9 @@ class IdentityRecord(Base):
 class NamespaceRecord(Base):
     __tablename__ = 'namespace'
     name = Column(String(64), primary_key=True)
-    budget = Column(NestedMutableJson, nullable=False)
-    reservations = Column(NestedMutableJson, nullable=False)
-    jobs = Column(NestedMutableJson, nullable=False)
+    budget = Column(MutableDict.as_mutable(JSON), nullable=False)
+    reservations = Column(MutableDict.as_mutable(JSON), nullable=False)
+    jobs = Column(MutableList.as_mutable(JSON), nullable=False)
 
 
 class DefaultNodeDBService(NodeDBService):
