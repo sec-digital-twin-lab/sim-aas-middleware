@@ -33,9 +33,9 @@ Every identity consists of:
 
 | Key | Algorithm | Purpose |
 |-----|-----------|---------|
-| Signing key | EC (ECDSA) | Authenticate requests via digital signatures |
+| Signing key | EC (ECDSA) | Authenticate REST requests and P2P attestations via digital signatures |
 | Encryption key | RSA | Encrypt data object content |
-| Communication key | Curve25519 | Encrypt P2P communication channels |
+| TLS certificate | Self-signed X.509 (RSA) | mTLS peer identity for P2P transport |
 
 Identities are stored in **keystores** -- encrypted files protected by a user password (PBKDF2 key
 derivation). The keystore's master key encrypts all other keys at rest.
@@ -59,18 +59,32 @@ generation protocol and code examples.
 Key properties:
 - **Stateless**: No sessions or tokens to manage or revoke
 - **Non-repudiable**: Signatures prove the request came from the keystore holder
-- **Tamper-proof**: Signature covers method, URL, and request body
-- **Replay-resistant within scope**: Different endpoints produce different signatures
+- **Tamper-proof**: Signature covers method, URL, request body, and an `issued_at` timestamp
+- **Time-bound**: Signatures are rejected outside a configurable window (default 300 s,
+  set via `SIMAAS_SIG_WINDOW_SECONDS`); see `simaas/rest/auth.py::timestamp_within_window`
+- **Replay-resistant within scope**: Different endpoints, bodies, and timestamps produce
+  different signatures
 
 ## Transport Security
 
 | Channel | Encryption | Notes |
 |---------|-----------|-------|
-| P2P (ZMQ) | Curve25519 (CurveZMQ) | Encrypted and authenticated when curve keys are configured |
+| P2P (TCP) | TLS 1.3 (mTLS) | Each node's identity carries a self-signed TLS cert; the server rebuilds a per-accept trust bundle from `node.db.get_identities()` and pins client certs against it |
 | REST API | None (HTTP) | Relies on trusted network; TLS can be added via reverse proxy |
 
-P2P communication between nodes uses CurveZMQ, which provides both encryption and authentication
-at the transport level. Each node's communication key is part of its identity.
+P2P communication between nodes uses TLS 1.3 with mutual authentication (mTLS). Each node
+presents its own self-signed cert (from `TLSCertAsset` in the keystore) and pins the peer's
+expected cert as the trusted CA. Client certs are verified against the server's current
+trust bundle, so unknown peers are rejected at the transport layer. Public protocols
+(`@p2p_public_access`) accept anonymous clients that present no cert; authenticated protocols
+(`@p2p_requires_authentication`) require a verified client cert. See
+`simaas/p2p/base.py::build_client_ssl_context` and `build_server_ssl_context` for details.
+
+Push-side ownership on data-object uploads follows the mTLS peer identity, unless a valid
+**relay attestation** (signed by the runner or another intermediary) names a different
+attester as the rightful owner. This lets the runner push through its custodian while
+keeping ownership attributed to the runner rather than the relay. See
+`simaas/dor/protocol.py::P2PPushDataObject.handle` and `P2PRelayPushDataObject.handle`.
 
 REST API traffic is unencrypted by default. This is acceptable for the intended deployment model
 (trusted internal network). For deployments that require encrypted REST traffic, place a TLS-
@@ -98,7 +112,7 @@ Data objects support owner-based access control:
 |-------|---------------|----------------|
 | Application | User authentication, account management, sessions | OAuth2, JWT, LDAP |
 | Middleware | Model identity, access control, data provenance, job governance | Cryptographic signatures |
-| Transport | Secure communication between nodes | CurveZMQ (P2P), HTTP/TLS (REST) |
+| Transport | Secure communication between nodes | mTLS (P2P), HTTP/TLS (REST via reverse proxy) |
 
 ## Threat Model Assumptions
 

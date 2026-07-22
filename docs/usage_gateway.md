@@ -5,6 +5,19 @@ authentication via API keys and translates requests into authenticated Sim-aaS c
 internally managed keystores. This allows applications to manage data and run jobs without
 dealing with Sim-aaS cryptographic identity directly.
 
+> **Simplified surface.** The Gateway intentionally exposes a narrower feature set than the
+> full node REST API. Notably:
+> - **Outputs are unrestricted by default.** `POST /gateway/v1/proc/{proc_id}` accepts
+>   `output_access_restricted` but the default is `False`. Restricted-output ownership
+>   for jobs submitted through the Gateway is not fully supported — the runner cannot push
+>   with the API-key user's authority, so restricted outputs would only be accessible to
+>   the runner's ephemeral identity. If you need access-controlled outputs, submit the job
+>   directly against the node's `/api/v1/rti/*` endpoints instead.
+> - **No delegated identity operations.** Grant/revoke access, transfer ownership, and
+>   identity management are not exposed. Use the node CLI or the DOR REST API for those.
+> - **No processor deployment.** Deploying and undeploying processors is an admin
+>   operation done directly on the node (see "Deploying Processors" below).
+
 ## Architecture
 
 ```

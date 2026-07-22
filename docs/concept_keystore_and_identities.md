@@ -23,6 +23,8 @@ Each keystore contains the following core assets:
 - `content-keys`: A `ContentKeysAsset` for managing symmetric encryption keys.
 - `ssh-credentials`: An `SSHCredentialsAsset` storing SSH key-based credentials.
 - `github-credentials`: A `GithubCredentialsAsset` storing GitHub-related tokens.
+- `tls-cert`: A `TLSCertAsset` holding a self-signed X.509 certificate + private key,
+  used as the node's mTLS identity on the P2P transport.
 
 All assets except the master key are encrypted with the master key. The master key 
 itself is protected using a user-provided password.
@@ -31,7 +33,7 @@ itself is protected using a user-provided password.
 The keystore maintains a cryptographic identity that includes:
 - A unique ID (`iid`)
 - A profile (name and email)
-- Public keys (signing, encryption, and Curve-compatible)
+- Public keys (signing and encryption) and the TLS certificate PEM
 - A nonce to track updates
 - A digital signature for integrity verification
 
@@ -52,11 +54,12 @@ The keystore supports the following methods for cryptographic operations:
 - `sign(message: bytes)`: Signs data using the signing key
 - `verify(message: bytes, signature: str)`: Verifies a signature
 
-### ZeroMQ Curve Support
-To support secure ZeroMQ communication:
-- A Curve-compatible secret key (`curve_secret_key`)
-- A corresponding public key (`curve_public_key`)
-are derived from the signing key.
+### P2P TLS Identity
+The keystore's `tls-cert` asset holds a self-signed X.509 certificate and its private key.
+The certificate PEM is embedded in the identity record (`Identity.tls_cert`) and used by
+peers to build their mTLS trust bundles. The keystore exposes it via `tls_cert_pem()` /
+`tls_key_pem()`; the P2P layer uses these in `build_server_ssl_context()` and
+`build_client_ssl_context()` (see `simaas/p2p/base.py`).
 
 ### Thread-Safety
 Access to internal state is guarded by a mutex (`Lock`) to support safe 

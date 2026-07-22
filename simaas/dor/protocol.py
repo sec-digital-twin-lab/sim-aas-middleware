@@ -15,6 +15,7 @@ from simaas.core.errors import NetworkError
 from simaas.decorators import p2p_public_access, p2p_requires_authentication
 from simaas.dor.schemas import DataObject, DataObjectRecipe, TagValueType
 from simaas.nodedb.schemas import NodeInfo
+from simaas.nodedb.protocol import P2PUpdateIdentity, UpdateIdentityMessage
 from simaas.p2p.base import (
     P2PProtocol, P2PAddress, p2p_request, RelayAttestation,
     sign_relay_attestation, verify_relay_attestation,
@@ -503,6 +504,37 @@ class P2PRelayPushDataObject(P2PProtocol):
                 tags=request.tags, recipe=request.recipe
             )
             return PushResponse(successful=True, meta=meta, details=None), None
+
+        # The target needs the attester's identity record to verify the
+        # attestation signature. The attester (typically a runner) only ever
+        # registered with us (its custodian) via P2PUpdateIdentity, so propagate
+        # the record forward before forwarding the push. The target re-verifies
+        # the identity's own self-signature, so this doesn't expand trust.
+        if request.attestation is not None:
+            attester_identity = self._node.db.get_identity(request.attestation.iid)
+            if attester_identity is None:
+                return PushResponse(
+                    successful=False, meta=None,
+                    details={'reason': 'attester identity unknown to relay',
+                             'attester_iid': request.attestation.iid},
+                ), None
+            try:
+                target_p2p = P2PAddress(
+                    address=target_node.p2p_address,
+                    peer_tls_cert=target_node.identity.tls_cert,
+                )
+                p2p_request(
+                    target_p2p, P2PUpdateIdentity.NAME,
+                    UpdateIdentityMessage(identity=attester_identity),
+                    reply_type=UpdateIdentityMessage,
+                )
+            except NetworkError as e:
+                return PushResponse(
+                    successful=False, meta=None,
+                    details={'reason': f'failed to propagate attester identity to target: {e.reason}',
+                             'target_iid': request.target_iid,
+                             'attester_iid': request.attestation.iid},
+                ), None
 
         # forward via the existing push protocol using OUR keystore. The
         # attestation is carried verbatim — the target verifies it independently.

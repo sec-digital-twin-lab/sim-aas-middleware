@@ -1,4 +1,5 @@
 import json
+import time
 import httpx
 
 from typing import List, Tuple, Dict, Optional
@@ -58,7 +59,7 @@ class SubmitJobRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     budget: Optional[Dict[str, int]] = None
-    output_access_restricted: bool = True
+    output_access_restricted: bool = False
     output_content_encrypted: bool = False
 
 
@@ -102,10 +103,6 @@ def upload_data_object(
     try:
         url = f"http://{proxies.address[0]}:{proxies.address[1]}{DOR_ENDPOINT_PREFIX}/add"
         keystore = credentials[1].keystore
-        headers = {
-            'saasauth-iid': keystore.identity.id,
-            'saasauth-signature': generate_authorisation_token(keystore, f"POST:{url}", None)
-        }
 
         parsed = json.loads(body)
         dor_body = {
@@ -120,10 +117,17 @@ def upload_data_object(
             'tags': parsed.get('tags')
         }
 
+        issued_at = int(time.time())
+        headers = {
+            'saasauth-iid': keystore.identity.id,
+            'saasauth-timestamp': str(issued_at),
+            'saasauth-signature': generate_authorisation_token(keystore, f"POST:{url}", issued_at, dor_body)
+        }
+
         with httpx.Client() as client:
             form_data = {
                 'body': (None, json.dumps(dor_body), 'application/json'),
-                'attachment': (attachment.filename, attachment.read(), attachment.content_type)
+                'attachment': (attachment.filename, attachment.file.read(), attachment.content_type)
             }
             response = client.post(url, headers=headers, files=form_data)
             response.raise_for_status()
@@ -163,9 +167,11 @@ def download_data_object_content(
     try:
         url = f"http://{proxies.address[0]}:{proxies.address[1]}{DOR_ENDPOINT_PREFIX}/{obj_id}/content"
         keystore = credentials[1].keystore
+        issued_at = int(time.time())
         headers = {
             'saasauth-iid': keystore.identity.id,
-            'saasauth-signature': generate_authorisation_token(keystore, f"GET:{url}", None)
+            'saasauth-timestamp': str(issued_at),
+            'saasauth-signature': generate_authorisation_token(keystore, f"GET:{url}", issued_at)
         }
 
         def forward_stream():
