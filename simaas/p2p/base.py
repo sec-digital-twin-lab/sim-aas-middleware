@@ -129,8 +129,10 @@ def _parse_tcp_address(address: str) -> Tuple[str, int]:
 def _write_pem_pair(cert_pem: bytes, key_pem: bytes) -> Tuple[str, str]:
     cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
     kf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-    cf.write(cert_pem); cf.close()
-    kf.write(key_pem); kf.close()
+    cf.write(cert_pem)
+    cf.close()
+    kf.write(key_pem)
+    kf.close()
     return cf.name, kf.name
 
 

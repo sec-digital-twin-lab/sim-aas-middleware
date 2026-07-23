@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import tempfile
-import time
 from typing import List, Dict
 
 import pytest
@@ -15,7 +14,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.core.errors import NetworkError
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PRelayPushDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
@@ -24,7 +23,6 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
-from simaas.p2p.base import P2PAddress
 from simaas.core.errors import NetworkError as PeerUnavailableError  # Alias for backwards compat in tests
 from simaas.p2p.protocol import P2PLatency, P2PThroughput
 

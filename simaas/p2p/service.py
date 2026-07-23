@@ -7,7 +7,7 @@ import tempfile
 import threading
 from typing import Optional, Dict, Tuple
 
-from simaas.core.errors import ConfigurationError, OperationError
+from simaas.core.errors import ConfigurationError
 from simaas.core.helpers import env_int
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger

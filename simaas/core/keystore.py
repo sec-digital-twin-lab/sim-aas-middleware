@@ -16,7 +16,7 @@ from simaas.core.keypair import KeyPair
 from simaas.core.logging import get_logger
 from simaas.core.rsakeypair import RSAKeyPair
 from simaas.core.schemas import KeystoreContent
-from simaas.core.helpers import generate_random_string, write_json_to_file
+from simaas.core.helpers import generate_random_string
 from simaas.core.assets import MasterKeyPairAsset, KeyPairAsset, ContentKeysAsset, SSHCredentialsAsset, \
     GithubCredentialsAsset, TLSCertAsset
 from simaas.core.identity import generate_identity_token, Identity

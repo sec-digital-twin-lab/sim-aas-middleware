@@ -5,7 +5,6 @@ from pydantic import BaseModel
 
 from simaas.core.helpers import env_int
 from simaas.core.identity import Identity
-from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger
 from simaas.decorators import p2p_public_access, p2p_requires_authentication
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress

@@ -509,7 +509,6 @@ class JobRunner(CLICommand, ProgressListener):
         # build the mTLS trust bundle. This minimal adapter exposes the same
         # `db.get_identities()` shape; we add the custodian to it after the
         # handshake (and any other batch peers when coupled execution kicks in).
-        runner = self
 
         class _RunnerIdentityDB:
             def __init__(self):
