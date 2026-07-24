@@ -16,7 +16,7 @@ from simaas.core.keypair import KeyPair
 from simaas.core.logging import get_logger
 from simaas.core.rsakeypair import RSAKeyPair
 from simaas.core.schemas import KeystoreContent
-from simaas.core.helpers import generate_random_string, write_json_to_file
+from simaas.core.helpers import generate_random_string
 from simaas.core.assets import MasterKeyPairAsset, KeyPairAsset, ContentKeysAsset, SSHCredentialsAsset, \
     GithubCredentialsAsset, TLSCertAsset
 from simaas.core.identity import generate_identity_token, Identity
@@ -267,6 +267,7 @@ class Keystore:
                                         email=self._content.profile.email,
                                         s_public_key=self._s_key.public_as_string(),
                                         e_public_key=self._e_key.public_as_string(),
+                                        tls_cert=self._tls_cert.cert_pem().decode('utf-8'),
                                         nonce=self._content.nonce)
         signature = self._s_key.sign(token.encode('utf-8'))
 
@@ -304,9 +305,10 @@ class Keystore:
             content_hash = hash_json_object(self._content.model_dump(), exclusions=['signature'])
             self._content.signature = self._s_key.sign(content_hash)
 
-            # write contents to disk
             if self._path is not None:
-                write_json_to_file(self._content.model_dump(), self._path)
+                fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(self._content.model_dump(), f, indent=4)
 
             # update identity
             self._update_identity()

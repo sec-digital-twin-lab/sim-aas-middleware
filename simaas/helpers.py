@@ -46,15 +46,10 @@ def determine_default_rest_address() -> str:
     return f"{LOCAL_IP}:5001" if LOCAL_IP else "127.0.0.1:5001"
 
 
-def determine_default_ws_address() -> str:
-    return f"{LOCAL_IP}:6001" if LOCAL_IP else "127.0.0.1:6001"
-
-
 class PortMaster:
     _mutex = Lock()
     _next_p2p = {}
     _next_rest = {}
-    _next_ws = {}
 
     @classmethod
     def _is_port_available(cls, host: str, port: int) -> bool:
@@ -99,22 +94,6 @@ class PortMaster:
             address = (host, port)
             cls._next_rest[host] = port + 1
             return address
-
-    @classmethod
-    def generate_ws_address(cls, host: str = '127.0.0.1') -> (str, int):
-        with cls._mutex:
-            if host not in cls._next_ws:
-                cls._next_ws[host] = 6100
-
-            # Find an available port
-            port = cls._next_ws[host]
-            while not cls._is_port_available(host, port):
-                port += 1
-
-            address = (host, port)
-            cls._next_ws[host] = port + 1
-            return address
-
 
 def find_available_port(host: str = 'localhost', port_range: (int, int) = (6000, 7000)) -> Optional[int]:
     for port in range(port_range[0], port_range[1], 1):

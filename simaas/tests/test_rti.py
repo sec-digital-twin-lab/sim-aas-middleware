@@ -454,7 +454,7 @@ def test_job_provenance_tracking(rti_context: RTIContext, test_context):
     # add test data object
     obj = rti_context.dor_proxy.add_data_object(
         test_context.create_file_with_content(f"{generate_random_string(4)}.json", json.dumps({'v': 1})),
-        owner.identity, False, False, 'JSONObject', 'json'
+        owner, False, False, 'JSONObject', 'json'
     )
 
     # beginning

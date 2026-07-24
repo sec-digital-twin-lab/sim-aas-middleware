@@ -165,7 +165,7 @@ class OutputObjectHandler(threading.Thread):
             )
             obj = P2PPushDataObject.perform(
                 target_node.p2p_address, self._owner.keystore, target_node.identity,
-                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                output_content_path, output_spec.data_type, output_spec.data_format, creator_iids,
                 restricted_access, content_encrypted,
                 license=DataObject.License(by=True, sa=True, nc=True, nd=True),
                 recipe=recipe,
@@ -179,7 +179,7 @@ class OutputObjectHandler(threading.Thread):
             obj = P2PRelayPushDataObject.perform(
                 self._owner.custodian_address.address, self._owner.keystore,
                 self._owner.custodian_identity, target_node.identity.id,
-                output_content_path, output_spec.data_type, output_spec.data_format, owner.id, creator_iids,
+                output_content_path, output_spec.data_type, output_spec.data_format, creator_iids,
                 restricted_access, content_encrypted,
                 license=DataObject.License(by=True, sa=True, nc=True, nd=True),
                 recipe=recipe,
@@ -214,13 +214,15 @@ class OutputObjectHandler(threading.Thread):
 
 
 class StatusHandler(threading.Thread):
-    def __init__(self, logger: logging.Logger, peer_address: P2PAddress, job_id: str, job_status_path: str):
+    def __init__(self, logger: logging.Logger, peer_address: P2PAddress, job_id: str, job_status_path: str,
+                 keystore: Keystore):
         super().__init__(daemon=False)
         self._mutex = threading.Lock()
         self._logger = logger
         self._peer_address = peer_address
         self._job_id = job_id
         self._job_status_path = job_status_path
+        self._keystore = keystore
         self._job_status = JobStatus(
             state=JobStatus.State.UNINITIALISED, progress=0, output={}, notes={}, errors=[], message=None
         )
@@ -279,7 +281,7 @@ class StatusHandler(threading.Thread):
 
             # push the job status to the custodian (unless cancelled - custodian handles that)
             if self._job_status.state != JobStatus.State.CANCELLED:
-                P2PPushJobStatus.perform(self._peer_address, self._job_id, self._job_status)
+                P2PPushJobStatus.perform(self._peer_address, self._keystore, self._job_id, self._job_status)
                 self._logger.info(f"Pushing job status {last_update} -> SUCCESSFUL.")
 
         except _BaseError as e:
@@ -502,6 +504,38 @@ class JobRunner(CLICommand, ProgressListener):
     ) -> None:
         # start the secured P2P service (keystore already created before fork)
         self._p2p = P2PService(self._keystore, service_address)
+
+        # The runner doesn't run a full node DB but P2PService needs one to
+        # build the mTLS trust bundle. This minimal adapter exposes the same
+        # `db.get_identities()` shape; we add the custodian to it after the
+        # handshake (and any other batch peers when coupled execution kicks in).
+
+        class _RunnerIdentityDB:
+            def __init__(self):
+                self._identities: Dict[str, Identity] = {}
+                self._lock = threading.Lock()
+
+            def add(self, identity: Identity) -> None:
+                with self._lock:
+                    self._identities[identity.id] = identity
+
+            def get_identities(self) -> List[Identity]:
+                with self._lock:
+                    return list(self._identities.values())
+
+            def get_identity(self, iid: str) -> Optional[Identity]:
+                with self._lock:
+                    return self._identities.get(iid)
+
+        class _RunnerNodeAdapter:
+            def __init__(self, ks: Keystore):
+                self.db = _RunnerIdentityDB()
+                self.keystore = ks
+                self.identity = ks.identity
+
+        self._runner_node_adapter = _RunnerNodeAdapter(self._keystore)
+        self._p2p.set_node(self._runner_node_adapter)
+
         self._p2p.add(P2PLatency())
         self._p2p.add(P2PInterruptJob(self))
         self._p2p.add(self._barrier)
@@ -525,13 +559,28 @@ class JobRunner(CLICommand, ProgressListener):
             external_address = f"tcp://{hostname}:{port}"
         self._logger.info(f"P2P service determined external address as {external_address}")
 
+        # Publish the ephemeral runner identity to the custodian first so the
+        # custodian's mTLS trust bundle includes the runner's cert before the
+        # signed handshake call. P2PUpdateIdentity is @p2p_public_access — the
+        # identity record carries its own self-signature.
+        from simaas.nodedb.protocol import P2PUpdateIdentity, UpdateIdentityMessage
+        from simaas.p2p.base import p2p_request as _p2p_request
+        _p2p_request(
+            self._custodian_address, P2PUpdateIdentity.NAME,
+            UpdateIdentityMessage(identity=self._keystore.identity),
+            reply_type=UpdateIdentityMessage,
+        )
+
         # perform handshake with custodian
         self._logger.info(f"P2P handshake: trying to connect to {self._custodian_address.address}...")
         self._job, self._custodian, self._batch_status = P2PRunnerPerformHandshake.perform(
-            self._custodian_address, self._keystore.identity, external_address, job_id, self._gpp
+            self._custodian_address, self._keystore, self._keystore.identity, external_address, job_id, self._gpp
         )
         self._logger.info(f"P2P handshake: successful -> custodian at {self._custodian_address.address} "
                           f"has id={self._custodian.id}")
+        # Custodian is now a verified peer — add to the runner's local trust
+        # so its inbound interrupt/barrier calls authenticate at the TLS layer.
+        self._runner_node_adapter.db.add(self._custodian)
 
     def _initialise_job(self) -> None:
         # write the job descriptor
@@ -547,7 +596,7 @@ class JobRunner(CLICommand, ProgressListener):
 
         # update job and set up status handler
         job_status_path = os.path.join(self._wd_path, 'job.status')
-        self._status_handler = StatusHandler(self._logger, self._custodian_address, self._job.id, job_status_path)
+        self._status_handler = StatusHandler(self._logger, self._custodian_address, self._job.id, job_status_path, self._keystore)
         self._status_handler.start()
 
     def _extract_batch_status(self) -> bool:
@@ -555,6 +604,13 @@ class JobRunner(CLICommand, ProgressListener):
         for member in self._batch_status.members:
             self._batch_ports[member.name] = member.ports
             self._batch_identities[member.name] = member.identity
+            # Add every batch peer to our trust adapter the moment we hear about
+            # them — both runners need to trust each other before the BatchBarrier
+            # exchange (which is mTLS-authenticated). Adding here covers both
+            # the sender side and the receiver side symmetrically. ``member.identity``
+            # may be ``None`` until that peer registers — skip until it's set.
+            if member.identity is not None:
+                self._runner_node_adapter.db.add(member.identity)
             for address in member.ports.values():
                 if address is None:
                     mappings_complete = False
@@ -588,6 +644,11 @@ class JobRunner(CLICommand, ProgressListener):
             suffix = ' '.join(f"{item[0]}->{item[1].address}" for item in mappings)
             self._logger.info(f"[barrier] complete mapping available: {suffix}")
             self._logger.info(f"[barrier] batch status: {self._batch_status.model_dump()}")
+
+            # Add batch peers to this runner's trust so their inbound BatchBarrier
+            # calls authenticate at the TLS layer (mutual trust within a batch).
+            for name in self._batch_identities:
+                self._runner_node_adapter.db.add(self._batch_identities[name])
 
             # release the barrier
             for name, p2p_address in mappings:

@@ -297,7 +297,7 @@ class DefaultNodeDBService(NodeDBService):
             if record is None:
                 raise NotFoundError(resource_type='identity', resource_id=identity.id)
 
-            record.last_accessed = get_timestamp_now()
+            record.last_seen = get_timestamp_now()
             session.commit()
 
     def get_namespace(self, name: str) -> Optional[NamespaceInfo]:

@@ -15,10 +15,12 @@ class Identity:
     """Public identity with verification capabilities"""
     id: str           # SHA-256 hash of canonical identity representation
     profile: IdentityProfile
-    public_keys: Dict[str, PublicKey]  # Signing (EC), Encryption (RSA), Communication (Curve25519)
+    s_public_key: str  # Signing key (EC) PEM
+    e_public_key: str  # Encryption key (RSA) PEM
+    tls_cert: str      # Self-signed X.509 TLS cert PEM (mTLS peer identity)
     signature: str
 
-    def verify(self) -> bool:
+    def verify_integrity(self) -> bool:
         """Verify identity signature integrity"""
 ```
 
@@ -29,13 +31,13 @@ Hierarchical encryption with master key protection:
 ```python
 class Keystore:
     """Secure storage for cryptographic materials and credentials"""
-    master_key: RSAKeyPair      # Root of trust, encrypted with password
-    signing_key: ECKeyPair      # For identity verification
-    encryption_key: RSAKeyPair  # For data encryption
-    communication_key: bytes    # ZeroMQ Curve key
-    content_keys: Dict[str, bytes]        # Per-data-object encryption
-    ssh_credentials: Dict[str, SSHKey]    # Git repository access
-    github_credentials: Dict[str, Token]  # GitHub API access
+    master_key: RSAKeyPair                # Root of trust, encrypted with password
+    signing_key: ECKeyPair                # Signs REST requests and P2P attestations
+    encryption_key: RSAKeyPair            # For data encryption
+    tls_cert: TLSCertAsset                # Self-signed X.509 cert + key for P2P mTLS
+    content_keys: ContentKeysAsset        # Per-data-object encryption keys
+    ssh_credentials: SSHCredentialsAsset  # Git repository access
+    github_credentials: GithubCredentialsAsset  # GitHub API access
 ```
 
 **Security Model**:
@@ -176,39 +178,79 @@ response = batch_client.submit_job(
 
 ## P2P Networking (`simaas/p2p/`)
 
-Secure, authenticated communication layer using ZeroMQ with Curve encryption.
+Framed request/response over TLS 1.3 with mutual authentication. The server is a
+`socketserver.ThreadingTCPServer` (`_ThreadedSSLServer` in `simaas/p2p/service.py`)
+that rebuilds its SSL context per accept so the trust bundle stays current with the
+node's identity DB.
 
-### Security Model
+### Transport Model
 
-Curve25519 encryption with identity verification:
+Client dials with the peer's expected server cert pinned, and — for authenticated
+protocols — also presents its own keystore's TLS cert:
 
 ```python
-socket.curve_secretkey = keystore.communication_key.secret
-socket.curve_publickey = keystore.communication_key.public
-socket.curve_server = True  # For servers
-socket.curve_serverkey = remote_public_key  # For clients
+# simaas/p2p/base.py
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+ctx.verify_mode = ssl.CERT_REQUIRED
+ctx.load_verify_locations(cadata=peer.tls_cert)  # pin peer's self-signed cert
+if with_authorisation_by is not None:
+    # present the client cert so the server can identify the caller via mTLS
+    ctx.load_cert_chain(certfile=..., keyfile=...)
 ```
+
+Server accepts, requests a client cert, and verifies it against a bundle built from
+every identity the node currently knows about (`node.db.get_identities()`):
+
+```python
+# simaas/p2p/service.py
+def _current_trust_bundle(self):
+    parts = [i.tls_cert for i in self._node.db.get_identities() if i.tls_cert]
+    return "\n".join(parts) if parts else None
+```
+
+An empty bundle disables client-cert verification (bootstrap), so `@p2p_public_access`
+protocols (identity publish, network discovery) work before any peers are known.
 
 ### Protocol Framework
 
 ```python
 class P2PProtocol(ABC):
-    """Base class for P2P protocols"""
+    """Base class for P2P protocols. Concrete classes carry an auth marker."""
+
+    @classmethod
+    @abstractmethod
+    def perform(cls, ...):
+        """Client-side entry point."""
 
     @abstractmethod
-    def handle_request(self, sender_iid: str, request: any) -> any:
-        """Process incoming request and return response"""
+    def handle(self, request, attachment_path=None, download_path=None,
+               identity: Optional[Identity] = None) -> Tuple[Optional[BaseModel], Optional[str]]:
+        """Server-side handler. `identity` is the mTLS-verified caller (or None)."""
 ```
+
+Every concrete protocol carries either `@p2p_public_access` or
+`@p2p_requires_authentication`; unmarked protocols are rejected at `add()` time.
+
+### Ownership on push
+
+Data-object pushes attribute ownership to the mTLS-verified sender by default. A push
+may carry a `RelayAttestation` naming a different attester as the rightful owner; the
+target verifies the attestation signature against the attester's identity record and,
+if valid, records ownership as the attester rather than the immediate sender. This is
+how a runner can push through its custodian while keeping ownership on itself. See
+`simaas/dor/protocol.py::P2PPushDataObject.handle` and
+`P2PRelayPushDataObject.handle`.
 
 ### Built-in Protocols
 
 | Protocol | Purpose |
 |----------|---------|
-| `NetworkDiscoveryProtocol` | Discover available nodes and services |
-| `DORSearchProtocol` | Search for data objects across the network |
-| `DORFetchProtocol` | Fetch object content from remote nodes |
-| `IdentityPublishProtocol` | Publish identity updates |
-| `IdentityDiscoveryProtocol` | Discover identities by ID or pattern |
+| `P2PLookupDataObject` / `P2PFetchDataObject` | Discover and fetch data objects |
+| `P2PPushDataObject` / `P2PRelayPushDataObject` | Upload (direct or via a relay) |
+| `P2PUpdateIdentity` / `P2PGetIdentity` | Publish and query identity records |
+| `P2PJoinNetwork` / `P2PLeaveNetwork` / `P2PGetNetwork` | Network membership |
+| `P2PPushJobStatus` / `P2PInterruptJob` / `BatchBarrier` | RTI runner ↔ custodian |
 
 ---
 
@@ -260,21 +302,32 @@ There are no sessions, cookies, or JWTs — every request is independently verif
 | Header | Value |
 |--------|-------|
 | `saasauth-iid` | The caller's identity ID |
-| `saasauth-signature` | Signature over the request (see below) |
+| `saasauth-timestamp` | Unix seconds when the signature was issued |
+| `saasauth-signature` | Signature over method + URL + timestamp + body |
 
 **Signature Generation**:
 
-The signature covers both the request target and the body, preventing replay across different
-endpoints or with modified payloads.
+The signature covers the request target, an `issued_at` timestamp, and the body — so it
+can't be replayed across endpoints, mutated payloads, or old requests. The server enforces
+a time window (default 300 s; override with `SIMAAS_SIG_WINDOW_SECONDS`) around
+`issued_at`.
 
 ```python
+import time
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 import canonicaljson
 
-# 1. Build the digest: SHA-256 of "METHOD:URL" + canonical JSON body
+# The transport-layer canonicalisation lives in simaas.rest.canonical
+from simaas.rest.canonical import REST_AUTH_DOMAIN, canonical_auth_url
+
+issued_at = int(time.time())
+
+# 1. Build the digest: domain-separated hash of METHOD:URL + issued_at + canonical body
 digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-digest.update(f"{method}:{full_url}".encode('utf-8'))
+digest.update(REST_AUTH_DOMAIN)
+digest.update(canonical_auth_url(f"{method}:{full_url}").encode('utf-8'))
+digest.update(str(issued_at).encode('utf-8'))
 if body:
     digest.update(canonicaljson.encode_canonical_json(body))
 token = digest.finalize()
@@ -285,16 +338,25 @@ signature = keystore.sign(token)
 # 3. Set headers
 headers = {
     'saasauth-iid': keystore.identity.id,
+    'saasauth-timestamp': str(issued_at),
     'saasauth-signature': signature,
 }
 ```
 
-**Server-Side Verification** (`simaas/rest/auth.py`):
+**Server-Side Verification** (`simaas/rest/auth.py::VerifyAuthorisation`):
 
-1. Look up the identity by `saasauth-iid` in the node database
-2. Recompute the digest from `METHOD:URL` + body
-3. Verify the signature against the identity's public signing key
-4. Reject with 403 if the identity is unknown or the signature is invalid
+1. Reject with 403 if any of the three headers is missing.
+2. Parse `saasauth-timestamp` and check it against the current time window
+   (`timestamp_within_window`); reject with 403 if it's outside.
+3. Look up the identity by `saasauth-iid` in the node database.
+4. Recompute the digest from `METHOD:URL` + `issued_at` + body (multipart requests use
+   the JSON-decoded `body` form field; see `_extract_signed_body`).
+5. Verify the signature against the identity's public signing key; reject with 403 if
+   the identity is unknown or the signature is invalid.
+
+Error responses always carry `{reason, id}` only — the full `details` dict is logged
+server-side under the same `id` and never sent to the client (see
+`simaas/rest/service.py::_error_response`). Include the id when reporting an issue.
 
 **Using Proxy Classes**: The `DORProxy`, `RTIProxy`, and `NodeDBProxy` classes handle signature
 generation automatically — pass a `Keystore` instance and authentication is transparent.
@@ -396,116 +458,63 @@ simaas-cli
 
 ## Node Lifecycle (`simaas/node/`)
 
-The `Node` class is the central orchestrator that manages all services. It has a clear separation between **sync** operations (thread lifecycle management) and **async** operations (application logic).
+The `Node` class is the central orchestrator that manages all services. All of its
+public methods are **synchronous** — see [Sync Design + FastAPI Boundary](dev_async_patterns.md).
 
-### Async/Sync Boundary
-
-| Layer | Methods | Purpose |
-|-------|---------|---------|
-| **Sync** | `shutdown()` | Stop daemon threads |
-| **Async** | `startup()`, `join_network()`, `leave_network()`, `shutdown_rti()`, `update_identity()` | Daemon start and network operations |
-
-### Sync Methods (Thread Lifecycle)
+### Lifecycle methods
 
 ```python
+def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
+            bind_all_address: bool = False, wait_until_ready: bool = True) -> None:
+    """Start P2P and REST daemon threads, wait for services to be ready."""
+
+def join_network(self, boot_node_address: Tuple[str, int]) -> None:
+    """Join the P2P network via a boot node (REST discovery + P2P handshake)."""
+
+def leave_network(self, blocking: bool = False) -> None:
+    """Inform peers and leave the network."""
+
+def shutdown_rti(self, timeout: int = 60) -> None:
+    """Undeploy all processors and wait for workers to finish."""
+
+def update_identity(self, name: str = None, email: str = None,
+                    propagate: bool = True) -> Identity:
+    """Update identity and optionally broadcast to peers."""
+
 def shutdown(self) -> None:
     """Stop P2P and REST daemon threads."""
 ```
 
-### Async Methods (Application Logic)
-
-```python
-async def startup(self, p2p_address: str, rest_address: Tuple[str, int] = None,
-                  bind_all_address: bool = False, wait_until_ready: bool = True) -> None:
-    """Start P2P and REST daemon threads, wait for services to be ready."""
-```
-
-```python
-async def join_network(self, boot_node_address: Tuple[str, int]) -> None:
-    """Join the P2P network via a boot node."""
-
-async def leave_network(self, blocking: bool = False) -> None:
-    """Inform peers and leave the network."""
-
-async def shutdown_rti(self, timeout: int = 60) -> None:
-    """Undeploy all processors and wait for workers to finish."""
-
-async def update_identity(self, name: str = None, email: str = None,
-                          propagate: bool = True) -> Identity:
-    """Update identity and optionally broadcast to peers."""
-```
-
-### Usage Patterns
-
-**Pattern A: Script/CLI (no existing event loop)**
-
-Use `asyncio.run()` to execute async operations from sync code:
+### Usage
 
 ```python
 from simaas.node.default import DefaultNode
 from simaas.core.keystore import Keystore
-import asyncio
+from simaas.plugins.builtins.dor_fs import FilesystemDORService
+from simaas.plugins.builtins.rti_docker import DockerRTIService
 
-# Create and configure node
-keystore = Keystore.load("path/to/keystore", password="secret")
-node = DefaultNode(keystore, "path/to/datastore", enable_db=True,
-                   dor_plugin_class=FilesystemDORService,
-                   rti_plugin_class=DockerRTIService)
+keystore = Keystore.from_file("path/to/keystore.json", password="secret")
 
-# Async: Start daemon services
-asyncio.run(node.startup("tcp://0.0.0.0:4000", rest_address=("0.0.0.0", 5000)))
+node = DefaultNode.create(
+    keystore=keystore,
+    storage_path="path/to/datastore",
+    p2p_address="tcp://0.0.0.0:4000",
+    rest_address=("0.0.0.0", 5000),
+    enable_db=True,
+    dor_plugin_class=FilesystemDORService,
+    rti_plugin_class=DockerRTIService,
+)
 
-# Async: Join network (if connecting to existing network)
-asyncio.run(node.join_network(("192.168.1.100", 5000)))
+# Optional: join an existing network via a boot node's REST address
+node.join_network(("192.168.1.100", 5000))
 
-# ... application runs ...
+# ... application runs; P2P + REST are already serving on daemon threads ...
 
-# Async: Clean shutdown
-asyncio.run(node.leave_network())
-asyncio.run(node.shutdown_rti())
-
-# Sync: Stop daemon services
+node.leave_network()
+node.shutdown_rti()
 node.shutdown()
 ```
 
-**Pattern B: Async Application (existing event loop)**
-
-When running inside an async context (e.g., pytest-asyncio, async web framework):
-
-```python
-async def main():
-    # Create and configure node
-    keystore = Keystore.load("path/to/keystore", password="secret")
-    node = DefaultNode(keystore, "path/to/datastore", enable_db=True,
-                       dor_plugin_class=FilesystemDORService,
-                       rti_plugin_class=DockerRTIService)
-
-    # Async: Start daemon services (runs in background threads)
-    await node.startup("tcp://0.0.0.0:4000", rest_address=("0.0.0.0", 5000))
-
-    # Async: Join network
-    await node.join_network(("192.168.1.100", 5000))
-
-    try:
-        # ... application runs ...
-        await some_async_work()
-    finally:
-        # Async: Clean shutdown
-        await node.leave_network()
-        await node.shutdown_rti()
-
-        # Sync: Stop daemon services
-        node.shutdown()
-
-asyncio.run(main())
-```
-
-### Design Rationale
-
-The P2P and REST services run in their own daemon threads with isolated event loops because:
-
-1. **Long-running servers**: They continuously accept connections independent of application logic
-2. **Thread isolation**: Prevents blocking the main application's event loop
-3. **Clean separation**: Thread management is inherently sync; network I/O is naturally async
-
-This design allows the Node to be used in both sync scripts and async applications without nested event loop issues.
+The P2P and REST services run in their own daemon threads (`_ThreadedSSLServer` and
+uvicorn respectively). Handlers on those threads call the same sync service methods
+directly — no event loops to coordinate across the boundary.

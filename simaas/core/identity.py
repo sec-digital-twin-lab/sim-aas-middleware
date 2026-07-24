@@ -7,8 +7,12 @@ from simaas.core.eckeypair import ECKeyPair
 from simaas.core.rsakeypair import RSAKeyPair
 
 
-def generate_identity_token(iid: str, name: str, email: str, nonce: int, s_public_key: str, e_public_key: str) -> str:
-    return f"{iid}:{name}:{email}:{nonce}:{s_public_key}:{e_public_key}"
+_IDENTITY_DOMAIN = 'simaas-identity:v1:'
+
+
+def generate_identity_token(iid: str, name: str, email: str, nonce: int,
+                            s_public_key: str, e_public_key: str, tls_cert: str) -> str:
+    return f"{_IDENTITY_DOMAIN}{iid}:{name}:{email}:{nonce}:{s_public_key}:{e_public_key}:{tls_cert}"
 
 
 class Identity(BaseModel):
@@ -35,5 +39,5 @@ class Identity(BaseModel):
 
     def verify_integrity(self) -> bool:
         token = generate_identity_token(self.id, self.name, self.email, self.nonce,
-                                        self.s_public_key, self.e_public_key)
+                                        self.s_public_key, self.e_public_key, self.tls_cert)
         return self.verify(token.encode('utf-8'), self.signature)

@@ -19,8 +19,13 @@ def _account_label(user: User) -> str:
     return f"{user.uuid.hex}: {user.name} <{user.email}>{status}"
 
 
+def _redact_key(raw: str) -> str:
+    """Show only the leading characters so operators can correlate without exposing the secret."""
+    return f"{raw[:8]}…" if raw else ''
+
+
 def _apikey_label(key: APIKey) -> str:
-    return f"{key.id} by {key.uuid.hex} ({key.description}): {key.key}"
+    return f"{key.id} by {key.uuid.hex} ({key.description}): {_redact_key(key.key)}"
 
 
 def _select_users(uuids: List[UUID], action: str) -> Tuple[Dict[UUID, User], List[UUID]]:
@@ -242,7 +247,7 @@ class GatewayKeyList(CLICommand):
             for uuid, keys in found.items():
                 n_total += len(keys)
                 for key in keys:
-                    lines.append([uuid.hex, key.id, key.key, key.description])
+                    lines.append([uuid.hex, key.id, _redact_key(key.key), key.description])
 
             print(f"Found {n_total} API keys:")
             print(tabulate(lines, tablefmt="plain"))
@@ -288,6 +293,8 @@ class GatewayKeyCreate(CLICommand):
         print(f"- UUID: {key.uuid}")
         print(f"- Key: {key.key}")
         print(f"- Description: {key.description}")
+        print()
+        print("Save the key now — it will not be displayed again. Future listings show only the prefix.")
 
         return {'key': key}
 

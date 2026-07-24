@@ -10,6 +10,7 @@ from simaas.core.helpers import get_timestamp_now
 from simaas.core.errors import NetworkError, OperationError
 from simaas.core.identity import Identity
 from simaas.core.logging import get_logger
+from simaas.decorators import p2p_public_access
 from simaas.p2p.base import P2PProtocol, p2p_request, P2PAddress
 
 log = get_logger('simaas.p2p', 'p2p')
@@ -19,6 +20,7 @@ class LatencyMessage(BaseModel):
     t_now: int
 
 
+@p2p_public_access
 class P2PLatency(P2PProtocol):
     NAME = 'p2p-latency'
 
@@ -42,7 +44,8 @@ class P2PLatency(P2PProtocol):
         raise OperationError(operation='latency_test', cause=f'failed after {max_attempts} attempts')
 
     def handle(
-            self, request: LatencyMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            self, request: LatencyMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         return LatencyMessage(t_now=get_timestamp_now()), None
 
@@ -59,6 +62,7 @@ class ThroughputMessage(BaseModel):
     t_now: int
 
 
+@p2p_public_access
 class P2PThroughput(P2PProtocol):
     NAME = 'p2p-throughput'
 
@@ -95,7 +99,8 @@ class P2PThroughput(P2PProtocol):
             raise OperationError(operation='throughput_test', cause=f'failed after {max_attempts} attempts')
 
     def handle(
-            self, request: ThroughputMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            self, request: ThroughputMessage, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         return ThroughputMessage(t_now=get_timestamp_now()), attachment_path
 

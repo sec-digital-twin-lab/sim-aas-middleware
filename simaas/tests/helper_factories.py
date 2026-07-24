@@ -200,11 +200,11 @@ def prepare_data_object(content_path: str, node: Node, v: int = 1, data_type: st
 
     proxy = DORProxy(node.rest.address())
     if access:
-        obj = proxy.add_data_object(content_path, node.identity, True, False, data_type, data_format)
+        obj = proxy.add_data_object(content_path, node.keystore, True, False, data_type, data_format)
         for identity in access:
             obj = proxy.grant_access(obj.obj_id, node.keystore, identity)
     else:
-        obj = proxy.add_data_object(content_path, node.identity, False, False, data_type, data_format)
+        obj = proxy.add_data_object(content_path, node.keystore, False, False, data_type, data_format)
 
     return obj
 
@@ -347,7 +347,7 @@ def execute_job(
         P2PInterruptJob.perform(P2PAddress(
             address=runner_address,
             peer_tls_cert=runner_identity.tls_cert
-        ))
+        ), custodian.keystore)
 
     # Wait for job completion with timeout
     timeout = 60  # seconds

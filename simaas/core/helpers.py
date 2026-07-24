@@ -2,7 +2,7 @@ import os
 import shutil
 import datetime
 import json
-import random
+import secrets
 import string
 import jsonschema
 import canonicaljson
@@ -15,6 +15,28 @@ from typing import Union, List
 from simaas.core.logging import get_logger
 
 log = get_logger('simaas.core', 'core')
+
+
+def env_int(name: str, default: int, *,
+            min_value: int = None, max_value: int = None) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        log.warning('config', 'Env var not an integer; using default',
+                    name=name, raw=raw, default=default)
+        return default
+    if min_value is not None and value < min_value:
+        log.warning('config', 'Env var below allowed minimum; using default',
+                    name=name, raw=value, minimum=min_value, default=default)
+        return default
+    if max_value is not None and value > max_value:
+        log.warning('config', 'Env var above allowed maximum; using default',
+                    name=name, raw=value, maximum=max_value, default=default)
+        return default
+    return value
 
 
 def get_timestamp_now() -> int:
@@ -64,7 +86,10 @@ def write_json_to_file(content: Union[list, dict], path: str, schema: dict = Non
 
 
 def generate_random_string(length: int, characters: str = string.ascii_letters+string.digits):
-    return ''.join(random.choice(characters) for _ in range(length))
+    # secrets.choice — not random.choice — because some callers feed this
+    # straight into keystore identity ids and exception ids that should be
+    # unguessable. The throughput difference vs stdlib random is negligible.
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 
 def symmetric_encrypt(content: bytes) -> (bytes, bytes):

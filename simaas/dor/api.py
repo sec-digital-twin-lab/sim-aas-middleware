@@ -7,9 +7,11 @@ from fastapi import Response, Form, UploadFile, File
 from simaas.dor.schemas import DORStatistics, DataObjectProvenance, DataObject, SearchParameters, DataObjectRecipe, TagValueType
 from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
-from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
+from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
-from simaas.decorators import requires_ownership, requires_access
+from simaas.decorators import (
+    requires_ownership, requires_access, requires_authentication, public_access,
+)
 
 DOR_ENDPOINT_PREFIX = "/api/v1/dor"
 
@@ -35,6 +37,7 @@ class DORInterface(abc.ABC):
         """
 
     @abc.abstractmethod
+    @public_access
     def statistics(self) -> DORStatistics:
         """
         Retrieves some statistics from the DOR. This includes a list of all data types and formats found in the DOR.
@@ -62,6 +65,7 @@ class DORInterface(abc.ABC):
         """
 
     @abc.abstractmethod
+    @public_access
     def get_meta(self, obj_id: str) -> Optional[DataObject]:
         """
         Retrieves the meta information of a data object. Depending on the type of the data object, either a
@@ -75,6 +79,7 @@ class DORInterface(abc.ABC):
         ...
 
     @abc.abstractmethod
+    @public_access
     def get_provenance(self, c_hash: str) -> Optional[DataObjectProvenance]:
         """
         Retrieves the provenance information of a data object (identified by its content hash `c_hash`). Provenance
@@ -144,6 +149,7 @@ class DORRESTService(DORInterface):
         ]
 
     @abc.abstractmethod
+    @requires_authentication
     def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> DataObject:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
@@ -159,6 +165,7 @@ class DORRESTService(DORInterface):
         data object.
         """
 
+    @public_access
     def rest_search(self, p: SearchParameters) -> List[DataObject]:
         """
         Searches a DOR for data objects that match the search criteria. There are two kinds of criteria: constraints
@@ -192,14 +199,9 @@ class DORRESTService(DORInterface):
 
 
 class DORProxy(EndpointProxy):
-    @classmethod
-    def from_session(cls, session: Session) -> DORProxy:
-        return DORProxy(remote_address=session.address, credentials=session.credentials,
-                        endpoint_prefix=(session.endpoint_prefix_base, 'dor'))
-
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
+    def __init__(self, remote_address: (str, int),
                  endpoint_prefix: Tuple[str, str] = get_proxy_prefix(DOR_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
+        super().__init__(endpoint_prefix, remote_address)
 
     def search(self, patterns: list[str] = None, owner_iid: str = None,
                data_type: str = None, data_format: str = None,
@@ -219,13 +221,17 @@ class DORProxy(EndpointProxy):
         result = self.get('statistics')
         return DORStatistics.model_validate(result)
 
-    def add_data_object(self, content_path: str, owner: Identity, access_restricted: bool, content_encrypted: bool,
-                        data_type: str, data_format: str, creators: List[Identity] = None, recipe: dict = None,
+    def add_data_object(self, content_path: str, with_authorisation_by: Keystore, access_restricted: bool,
+                        content_encrypted: bool, data_type: str, data_format: str,
+                        creators: List[Identity] = None, recipe: dict = None,
                         tags: List[DataObject.Tag] = None, license_by: bool = False, license_sa: bool = False,
                         license_nc: bool = False, license_nd: bool = False) -> DataObject:
+        # owner_iid is derived server-side from the verified signer (the keystore
+        # passed via with_authorisation_by). Creators default to the signer when
+        # the caller doesn't specify them explicitly.
+        signer_id = with_authorisation_by.identity.id
         body = {
-            'owner_iid': owner.id,
-            'creators_iid': [creator.id for creator in creators] if creators else [owner.id],
+            'creators_iid': [creator.id for creator in creators] if creators else [signer_id],
             'data_type': data_type,
             'data_format': data_format,
             'access_restricted': access_restricted,
@@ -240,7 +246,8 @@ class DORProxy(EndpointProxy):
             'tags': {tag.key: tag.value for tag in tags} if tags else None
         }
 
-        result = self.post('add', body=body, attachment_path=content_path)
+        result = self.post('add', body=body, attachment_path=content_path,
+                           with_authorisation_by=with_authorisation_by)
         return DataObject.model_validate(result)
 
     def delete_data_object(self, obj_id: str, with_authorisation_by: Keystore) -> Optional[DataObject]:

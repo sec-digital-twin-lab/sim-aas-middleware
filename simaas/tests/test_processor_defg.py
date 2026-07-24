@@ -330,8 +330,9 @@ def test_validation_missing_required_output(
     with pytest.raises(RemoteError) as exc_info:
         rti_proxy.submit([task], with_authorisation_by=owner)
 
-    error_str = str(exc_info.value._details)
-    assert "missing required output" in error_str.lower()
+    # REST error responses omit `details` (server-side only); assert on the
+    # `reason` field, which carries the failing field name.
+    assert "task.output" in exc_info.value.reason.lower()
 
 
 @pytest.mark.integration
@@ -357,8 +358,7 @@ def test_validation_unknown_output_name(
     with pytest.raises(RemoteError) as exc_info:
         rti_proxy.submit([task], with_authorisation_by=owner)
 
-    error_str = str(exc_info.value._details)
-    assert "unknown output" in error_str.lower()
+    assert "task.output" in exc_info.value.reason.lower()
 
 
 @pytest.mark.integration
@@ -384,8 +384,7 @@ def test_validation_unknown_input_name(
     with pytest.raises(RemoteError) as exc_info:
         rti_proxy.submit([task], with_authorisation_by=owner)
 
-    error_str = str(exc_info.value._details)
-    assert "unknown input" in error_str.lower()
+    assert "task.input" in exc_info.value.reason.lower()
 
 
 # ==============================================================================
@@ -409,7 +408,7 @@ def test_defg_provenance_chain(
         f"{generate_random_string(4)}.json", json.dumps({'v': 1})
     )
     d0 = dor_proxy.add_data_object(
-        d0_path, owner.identity, False, False, 'JSONObject', 'json'
+        d0_path, owner, False, False, 'JSONObject', 'json'
     )
 
     prev_obj = d0

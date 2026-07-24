@@ -7,7 +7,7 @@ from stat import S_IREAD, S_IRGRP
 from threading import Lock
 from typing import Optional, List, Dict
 
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import Column, String, Boolean, BigInteger, JSON
 from sqlalchemy import create_engine
@@ -17,7 +17,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from simaas.core.helpers import hash_string_object, hash_json_object, hash_file_content
 from simaas.dor.api import DORProxy, DORRESTService
 from simaas.core.errors import NotFoundError, OperationError
-from simaas.core.helpers import get_timestamp_now, generate_random_string
+from simaas.core.helpers import env_int, get_timestamp_now, generate_random_string
 from simaas.core.logging import get_logger
 from simaas.nodedb.schemas import NodeInfo
 from simaas.dor.schemas import DORStatistics, CObjectNode, DataObjectRecipe, DataObjectProvenance, DataObject, \
@@ -183,8 +183,7 @@ class FilesystemDORService(DORRESTService):
                     dor = DORProxy(node.rest_address)
                     provenance = dor.get_provenance(c_hash)
                     if provenance is not None:
-                        # TODO: change once proxy has been refactored
-                        result.append(DataObjectProvenance.model_validate(provenance))
+                        result.append(provenance)
             except Exception:
                 log.warning('provenance', 'Failed to send request to node', id=node.identity.id, address=str(node.rest_address))
 
@@ -406,7 +405,7 @@ class FilesystemDORService(DORRESTService):
 
         return self.get_meta(obj_id)
 
-    def rest_add(self, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
+    def rest_add(self, request: Request, body: str = Form(...), attachment: UploadFile = File(...)) -> Optional[DataObject]:
         """
         Adds a new content data object to the DOR and returns the meta information for this data object. The content
         of the data object itself is uploaded as an attachment (binary). There is no restriction as to the nature or
@@ -418,6 +417,13 @@ class FilesystemDORService(DORRESTService):
         if '__part_info' in body:
             # read the part information
             part_info = DORFilePartInfo.model_validate(body.pop('__part_info'))
+            max_parts = env_int('SIMAAS_DOR_MAX_PARTS', 100000, min_value=1, max_value=10_000_000)
+            if part_info.n <= 0 or part_info.n > max_parts:
+                raise OperationError(operation='multipart_add', stage='validation',
+                                     cause=f'declared part count {part_info.n} outside [1, {max_parts}]')
+            if part_info.idx < 0 or part_info.idx >= part_info.n:
+                raise OperationError(operation='multipart_add', stage='validation',
+                                     cause=f'part idx {part_info.idx} outside [0, {part_info.n})')
             if part_info.idx == 0:
                 attachment_path: str = os.path.join(self.obj_content_path(f"{get_timestamp_now()}_{part_info.id}"))
                 f = open(attachment_path, 'wb')
@@ -477,7 +483,7 @@ class FilesystemDORService(DORRESTService):
         p = AddDataObjectParameters.model_validate(body)
 
         return self.add(
-            attachment_path, p.data_type, p.data_format, p.owner_iid,
+            attachment_path, p.data_type, p.data_format, request.state.identity.id,
             creators_iid=p.creators_iid, access_restricted=p.access_restricted,
             content_encrypted=p.content_encrypted, license=p.license, tags=p.tags,
             recipe=p.recipe

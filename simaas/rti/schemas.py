@@ -158,12 +158,3 @@ class Processor(BaseModel):
     volumes: List[ProcessorVolume] = Field(..., title="Volumes", description="List of volumes used by the processor (if any).")
     gpp: Optional[GitProcessorPointer] = Field(title="GPP", description="The Git Processor Pointer information.")
     error: Optional[str] = Field(title="Error", description="Information about the error encountered (only if state is 'failed').")
-
-
-class ProcessorStatus(BaseModel):
-    """
-    Status information about a deployed processor.
-    """
-    state: str = Field(..., title="State", description="The state of the processor.", examples=["initialised"])
-    pending: List[Job] = Field(..., title="Pending Jobs", description="A list of pending jobs that are queued for execution.")
-    active: List[Job] = Field(..., title="Active Jobs", description="A list of active jobs that are currently being executed by the processor (if any).")

@@ -15,7 +15,9 @@ from simaas.core.identity import Identity
 from simaas.core.keystore import Keystore
 from simaas.core.errors import ExceptionContent
 from simaas.core.logging import get_logger
+from simaas.decorators import p2p_public_access
 from simaas.p2p.base import P2PProtocol, P2PAddress, p2p_request
+from simaas.rest.auth import timestamp_within_window
 
 log = get_logger('simaas.ns', 'ns')
 
@@ -34,6 +36,7 @@ def serialise(obj: Any) -> Any:
 class NamespaceAuthorisation(BaseModel):
     iid: str
     signature: str
+    issued_at: int
 
 
 class NamespaceServiceRequest(BaseModel):
@@ -48,13 +51,18 @@ class NamespaceServiceResponse(BaseModel):
     exception: Optional[ExceptionContent]
 
 
+_NS_SERVICE_DOMAIN = b'simaas-namespace-service:v1:'
+
+
 def generate_authorised_request(
         authority: Keystore, service: str, method: str, args: Optional[dict]
 ) -> NamespaceServiceRequest:
-    # create the auth token
+    issued_at = int(time.time())
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(_NS_SERVICE_DOMAIN)
     digest.update(service.encode('utf-8'))
     digest.update(method.encode('utf-8'))
+    digest.update(str(issued_at).encode('utf-8'))
     if args is not None:
         digest.update(canonicaljson.encode_canonical_json(args))
     token = digest.finalize()
@@ -65,24 +73,30 @@ def generate_authorised_request(
         args=args,
         authorisation=NamespaceAuthorisation(
             iid=authority.identity.id,
-            signature=authority.sign(token)
+            signature=authority.sign(token),
+            issued_at=issued_at,
         )
     )
 
 
 def verify_request_authorisation(identity: Identity, request: NamespaceServiceRequest) -> bool:
-    # hash the contents
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(_NS_SERVICE_DOMAIN)
     digest.update(request.service.encode('utf-8'))
     digest.update(request.method.encode('utf-8'))
+    digest.update(str(request.authorisation.issued_at).encode('utf-8'))
     if request.args is not None:
         digest.update(canonicaljson.encode_canonical_json(request.args))
     token = digest.finalize()
 
-    # verify the signature
     return identity.verify(token, request.authorisation.signature)
 
 
+@p2p_public_access
+# Authorisation is enforced inside handle() via the body-level signed token
+# (request.authorisation.iid + signature, verified against the canonicalised
+# service+method+args). The top-level P2PMessage signature is therefore not
+# additionally required.
 class P2PNamespaceServiceCall(P2PProtocol):
     NAME = 'namespace-service-call'
 
@@ -171,10 +185,17 @@ class P2PNamespaceServiceCall(P2PProtocol):
 
     def handle(
             self, request: NamespaceServiceRequest, attachment_path: Optional[str] = None,
-            download_path: Optional[str] = None
+            download_path: Optional[str] = None, identity: Optional[Identity] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
 
         try:
+            if not timestamp_within_window(request.authorisation.issued_at):
+                raise AuthenticationError(
+                    identity_id=request.authorisation.iid,
+                    operation='namespace_request',
+                    hint='Authorisation outside time window'
+                )
+
             # do we know the identity that authorised the request?
             identity = self._node.db.get_identity(request.authorisation.iid)
             if identity is None:
@@ -254,9 +275,10 @@ class P2PNamespaceServiceCall(P2PProtocol):
             return NamespaceServiceResponse(result=None, exception=e.content), None
 
         except Exception as e:
-            trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
+            log.error('namespace', 'Unexpected exception in service call',
+                      trace=''.join(traceback.format_exception(None, e, e.__traceback__)))
             return NamespaceServiceResponse(
-                result=None, exception=ExceptionContent(id="unknown", reason=str(e), details={'trace': trace})
+                result=None, exception=ExceptionContent(id="unknown", reason=str(e))
             ), None
 
     @staticmethod

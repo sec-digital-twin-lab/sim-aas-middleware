@@ -274,11 +274,11 @@ def test_processor_kgraph_job(
     # upload input data objects
     ec_obj = dor_proxy.add_data_object(
         os.path.join(BASE_DIR, 'examples', 'kgraph', 'data', 'electricity_consumption.json'),
-        owner.identity, False, False, 'JSONObject', 'json'
+        owner, False, False, 'JSONObject', 'json'
     )
     er_obj = dor_proxy.add_data_object(
         os.path.join(BASE_DIR, 'examples', 'kgraph', 'data', 'emission_rate.json'),
-        owner.identity, False, False, 'JSONObject', 'json'
+        owner, False, False, 'JSONObject', 'json'
     )
 
     # build the SPARQL config using the host IP (reachable from inside the container)

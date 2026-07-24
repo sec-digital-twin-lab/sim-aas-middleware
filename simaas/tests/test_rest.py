@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from simaas.core.errors import _BaseError, RemoteError
 from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
-from simaas.decorators import requires_authentication
+from simaas.decorators import requires_authentication, public_access
 from simaas.node.base import Node
 from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
@@ -82,6 +82,7 @@ class TestRESTService:
                                self.rest_delete_with_auth, TestResponse)
         ]
 
+    @public_access
     def rest_post(self, value: str) -> TestResponse:
         """Create a new object with given value."""
         key = None
@@ -91,6 +92,7 @@ class TestRESTService:
         self._objects[key] = value
         return TestResponse(key=key, value=self._objects[key])
 
+    @public_access
     def rest_get(self, key: str) -> TestResponse:
         """Retrieve an object by key."""
         if key in self._objects:
@@ -100,6 +102,7 @@ class TestRESTService:
             'key': key
         })
 
+    @public_access
     def rest_put(self, key: str, value: str) -> TestResponse:
         """Update an existing object."""
         if key in self._objects:
@@ -110,6 +113,7 @@ class TestRESTService:
             'key': key
         })
 
+    @public_access
     def rest_delete(self, key: str) -> TestResponse:
         """Delete an object by key."""
         if key in self._objects:
@@ -120,6 +124,7 @@ class TestRESTService:
             'key': key
         })
 
+    @public_access
     def rest_delete_with_body(self, r: TestDeleteRequest) -> TestResponse:
         """Delete an object using request body."""
         if r.key in self._objects:
@@ -300,7 +305,8 @@ def test_delete_with_auth(test_context, rest_node, rest_test_proxy):
     with pytest.raises(RemoteError) as e:
         # this should fail because the 'bad' authority is not known to the node
         rest_test_proxy.remove_with_auth(key, authority=bad_authority)
-    assert e.value.details.get('remote_details', {}).get('hint') == 'unknown identity'
+    # REST responses no longer leak the verbose `hint` field; rely on reason instead
+    assert 'authoris' in e.value.reason.lower()
 
     # this should succeed because the 'good' authority is known to the node
     result = rest_test_proxy.remove_with_auth(key, authority=good_authority)

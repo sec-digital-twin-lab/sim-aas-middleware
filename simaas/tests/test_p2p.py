@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import tempfile
-import time
 from typing import List, Dict
 
 import pytest
@@ -15,7 +14,7 @@ from simaas.core.keystore import Keystore
 from simaas.core.logging import get_logger, initialise
 from simaas.dor.api import DORProxy
 from simaas.core.errors import NetworkError
-from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PPushDataObject, P2PRelayPushDataObject
+from simaas.dor.protocol import P2PLookupDataObject, P2PFetchDataObject, P2PRelayPushDataObject
 from simaas.dor.schemas import DataObject
 from simaas.helpers import PortMaster
 from simaas.node.base import Node
@@ -24,7 +23,6 @@ from simaas.nodedb.api import NodeDBProxy
 from simaas.plugins.builtins.dor_fs import FilesystemDORService
 from simaas.nodedb.protocol import P2PJoinNetwork, P2PLeaveNetwork, P2PUpdateIdentity
 from simaas.nodedb.schemas import NodeInfo
-from simaas.p2p.base import P2PAddress
 from simaas.core.errors import NetworkError as PeerUnavailableError  # Alias for backwards compat in tests
 from simaas.p2p.protocol import P2PLatency, P2PThroughput
 
@@ -145,9 +143,9 @@ def test_p2p_join_leave_network(p2p_server, p2p_client):
 def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
     """Test P2P data object lookup and fetch operations."""
     # client is supposed to be the owner of the data object -> make the server aware of the identity
-    owner = p2p_client.identity
+    owner_ks = p2p_client.keystore
     nodedb = NodeDBProxy(p2p_server.rest.address())
-    nodedb.update_identity(owner)
+    nodedb.update_identity(owner_ks.identity)
 
     # upload the data object
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -157,7 +155,7 @@ def test_p2p_lookup_fetch_data_object(p2p_server, p2p_client):
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())
-        meta = dor.add_data_object(content_path, owner, False, False, 'JSONObject', 'json')
+        meta = dor.add_data_object(content_path, owner_ks, False, False, 'JSONObject', 'json')
         obj_id = meta.obj_id
 
     # perform the lookup
@@ -217,7 +215,7 @@ def test_p2p_fetch_restricted(p2p_server):
             json.dump({'v': 1}, f, indent=2)
 
         dor = DORProxy(p2p_server.rest.address())
-        meta = dor.add_data_object(content_path, owner.identity, True, False, 'JSONObject', 'json')
+        meta = dor.add_data_object(content_path, owner, True, False, 'JSONObject', 'json')
         obj_id = meta.obj_id
 
         protocol = P2PFetchDataObject(client)
@@ -239,7 +237,7 @@ def test_p2p_fetch_restricted(p2p_server):
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
-            assert 'user id not found' in e.details['reason']
+            assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
 
@@ -251,7 +249,7 @@ def test_p2p_fetch_restricted(p2p_server):
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id)
             assert False
         except NetworkError as e:
-            assert 'user does not have access' in e.details['reason']
+            assert 'authorisation failed' in e.details['reason']
         except Exception:
             assert False
 
@@ -262,8 +260,8 @@ def test_p2p_fetch_restricted(p2p_server):
 
         # the client does not have a valid permission at this point to receive the data object
         try:
-            token = f"{client.identity.id}:12343245"
-            invalid_signature = client.keystore.sign(token.encode('utf-8'))
+            from simaas.dor.protocol import dor_fetch_token
+            invalid_signature = client.keystore.sign(dor_fetch_token(client.identity.id, '12343245'))
 
             protocol.perform(p2p_server.info, obj_id, meta_path, content_path, user_iid=client.identity.id,
                                    user_signature=invalid_signature)
@@ -274,8 +272,7 @@ def test_p2p_fetch_restricted(p2p_server):
             assert False
 
         # create valid user signature
-        token = f"{client.identity.id}:{obj_id}"
-        signature = client.keystore.sign(token.encode('utf-8'))
+        signature = client.keystore.sign(dor_fetch_token(client.identity.id, obj_id))
 
         # the client does not have permission at this point to receive the data object
         try:
@@ -306,7 +303,6 @@ def _relay_push_kwargs(custodian, runner_keystore, target_iid, content_path):
         content_path=content_path,
         data_type='JSONObject',
         data_format='json',
-        owner_iid=runner_keystore.identity.id,
         creators_iid=[runner_keystore.identity.id],
         access_restricted=False,
         content_encrypted=False,

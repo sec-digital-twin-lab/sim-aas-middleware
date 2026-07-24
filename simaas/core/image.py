@@ -20,25 +20,40 @@ def clone_repository(repository_url: str, repository_path: str, commit_id: str =
     if not simulate_only:
         original_url = repository_url
 
-        # do we have credentials? inject it into the repo URL
-        if credentials:
-            idx = repository_url.index('github.com')
-            url0 = repository_url[:idx]
-            url1 = repository_url[idx:]
-            repository_url = f"{url0}{credentials[0]}:{credentials[1]}@{url1}"
-
+        askpass_dir: Optional[str] = None
+        clone_env = dict(os.environ)
         try:
-            # does the destination already exist?
+            if credentials:
+                askpass_dir = tempfile.mkdtemp(prefix='simaas-askpass-')
+                askpass_path = os.path.join(askpass_dir, 'askpass.sh')
+                fd = os.open(askpass_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o700)
+                with os.fdopen(fd, 'w') as f:
+                    f.write(
+                        '#!/bin/sh\n'
+                        'case "$1" in\n'
+                        '  [Uu]sername*) printf "%s\\n" "$SIMAAS_GIT_LOGIN" ;;\n'
+                        '  *) printf "%s\\n" "$SIMAAS_GIT_PAT" ;;\n'
+                        'esac\n'
+                    )
+                clone_env['GIT_ASKPASS'] = askpass_path
+                clone_env['SIMAAS_GIT_LOGIN'] = credentials[0]
+                clone_env['SIMAAS_GIT_PAT'] = credentials[1]
+                clone_env['GIT_TERMINAL_PROMPT'] = '0'
+
             try:
-                shutil.rmtree(repository_path)
-            except OSError as e:
-                log.warning('clone', 'Failed to remove directory', path=repository_path, error=str(e))
+                # does the destination already exist?
+                try:
+                    shutil.rmtree(repository_path)
+                except OSError as e:
+                    log.warning('clone', 'Failed to remove directory', path=repository_path, error=str(e))
 
-            # clone the repo
-            Repo.clone_from(repository_url, repository_path)
+                Repo.clone_from(repository_url, repository_path, env=clone_env)
 
-        except Exception as e:
-            raise CLIError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
+            except Exception as e:
+                raise CLIError(reason=f"Failed to clone '{original_url}'", details={'exception': str(e)})
+        finally:
+            if askpass_dir is not None:
+                shutil.rmtree(askpass_dir, ignore_errors=True)
 
     try:
         # checkout a specific commit
@@ -99,9 +114,11 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
                 if platform:
                     command.extend(['--platform', platform])
                 if credentials:
-                    # write the credentials to file (temporarily)
-                    with open(credentials_path, 'w') as f:
-                        f.write(f"{credentials[0]}:{credentials[1]}")
+                    fd = os.open(credentials_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    try:
+                        os.write(fd, f"{credentials[0]}:{credentials[1]}".encode())
+                    finally:
+                        os.close(fd)
 
                     command.extend(['--secret', f'id=git_credentials,src={credentials_path}'])
                 command.extend(['-t', image_name, '.'])
@@ -113,12 +130,14 @@ def build_processor_image(processor_path: str, simaas_path: str, image_name: str
 
             except subprocess.CalledProcessError as e:
                 trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
-                print(e.stderr)
+                log.error('image.build',
+                          'docker build failed',
+                          returncode=e.returncode,
+                          stdout=e.stdout,
+                          stderr=e.stderr)
                 raise CLIError("Creating docker image failed", details={
-                    'stdout': e.stdout,
-                    'stderr': e.stderr,
-                    'exception': str(e),
-                    'trace': trace
+                    'returncode': e.returncode,
+                    'trace': trace,
                 })
 
             except Exception as e:

@@ -30,26 +30,43 @@ log = get_logger('simaas.rti', 'rti')
 
 class AWSConfiguration(BaseModel):
     aws_region: str
-    aws_access_key_id: str
-    aws_secret_access_key: str
     aws_role_arn: str
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
 
 
-REQUIRED_AWS_CONFIG_ENV = [
-    'SIMAAS_AWS_REGION', 'SIMAAS_AWS_ACCESS_KEY_ID', 'SIMAAS_AWS_SECRET_ACCESS_KEY', 'SIMAAS_AWS_ROLE_ARN'
-]
+REQUIRED_AWS_CONFIG_ENV = ['SIMAAS_AWS_REGION', 'SIMAAS_AWS_ROLE_ARN']
 REQUIRED_ENV = REQUIRED_AWS_CONFIG_ENV + ['SIMAAS_AWS_JOB_QUEUE', 'SIMAAS_REPO_PATH']
 
 def get_default_aws_config() -> Optional[AWSConfiguration]:
-    if all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
-        return AWSConfiguration(
-            aws_region=os.environ['SIMAAS_AWS_REGION'],
-            aws_access_key_id=os.environ['SIMAAS_AWS_ACCESS_KEY_ID'],
-            aws_secret_access_key=os.environ['SIMAAS_AWS_SECRET_ACCESS_KEY'],
-            aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN']
-        )
-    else:
+    if not all(var in os.environ for var in REQUIRED_AWS_CONFIG_ENV):
         return None
+
+    access_key = os.environ.get('SIMAAS_AWS_ACCESS_KEY_ID')
+    secret_key = os.environ.get('SIMAAS_AWS_SECRET_ACCESS_KEY')
+    if bool(access_key) != bool(secret_key):
+        raise ConfigurationError(
+            path='SIMAAS_AWS_ACCESS_KEY_ID,SIMAAS_AWS_SECRET_ACCESS_KEY',
+            expected='both set or neither set',
+            actual='only one set',
+            hint='set both to use explicit static credentials, or unset both to use the default credential chain',
+        )
+
+    return AWSConfiguration(
+        aws_region=os.environ['SIMAAS_AWS_REGION'],
+        aws_role_arn=os.environ['SIMAAS_AWS_ROLE_ARN'],
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+
+
+def _boto_kwargs(config: AWSConfiguration) -> dict:
+    """boto3 client kwargs; explicit keys when set, otherwise fall through to the default credential chain."""
+    kwargs = {'region_name': config.aws_region}
+    if config.aws_access_key_id and config.aws_secret_access_key:
+        kwargs['aws_access_key_id'] = config.aws_access_key_id
+        kwargs['aws_secret_access_key'] = config.aws_secret_access_key
+    return kwargs
 
 
 def get_ecr_tag(image_name: str) -> str:
@@ -69,10 +86,7 @@ def get_ecr_client(config: Optional[AWSConfiguration] = None) -> Tuple[boto3.cli
     if config is None:
         raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
-    return boto3.client(
-        "ecr", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key
-    ), config
+    return boto3.client("ecr", **_boto_kwargs(config)), config
 
 
 def get_ecr_repository(repository_name: str, config: Optional[AWSConfiguration] = None) -> str:
@@ -127,15 +141,22 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     auth_token = base64.b64decode(auth_data["authorizationToken"]).decode()  # Decode base64 token
     username, password = auth_token.split(":")
 
-    # Perform ECR login
+    # Perform ECR login. The docker login subprocess can include the registry
+    # host, IAM hints, or even partial credentials in its stderr — log it
+    # server-side and pass a sanitised hint via the exception that won't carry
+    # those details through whatever consumes the error.
     result = subprocess.run(
         ['docker', 'login', '--username', 'AWS', '--password-stdin', ecr_url],
         input=password.encode(), capture_output=True
     )
     if result.returncode != 0:
+        log.error('ecr.login', 'ECR login failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise OperationError(
             operation='ecr_login', stage='authentication', cause='login failed',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker login exited with code {result.returncode}",
         )
 
     # Tag the local image for ECR
@@ -143,18 +164,26 @@ def ecr_push_local_image(repository_name: str, image_name: str, config: Optional
     ecr_image = get_ecr_image_name(repository_uri, get_ecr_tag(image_name))
     result = subprocess.run(['docker', 'tag', image_name, ecr_image], capture_output=True)
     if result.returncode != 0:
+        log.error('ecr.tag', 'docker tag failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise OperationError(
             operation='tag_image', stage='tagging', cause='failed',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker tag exited with code {result.returncode}",
         )
 
     # Push the image to ECR
     # docker push <aws-account-id>.dkr.ecr.<region>.amazonaws.com/<repository>:<tag>
     result = subprocess.run(['docker', 'push', '--platform', 'linux/amd64', ecr_image], capture_output=True)
     if result.returncode != 0:
+        log.error('ecr.push', 'docker push failed',
+                  returncode=result.returncode,
+                  stdout=result.stdout.decode('utf-8', errors='replace'),
+                  stderr=result.stderr.decode('utf-8', errors='replace'))
         raise NetworkError(
             operation='ecr_push',
-            hint=f"stdout={result.stdout.decode('utf-8')}, stderr={result.stderr.decode('utf-8')}"
+            hint=f"docker push exited with code {result.returncode}",
         )
 
     return ecr_image
@@ -190,10 +219,7 @@ def get_batch_client(config: Optional[AWSConfiguration] = None) -> boto3.client:
     if config is None:
         raise ConfigurationError(setting='AWS_*', hint='missing AWS configuration')
 
-    return boto3.client(
-        "batch", region_name=config.aws_region, aws_access_key_id=config.aws_access_key_id,
-        aws_secret_access_key=config.aws_secret_access_key
-    ), config
+    return boto3.client("batch", **_boto_kwargs(config)), config
 
 
 def batch_ensure_job_def(
@@ -594,7 +620,7 @@ class AWSRTIService(RTIServiceBase):
             # send P2P interrupt (best effort)
             if peer_address:
                 try:
-                    P2PInterruptJob.perform(peer_address)
+                    P2PInterruptJob.perform(peer_address, self._node.keystore)
                 except Exception:
                     pass
 

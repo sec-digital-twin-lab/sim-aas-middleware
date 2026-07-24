@@ -110,9 +110,13 @@ def _build_processor(proc_info: tuple, force_build: bool = True) -> dict:
                 json.dump(gpp.model_dump(), f, indent=2)
 
             # Build the image from the isolated temp copy
+            if {'GITHUB_USERNAME', 'GITHUB_TOKEN'}.issubset(os.environ):
+                credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+            else:
+                credentials = None
             build_processor_image(
                 temp_proc_path, os.environ['SIMAAS_REPO_PATH'], image_name,
-                credentials=(os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN']),
+                credentials=credentials,
                 platform='linux/amd64',
                 force_build=force_build
             )
@@ -147,8 +151,12 @@ def test_helper_image_clone_build_export(docker_available, session_node, temp_di
     # -----
 
     try:
+        if {'GITHUB_USERNAME', 'GITHUB_TOKEN'}.issubset(os.environ):
+            credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+        else:
+            credentials = None
         clone_repository(REPOSITORY_URL+"_doesnt_exist", os.path.join(temp_dir, 'repository_doesnt_exist'),
-                         credentials=(os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN']))
+                         credentials=credentials)
         assert False
     except CLIError:
         assert True

@@ -42,7 +42,7 @@ class TestAuthenticationErrorHandler:
         assert response.status_code == 401
 
     def test_response_body_structure(self, app, client):
-        """Test that response contains id, reason, and details."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-auth-error-body")
         def raise_auth_error():
             raise AuthenticationError(identity_id='user123', operation='login')
@@ -52,9 +52,7 @@ class TestAuthenticationErrorHandler:
 
         assert 'id' in body
         assert 'reason' in body
-        assert 'details' in body
-        assert body['details']['identity_id'] == 'user123'
-        assert body['details']['operation'] == 'login'
+        assert 'details' not in body
 
 
 class TestAuthorisationErrorHandler:
@@ -75,7 +73,7 @@ class TestAuthorisationErrorHandler:
         assert response.status_code == 403
 
     def test_response_body_structure(self, app, client):
-        """Test that response contains correct details."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-authz-error-body")
         def raise_authz_error():
             raise AuthorisationError(
@@ -87,9 +85,9 @@ class TestAuthorisationErrorHandler:
         response = client.get("/test-authz-error-body")
         body = response.json()
 
-        assert body['details']['identity_id'] == 'user123'
-        assert body['details']['resource_id'] == 'doc456'
-        assert body['details']['required_permission'] == 'write'
+        assert 'id' in body
+        assert 'reason' in body
+        assert 'details' not in body
 
 
 class TestNotFoundErrorHandler:
@@ -106,7 +104,7 @@ class TestNotFoundErrorHandler:
         assert response.status_code == 404
 
     def test_response_body_structure(self, app, client):
-        """Test that response contains correct details."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-not-found-body")
         def raise_not_found():
             raise NotFoundError(
@@ -118,9 +116,9 @@ class TestNotFoundErrorHandler:
         response = client.get("/test-not-found-body")
         body = response.json()
 
-        assert body['details']['resource_type'] == 'data_object'
-        assert body['details']['resource_id'] == 'abc123'
-        assert body['details']['searched_locations'] == ['local', 'remote']
+        assert 'id' in body
+        assert 'reason' in body
+        assert 'details' not in body
 
 
 class TestValidationErrorHandler:
@@ -141,7 +139,7 @@ class TestValidationErrorHandler:
         assert response.status_code == 422
 
     def test_response_body_structure(self, app, client):
-        """Test that response contains correct details."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-validation-body")
         def raise_validation():
             raise ValidationError(
@@ -153,9 +151,9 @@ class TestValidationErrorHandler:
         response = client.get("/test-validation-body")
         body = response.json()
 
-        assert body['details']['field'] == 'email'
-        assert body['details']['expected'] == 'valid email format'
-        assert body['details']['actual'] == 'not-an-email'
+        assert 'id' in body
+        assert 'reason' in body
+        assert 'details' not in body
 
 
 class TestNetworkErrorHandler:
@@ -172,7 +170,7 @@ class TestNetworkErrorHandler:
         assert response.status_code == 502
 
     def test_response_body_structure(self, app, client):
-        """Test that response contains correct details."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-network-body")
         def raise_network():
             raise NetworkError(
@@ -184,9 +182,9 @@ class TestNetworkErrorHandler:
         response = client.get("/test-network-body")
         body = response.json()
 
-        assert body['details']['peer_address'] == '192.168.1.100'
-        assert body['details']['operation'] == 'connect'
-        assert body['details']['timeout_ms'] == 5000
+        assert 'id' in body
+        assert 'reason' in body
+        assert 'details' not in body
 
 
 class TestBaseErrorCatchAll:
@@ -223,7 +221,7 @@ class TestBaseErrorCatchAll:
         assert response.status_code == 500
 
     def test_response_body_structure(self, app, client):
-        """Test that catch-all response contains correct structure."""
+        """Response carries id + reason; details stay server-side (security)."""
         @app.api.get("/test-catchall-body")
         def raise_operation():
             raise OperationError(operation='deploy', stage='validation')
@@ -233,9 +231,7 @@ class TestBaseErrorCatchAll:
 
         assert 'id' in body
         assert 'reason' in body
-        assert 'details' in body
-        assert body['details']['operation'] == 'deploy'
-        assert body['details']['stage'] == 'validation'
+        assert 'details' not in body
 
 
 class TestResponseIdFormat:

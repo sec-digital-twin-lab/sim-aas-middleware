@@ -6,12 +6,20 @@ import ssl
 import struct
 import tempfile
 import traceback
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 
+import canonicaljson
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
 from pydantic import BaseModel
 
 from simaas.core.errors import NetworkError
+from simaas.core.helpers import env_int
 from simaas.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from simaas.core.identity import Identity
+    from simaas.core.keystore import Keystore
 
 log = get_logger('simaas.p2p', 'p2p')
 
@@ -28,6 +36,42 @@ class P2PAddress(BaseModel):
     peer_tls_cert: str
 
 
+class RelayAttestation(BaseModel):
+    """Signed assertion identifying the original sender for a relayed action.
+
+    Lets the target verify the original authorisation directly, separately from
+    the immediate (relay) sender's transport-level identity.
+    """
+    iid: str
+    signature: str
+    issued_at: int
+
+
+_RELAY_ATTESTATION_DOMAIN = b'p2p-relay-attestation:v1:'
+
+
+def _relay_attestation_token(payload: dict) -> bytes:
+    """Domain-separated canonical token for a relay attestation signature."""
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(_RELAY_ATTESTATION_DOMAIN)
+    digest.update(canonicaljson.encode_canonical_json(payload))
+    return digest.finalize()
+
+
+def sign_relay_attestation(keystore: "Keystore", payload: dict) -> RelayAttestation:
+    """Build a ``RelayAttestation`` for the given attested-fields payload."""
+    return RelayAttestation(
+        iid=keystore.identity.id,
+        signature=keystore.sign(_relay_attestation_token(payload)),
+        issued_at=payload['issued_at'],
+    )
+
+
+def verify_relay_attestation(identity: "Identity", payload: dict, signature: str) -> bool:
+    """Verify a relay attestation against the claimed identity's public key."""
+    return identity.verify(_relay_attestation_token(payload), signature)
+
+
 class P2PProtocol(abc.ABC):
     def __init__(self, protocol: str) -> None:
         self._protocol = protocol
@@ -37,9 +81,17 @@ class P2PProtocol(abc.ABC):
 
     @abc.abstractmethod
     def handle(
-            self, request: BaseModel, attachment_path: Optional[str] = None, download_path: Optional[str] = None
+            self, request: BaseModel, attachment_path: Optional[str] = None, download_path: Optional[str] = None,
+            identity: Optional["Identity"] = None,
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
-        ...
+        """Process a P2P request.
+
+        ``identity`` is the verified sender — set when the caller presented a TLS
+        client cert that resolves to a known identity. Public-access protocols
+        may receive ``None`` (anonymous caller). Auth-required protocols are
+        rejected by ``p2p_respond`` before ``handle`` is invoked if ``identity``
+        would be ``None``.
+        """
 
     @staticmethod
     def request_type() -> BaseModel:
@@ -54,6 +106,18 @@ class P2PProtocol(abc.ABC):
 _THROUGHPUT_FLOOR = 10 * 1024 * 1024
 _CHUNK_SIZE = 1024 * 1024
 
+# Inbound P2P attachment ceiling; tune via ``SIMAAS_P2P_MAX_ATTACHMENT_BYTES``.
+_DEFAULT_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 * 1024
+_MIN_ATTACHMENT_BYTES = 1024 * 1024
+_MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024 * 1024
+
+
+def max_attachment_bytes() -> int:
+    return env_int(
+        'SIMAAS_P2P_MAX_ATTACHMENT_BYTES', _DEFAULT_MAX_ATTACHMENT_BYTES,
+        min_value=_MIN_ATTACHMENT_BYTES, max_value=_MAX_ATTACHMENT_BYTES,
+    )
+
 
 def _parse_tcp_address(address: str) -> Tuple[str, int]:
     if address.startswith('tcp://'):
@@ -65,8 +129,10 @@ def _parse_tcp_address(address: str) -> Tuple[str, int]:
 def _write_pem_pair(cert_pem: bytes, key_pem: bytes) -> Tuple[str, str]:
     cf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
     kf = tempfile.NamedTemporaryFile(mode='wb', suffix='.pem', delete=False)
-    cf.write(cert_pem); cf.close()
-    kf.write(key_pem); kf.close()
+    cf.write(cert_pem)
+    cf.close()
+    kf.write(key_pem)
+    kf.close()
     return cf.name, kf.name
 
 
@@ -78,18 +144,38 @@ def _unlink_silently(*paths: str) -> None:
             pass
 
 
-def build_client_ssl_context(peer_cert_pem: str) -> ssl.SSLContext:
-    """Client context pinning the peer's self-signed cert as the only trusted CA."""
+def build_client_ssl_context(peer_cert_pem: str, client_keystore: Optional["Keystore"] = None) -> ssl.SSLContext:
+    """Client context pinning the peer's self-signed cert as the trusted CA.
+
+    When ``client_keystore`` is supplied the client also presents its own
+    cert/key pair so the server can identify the caller via mTLS. Pass ``None``
+    to call public-access protocols anonymously.
+    """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_verify_locations(cadata=peer_cert_pem)
+    if client_keystore is not None:
+        cert_path, key_path = _write_pem_pair(client_keystore.tls_cert_pem(), client_keystore.tls_key_pem())
+        try:
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        finally:
+            _unlink_silently(cert_path, key_path)
     return ctx
 
 
-def build_server_ssl_context(cert_pem: bytes, key_pem: bytes) -> ssl.SSLContext:
-    """Server context presenting its own self-signed cert. Clients are not authenticated at TLS level."""
+def build_server_ssl_context(cert_pem: bytes, key_pem: bytes,
+                             trusted_peer_certs_pem: Optional[str] = None) -> ssl.SSLContext:
+    """Server context presenting its own self-signed cert and accepting trusted client certs.
+
+    When ``trusted_peer_certs_pem`` is provided (a concatenation of known peer
+    identity certs in PEM form), the server requests a client cert in the
+    handshake and accepts it only if it appears in that bundle. This is the
+    transport-layer half of the P2P auth model. When the bundle is empty
+    (e.g. on a freshly-started node before any peers are known), the server
+    falls back to no client-cert request so the bootstrap flow still works.
+    """
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     cert_path, key_path = _write_pem_pair(cert_pem, key_pem)
@@ -97,8 +183,34 @@ def build_server_ssl_context(cert_pem: bytes, key_pem: bytes) -> ssl.SSLContext:
         ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
     finally:
         _unlink_silently(cert_path, key_path)
-    ctx.verify_mode = ssl.CERT_NONE
+    if trusted_peer_certs_pem:
+        ctx.load_verify_locations(cadata=trusted_peer_certs_pem)
+        ctx.verify_mode = ssl.CERT_OPTIONAL
+    else:
+        ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+def identity_from_peercert(node, peer_cert_der: Optional[bytes]) -> Optional["Identity"]:
+    """Resolve a verified TLS peer cert to a known node identity.
+
+    Returns ``None`` if the handshake didn't yield a peer cert (anonymous
+    caller) or if the cert doesn't match any identity the node knows about.
+    PEM-equality keeps this independent of any pre-computed cert index.
+    """
+    if not peer_cert_der or node is None:
+        return None
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives.serialization import Encoding
+        cert = x509.load_der_x509_certificate(peer_cert_der)
+        peer_pem = cert.public_bytes(Encoding.PEM).decode('utf-8').strip()
+    except Exception:
+        return None
+    for known in node.db.get_identities():
+        if known.tls_cert and known.tls_cert.strip() == peer_pem:
+            return known
+    return None
 
 
 def _send_frame(sock: socket.socket, message: P2PMessage, attachment_path: Optional[str] = None) -> None:
@@ -135,6 +247,9 @@ def _recv_header(sock: socket.socket) -> P2PMessage:
 def _recv_attachment(sock: socket.socket, size: int, download_path: Optional[str]) -> Optional[str]:
     if size <= 0:
         return None
+    cap = max_attachment_bytes()
+    if size > cap:
+        raise IOError(f'attachment_size {size} exceeds cap {cap}')
     if download_path is None:
         download_path = os.devnull
     remaining = size
@@ -151,14 +266,14 @@ def _recv_attachment(sock: socket.socket, size: int, download_path: Optional[str
 def p2p_request(
         peer: P2PAddress, protocol: str, content: BaseModel, reply_type: Optional[BaseModel] = None,
         attachment_path: Optional[str] = None, download_path: Optional[str] = None,
-        timeout: Optional[int] = None,
+        timeout: Optional[int] = None, with_authorisation_by: Optional["Keystore"] = None,
 ) -> Tuple[Optional[BaseModel], Optional[str]]:
     attachment_size = os.path.getsize(attachment_path) if attachment_path else 0
     base_timeout_ms = timeout if timeout is not None else 5000
     effective_timeout_s = max(base_timeout_ms, int(attachment_size / _THROUGHPUT_FLOOR * 1000)) / 1000.0
 
     host, port = _parse_tcp_address(peer.address)
-    ssl_ctx = build_client_ssl_context(peer.peer_tls_cert)
+    ssl_ctx = build_client_ssl_context(peer.peer_tls_cert, client_keystore=with_authorisation_by)
 
     raw_sock: Optional[socket.socket] = None
     sock: Optional[ssl.SSLSocket] = None
@@ -228,11 +343,27 @@ def p2p_send_error(sock: socket.socket, protocol_name: str, reason: str, **extra
 
 
 def p2p_respond(sock: socket.socket, protocol: P2PProtocol, request: P2PMessage,
+                peer_identity: Optional["Identity"] = None,
                 attachment_path: Optional[str] = None, download_path: Optional[str] = None) -> None:
+    """Dispatch a P2P request to its handler with marker-driven auth enforcement.
+
+    ``peer_identity`` is the verified identity behind the TLS handshake (or
+    ``None`` when the caller didn't present a cert). The protocol's class
+    marker decides whether ``None`` is acceptable.
+    """
     try:
+        cls = type(protocol)
+        auth_required = getattr(cls, "_p2p_requires_authentication", False)
+
+        if auth_required and peer_identity is None:
+            p2p_send_error(sock, protocol.name(),
+                           "authentication required", auth='missing')
+            return
+
         request_type = protocol.request_type()
         reply_content, reply_attachment_path = protocol.handle(
             request_type.model_validate(request.content), attachment_path, download_path,
+            identity=peer_identity,
         )
         reply_attachment_size = os.path.getsize(reply_attachment_path) if reply_attachment_path else 0
         try:

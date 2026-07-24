@@ -1,3 +1,33 @@
+def public_access(func):
+    """Mark an endpoint as intentionally unauthenticated.
+
+    Routes without any auth marker (this or one of the ``requires_*`` markers)
+    are rejected at node startup.
+    """
+    func._public_access = True
+    return func
+
+
+def p2p_public_access(cls):
+    """Mark a P2PProtocol subclass as anonymously callable.
+
+    Protocols without either this marker or ``@p2p_requires_authentication``
+    are rejected when ``P2PService.add`` registers them.
+    """
+    cls._p2p_public_access = True
+    return cls
+
+
+def p2p_requires_authentication(cls):
+    """Mark a P2PProtocol subclass as requiring a signed (mTLS-authenticated) request.
+
+    The verified sender identity is passed into ``handle()`` via the
+    ``identity`` keyword; ``perform()`` must be called with a signing keystore.
+    """
+    cls._p2p_requires_authentication = True
+    return cls
+
+
 def requires_authentication(func):
     func._require_authentication = True
     return func

@@ -77,6 +77,7 @@ class Node(abc.ABC):
 
         log.info('startup', 'Starting P2P service')
         self.p2p = P2PService(self.keystore, p2p_address)
+        self.p2p.set_node(self)
         for service in (self.db, self.dor, self.rti):
             if service is None:
                 continue

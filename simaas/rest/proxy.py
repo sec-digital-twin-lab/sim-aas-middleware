@@ -1,9 +1,10 @@
 import json
 import math
 import os
+import time
 import traceback
-from datetime import datetime, timezone
 from typing import Union, Optional, Tuple
+from urllib.parse import urlencode
 
 import canonicaljson
 import pydantic
@@ -17,7 +18,7 @@ from simaas.core.errors import (
 from simaas.core.helpers import generate_random_string
 from simaas.core.keystore import Keystore
 from simaas.dor.schemas import DORFilePartInfo
-from simaas.rest.schemas import Token
+from simaas.rest.canonical import REST_AUTH_DOMAIN, canonical_auth_url
 
 
 def get_proxy_prefix(endpoint_prefix: str) -> Tuple[str, str]:
@@ -84,10 +85,12 @@ def extract_response(response: requests.Response) -> Optional[Union[dict, list]]
         )
 
 
-def generate_authorisation_token(authority: Keystore, url: str, body: dict = None) -> str:
+def generate_authorisation_token(authority: Keystore, url: str, issued_at: int,
+                                 body: dict = None) -> str:
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-
-    digest.update(url.encode('utf-8'))
+    digest.update(REST_AUTH_DOMAIN)
+    digest.update(canonical_auth_url(url).encode('utf-8'))
+    digest.update(str(issued_at).encode('utf-8'))
     if body:
         digest.update(canonicaljson.encode_canonical_json(body))
 
@@ -95,98 +98,34 @@ def generate_authorisation_token(authority: Keystore, url: str, body: dict = Non
     return authority.sign(token)
 
 
-def _make_headers(url: str, body: Union[dict, list] = None, authority: Keystore = None,
-                  token: Token = None) -> dict:
+def _make_headers(url: str, body: Union[dict, list] = None, authority: Keystore = None) -> dict:
 
     headers = {}
 
     if authority:
+        issued_at = int(time.time())
         headers['saasauth-iid'] = authority.identity.id
-        headers['saasauth-signature'] = generate_authorisation_token(authority, url, body)
-
-    if token:
-        headers['Authorization'] = f"Bearer {token.access_token}"
+        headers['saasauth-timestamp'] = str(issued_at)
+        headers['saasauth-signature'] = generate_authorisation_token(authority, url, issued_at, body)
 
     return headers
 
 
-class Session:
-    def __init__(self, endpoint_prefix_base: str, remote_address: Union[tuple[str, str, int], tuple[str, int]],
-                 credentials: (str, str)) -> None:
-        self._endpoint_prefix_base = endpoint_prefix_base
-
-        self._remote_address = \
-            remote_address if len(remote_address) == 3 else ('http', remote_address[0], remote_address[1])
-
-        self._credentials = credentials
-
-        self._token = None
-        self._expiry = None
-
-    @property
-    def endpoint_prefix_base(self) -> str:
-        return self._endpoint_prefix_base
-
-    @property
-    def address(self) -> (str, str, int):
-        return self._remote_address
-
-    @property
-    def credentials(self) -> (str, str):
-        return self._credentials
-
-    def refresh_token(self) -> Token:
-        data = {
-            'grant_type': 'password',
-            'username': self._credentials[0],
-            'password': self._credentials[1]
-        }
-
-        # get the token
-        url = f"{self._remote_address[0]}://{self._remote_address[1]}" if self._remote_address[2] is None else \
-            f"{self._remote_address[0]}://{self._remote_address[1]}:{self._remote_address[2]}"
-        url = f"{url}{self._endpoint_prefix_base}/token"
-
-        try:
-            response = requests.post(url, data=data)
-            result = extract_response(response)
-            self._token = Token.model_validate(result)
-            return self._token
-
-        except requests.exceptions.ConnectionError:
-            raise NetworkError(peer_address=url, operation='http_connect')
-
-    @property
-    def token(self) -> Token:
-        now = datetime.now(tz=timezone.utc).timestamp()
-        if self._token is None or now > self._token.expiry - 60:
-            self.refresh_token()
-
-        return self._token
-
-
 class EndpointProxy:
-    def __init__(self, endpoint_prefix: (str, str), remote_address: Union[tuple[str, str, int], tuple[str, int]],
-                 credentials: (str, str) = None) -> None:
+    def __init__(self, endpoint_prefix: (str, str), remote_address: Union[tuple[str, str, int], tuple[str, int]]) -> None:
         self._endpoint_prefix = endpoint_prefix
         self._remote_address = \
             remote_address if len(remote_address) == 3 else ('http', remote_address[0], remote_address[1])
-        self._session = Session(endpoint_prefix[0], remote_address, credentials) if credentials else None
 
     @property
     def remote_address(self) -> (str, str, int):
         return self._remote_address
 
-    @property
-    def session(self) -> Session:
-        return self._session
-
     def get(self, endpoint: str, body: Union[dict, list] = None, parameters: dict = None, download_path: str = None,
             with_authorisation_by: Keystore = None) -> Optional[Union[dict, list]]:
 
         url = self._make_url(endpoint, parameters)
-        headers = _make_headers(f"GET:{url}", body=body, authority=with_authorisation_by,
-                                token=self._session.token if self._session else None)
+        headers = _make_headers(f"GET:{url}", body=body, authority=with_authorisation_by)
 
         try:
             if download_path:
@@ -220,8 +159,7 @@ class EndpointProxy:
             with_authorisation_by: Keystore = None) -> Union[dict, list]:
 
         url = self._make_url(endpoint, parameters)
-        headers = _make_headers(f"PUT:{url}", body=body, authority=with_authorisation_by,
-                                token=self._session.token if self._session else None)
+        headers = _make_headers(f"PUT:{url}", body=body, authority=with_authorisation_by)
 
         try:
             if attachment_path:
@@ -246,8 +184,7 @@ class EndpointProxy:
              max_part_size: int = 128*1024*1024) -> Union[dict, list]:
 
         url = self._make_url(endpoint, parameters)
-        headers = _make_headers(f"POST:{url}", body=body, authority=with_authorisation_by,
-                                token=self._session.token if self._session else None)
+        headers = _make_headers(f"POST:{url}", body=body, authority=with_authorisation_by)
 
         try:
             if attachment_path:
@@ -299,8 +236,7 @@ class EndpointProxy:
                with_authorisation_by: Keystore = None) -> Union[dict, list]:
 
         url = self._make_url(endpoint, parameters)
-        headers = _make_headers(f"DELETE:{url}", body=body, authority=with_authorisation_by,
-                                token=self._session.token if self._session else None)
+        headers = _make_headers(f"DELETE:{url}", body=body, authority=with_authorisation_by)
 
         try:
             response = requests.delete(url, headers=headers, json=body)
@@ -329,6 +265,6 @@ class EndpointProxy:
                     eligible[k] = v
 
             if eligible:
-                url += '?' + '&'.join(f"{k}={v}" for k, v in eligible.items())
+                url += '?' + urlencode(eligible)
 
         return url

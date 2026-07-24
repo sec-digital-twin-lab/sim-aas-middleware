@@ -13,8 +13,8 @@ The **Simulation-as-a-Service (Sim-aaS) Middleware** is a distributed computatio
 ## Design Principles
 
 ### Security-First Architecture
-- **Cryptographic Identity**: All operations are tied to verifiable cryptographic identities using EC/RSA key pairs
-- **Zero-Trust Networking**: Every communication is authenticated and optionally encrypted using ZeroMQ Curve protocol
+- **Cryptographic Identity**: All operations are tied to verifiable cryptographic identities using EC/RSA key pairs plus a per-identity TLS certificate
+- **Zero-Trust Networking**: P2P transport uses TLS 1.3 mutual authentication; REST requests are signed with a time-bound cryptographic signature
 - **End-to-End Data Protection**: Data objects can be encrypted at rest and in transit with user-controlled keys
 - **Fine-Grained Access Control**: Data access is controlled at the individual object level with explicit permission grants
 
@@ -56,7 +56,7 @@ The Sim-aaS Middleware follows a **service-oriented, microservices architecture*
 │                 Communication Layer                         │
 │  ┌─────────────────────┐ ┌─────────────────────────────────┐│
 │  │     P2P Network     │ │      HTTP/REST API              ││
-│  │  (ZeroMQ + Curve)   │ │    (FastAPI + Auth)             ││
+│  │  (TLS 1.3 / mTLS)   │ │    (FastAPI + signed auth)      ││
 │  └─────────────────────┘ └─────────────────────────────────┘│
 ├─────────────────────────────────────────────────────────────┤
 │                    Core Layer                               │
@@ -100,7 +100,7 @@ For detailed component documentation, see [Component Reference](dev_components.m
 ## Further Reading
 
 - [Security Architecture](dev_security.md) - Deployment model, threat assumptions, cryptographic identity
-- [Async Patterns](dev_async_patterns.md) - Async/sync boundaries, thread model, common pitfalls
+- [Sync Design + FastAPI Boundary](dev_async_patterns.md) - Where `async def` is required and where it isn't
 - [Logging Guide](dev_logging.md) - Smart logging features: ID shortening, redaction, rate limiting
 - [Testing Guide](dev_testing.md) - Environment setup, test categories, PDI rebuilds
 - [Plugin Development](dev_plugins.md) - Extending DOR and RTI with custom backends

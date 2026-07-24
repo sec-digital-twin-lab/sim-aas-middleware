@@ -1,8 +1,4 @@
-"""CLI helper utilities.
-
-This module re-exports all helpers for backwards compatibility.
-New code should import from specific submodules.
-"""
+"""Package-level public API for CLI helpers. Re-exports the canonical helper functions from the submodules."""
 
 # Base classes
 from simaas.cli.helpers.base import (

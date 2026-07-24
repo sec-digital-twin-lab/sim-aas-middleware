@@ -4,8 +4,10 @@ import abc
 from typing import Optional, List, Dict, Tuple
 
 from simaas.core.identity import Identity
+from simaas.core.keystore import Keystore
+from simaas.decorators import public_access, requires_authentication
 from simaas.nodedb.schemas import NodeInfo, NamespaceInfo, ResourceDescriptor
-from simaas.rest.proxy import EndpointProxy, Session, get_proxy_prefix
+from simaas.rest.proxy import EndpointProxy, get_proxy_prefix
 from simaas.rest.schemas import EndpointDefinition
 
 DB_ENDPOINT_PREFIX = "/api/v1/db"
@@ -66,12 +68,14 @@ class NodeDBService(abc.ABC):
         ]
 
     @abc.abstractmethod
+    @public_access
     def get_node(self) -> NodeInfo:
         """
         Retrieves information about the node.
         """
 
     @abc.abstractmethod
+    @public_access
     def get_network(self) -> List[NodeInfo]:
         """
         Retrieves information about all peers known to the node.
@@ -85,18 +89,23 @@ class NodeDBService(abc.ABC):
         """
 
     @abc.abstractmethod
+    @public_access
     def get_identity(self, iid: str, raise_if_unknown: bool = False) -> Optional[Identity]:
         """
         Retrieves the identity given its id (if the node db knows about it).
         """
 
     @abc.abstractmethod
+    @public_access
     def get_identities(self) -> List[Identity]:
         """
         Retrieves a list of all identities known to the node.
         """
 
     @abc.abstractmethod
+    @public_access
+    # Self-authenticating via Identity.verify_integrity() and a monotonic nonce
+    # — no header-level auth required.
     def update_identity(self, identity: Identity) -> Identity:
         """
         Updates an existing identity or adds a new one in case an identity with the id does not exist yet.
@@ -109,18 +118,23 @@ class NodeDBService(abc.ABC):
         """
 
     @abc.abstractmethod
+    @public_access
     def get_namespace(self, name: str) -> Optional[NamespaceInfo]:
         """
         Returns information of a specific namespace.
         """
 
     @abc.abstractmethod
+    @public_access
     def get_namespaces(self) -> List[NamespaceInfo]:
         """
         Returns a list of all namespaces.
         """
 
     @abc.abstractmethod
+    @requires_authentication
+    # TODO(security): tighten once namespaces have an ownership model. The same
+    # rule applies to P2PUpdateNamespaceBudget in nodedb/protocol.py.
     def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
         """
         Updates the resource budget for an existing namespace. If the namespace doesn't exist yet, it will be created.
@@ -140,14 +154,9 @@ class NodeDBService(abc.ABC):
 
 
 class NodeDBProxy(EndpointProxy):
-    @classmethod
-    def from_session(cls, session: Session) -> NodeDBProxy:
-        return NodeDBProxy(remote_address=session.address, credentials=session.credentials,
-                           endpoint_prefix=(session.endpoint_prefix_base, 'db'))
-
-    def __init__(self, remote_address: (str, int), credentials: (str, str) = None,
+    def __init__(self, remote_address: (str, int),
                  endpoint_prefix: Tuple[str, str] = get_proxy_prefix(DB_ENDPOINT_PREFIX)):
-        super().__init__(endpoint_prefix, remote_address, credentials=credentials)
+        super().__init__(endpoint_prefix, remote_address)
 
     def get_node(self) -> NodeInfo:
         result = self.get("node")
@@ -179,6 +188,8 @@ class NodeDBProxy(EndpointProxy):
             item['name']: NamespaceInfo.model_validate(item) for item in self.get("namespace")
         }
 
-    def update_namespace_budget(self, name: str, budget: ResourceDescriptor) -> NamespaceInfo:
-        serialised_namespace = self.post(f'namespace/{name}', body=budget.model_dump())
+    def update_namespace_budget(self, name: str, budget: ResourceDescriptor,
+                                with_authorisation_by: Keystore) -> NamespaceInfo:
+        serialised_namespace = self.post(f'namespace/{name}', body=budget.model_dump(),
+                                         with_authorisation_by=with_authorisation_by)
         return NamespaceInfo.model_validate(serialised_namespace) if serialised_namespace else None

@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from typing import Any, Union, Tuple
 
-from pydantic import BaseModel
-
 
 @dataclass
 class EndpointDefinition:
@@ -11,9 +9,3 @@ class EndpointDefinition:
     rule: str
     function: Any
     response_model: Any
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    expiry: int

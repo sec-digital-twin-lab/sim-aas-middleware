@@ -184,10 +184,20 @@ class TLSCertAsset:
 
     @classmethod
     def create_new(cls) -> TLSCertAsset:
+        import uuid
         key = ec.generate_private_key(ec.SECP256R1())
-        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'simaas-node')])
+        # Each peer's cert gets a unique CN. With many self-signed CA certs
+        # sharing the same subject name, OpenSSL's chain-builder picks the
+        # wrong issuer when validating a client cert and rejects the handshake;
+        # uniqueness keeps the per-cert subject distinguishable.
+        cn = f'simaas-node-{uuid.uuid4()}'
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, cn)])
         not_before = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
         not_after = datetime.datetime(2099, 1, 1, tzinfo=datetime.timezone.utc)
+        # BasicConstraints(ca=True) is required so the cert can act as the trust
+        # anchor for verifying an inbound client cert that matches it. The same
+        # cert plays both end-entity (TLS server/client cert) and CA (trust
+        # anchor) roles in this self-signed setup.
         cert = (x509.CertificateBuilder()
                 .subject_name(name)
                 .issuer_name(name)
@@ -195,6 +205,7 @@ class TLSCertAsset:
                 .serial_number(x509.random_serial_number())
                 .not_valid_before(not_before)
                 .not_valid_after(not_after)
+                .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
                 .sign(key, hashes.SHA256()))
 
         cert_pem = cert.public_bytes(serialization.Encoding.PEM)

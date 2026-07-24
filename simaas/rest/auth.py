@@ -1,4 +1,5 @@
 import json
+import time
 from typing import List, Any
 
 import canonicaljson
@@ -7,19 +8,57 @@ from cryptography.hazmat.primitives import hashes
 from fastapi import Request
 from simaas.rti.schemas import Task
 
+from simaas.core.helpers import env_int
 from simaas.core.identity import Identity
 from simaas.core.errors import AuthorisationError
+from simaas.core.logging import get_logger
+from simaas.rest.canonical import REST_AUTH_DOMAIN, canonical_auth_url
+
+log = get_logger('simaas.rest', 'rest')
 
 
-def verify_authorisation_token(identity: Identity, signature: str, url: str, body: dict = None) -> bool:
+def signature_window_seconds() -> int:
+    return env_int('SIMAAS_SIG_WINDOW_SECONDS', 300, min_value=10, max_value=3600)
+
+
+def timestamp_within_window(issued_at: int) -> bool:
+    return abs(int(time.time()) - issued_at) <= signature_window_seconds()
+
+
+def verify_authorisation_token(identity: Identity, signature: str, url: str,
+                               issued_at: int, body: dict = None) -> bool:
     digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
-
-    digest.update(url.encode('utf-8'))
+    digest.update(REST_AUTH_DOMAIN)
+    digest.update(canonical_auth_url(url).encode('utf-8'))
+    digest.update(str(issued_at).encode('utf-8'))
     if body:
         digest.update(canonicaljson.encode_canonical_json(body))
 
     token = digest.finalize()
     return identity.verify(token, signature)
+
+
+async def _extract_signed_body(request: Request) -> dict:
+    """Return the body dict that the client signed.
+
+    JSON requests: the request body decoded as JSON.
+    multipart/form-data requests (file uploads): the JSON-decoded ``body`` form
+    field, with the transport-only ``__part_info`` key stripped — the client
+    signs the invariant payload once and reuses that signature across all chunks.
+    """
+    content_type = request.headers.get('content-type', '')
+    if content_type.startswith('multipart/form-data'):
+        form = await request.form()
+        raw = form.get('body')
+        if raw is None:
+            return {}
+        parsed = json.loads(raw)
+        parsed.pop('__part_info', None)
+        return parsed
+
+    raw = await request.body()
+    decoded = raw.decode('utf-8')
+    return json.loads(decoded) if decoded else {}
 
 
 class VerifyAuthorisation:
@@ -28,37 +67,62 @@ class VerifyAuthorisation:
 
     async def __call__(self, request: Request) -> (Identity, dict):
         # check if there is the required saasauth header information
-        if 'saasauth-iid' not in request.headers or 'saasauth-signature' not in request.headers:
+        required = ('saasauth-iid', 'saasauth-signature', 'saasauth-timestamp')
+        if not all(h in request.headers for h in required):
+            log.warning('auth', 'auth header missing', operation='authenticate')
             raise AuthorisationError(
                 identity_id='unknown',
                 operation='authenticate',
-                hint='saasauth header information missing'
+                hint='authentication failed'
+            )
+
+        # parse + window-check the timestamp before any DB work
+        try:
+            issued_at = int(request.headers['saasauth-timestamp'])
+        except ValueError:
+            log.warning('auth', 'auth timestamp not an integer',
+                        iid=request.headers['saasauth-iid'], operation='authenticate')
+            raise AuthorisationError(
+                identity_id='unknown',
+                operation='authenticate',
+                hint='authentication failed',
+            )
+        if not timestamp_within_window(issued_at):
+            log.warning('auth', 'auth signature outside time window',
+                        iid=request.headers['saasauth-iid'], operation='authenticate')
+            raise AuthorisationError(
+                identity_id=request.headers['saasauth-iid'],
+                operation='authenticate',
+                hint='authentication failed',
             )
 
         # check if the node knows about the identity
         iid = request.headers['saasauth-iid']
         identity: Identity = self.node.db.get_identity(iid)
         if identity is None:
+            log.warning('auth', 'auth unknown identity', iid=iid, operation='authenticate')
             raise AuthorisationError(
                 identity_id=iid,
                 operation='authenticate',
-                hint='unknown identity'
+                hint='authentication failed'
             )
 
         # verify the signature
         signature = request.headers['saasauth-signature']
-        body = await request.body()
-        body = body.decode('utf-8')
-        body = json.loads(body) if body != '' else {}
-        if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", body):
+        body = await _extract_signed_body(request)
+        if not verify_authorisation_token(identity, signature, f"{request.method}:{request.url}", issued_at, body):
+            log.warning('auth', 'auth invalid signature', iid=iid, operation='authenticate')
             raise AuthorisationError(
                 identity_id=iid,
                 operation='verify_signature',
-                hint='invalid signature'
+                hint='authentication failed'
             )
 
         # touch the identity
         self.node.db.touch_identity(identity)
+
+        # expose the verified identity to handlers via request.state
+        request.state.identity = identity
 
         return identity, body
 
@@ -134,8 +198,23 @@ class VerifyUserIsNodeOwner:
         self.node.check_rti_node_owner(identity)
 
 
+_AUTH_MARKERS = (
+    "_require_authentication",
+    "_dor_requires_ownership",
+    "_dor_requires_access",
+    "_rti_requires_tasks_supported",
+    "_rti_requires_proc_deployed",
+    "_rti_node_ownership_if_strict",
+    "_rti_job_or_node_ownership",
+    "_rti_batch_or_node_ownership",
+    "_rti_requires_proc_not_busy",
+)
+
+
 def make_depends(method, node) -> List[Any]:
     result = []
+    public = False
+    auth_marker_present = False  # any @requires_* marker, even if it produces no dep in this mode
 
     # Get the class that owns the method
     cls = getattr(method, "__self__", None)
@@ -143,39 +222,65 @@ def make_depends(method, node) -> List[Any]:
         cls = cls.__class__  # Get actual class if method is bound
 
     if cls is None:
-        return result  # No class found, return empty list
+        # No class found — treat as ambiguous; enforce at the route level instead
+        raise RuntimeError(
+            f"cannot determine owning class for endpoint handler {method!r}; "
+            f"every endpoint must carry an auth marker (@requires_*) or @public_access"
+        )
 
-    # Iterate over the class and its parent classes (including ABCs)
-    for base_cls in cls.__mro__:  # Method Resolution Order (MRO) includes all parents
+    # Walk MRO so a marker on the ABC counts (matches how the decorators are declared).
+    for base_cls in cls.__mro__:
         interface_method = getattr(base_cls, method.__name__, None)
-        if interface_method:
-            # Check for restriction flags and append appropriate dependencies
-            if getattr(interface_method, "_require_authentication", False):
-                result.append(VerifyAuthorisation)
+        if interface_method is None:
+            continue
 
-            if getattr(interface_method, "_dor_requires_ownership", False):
-                result.append(VerifyIsOwner)
+        if getattr(interface_method, "_public_access", False):
+            public = True
 
-            if getattr(interface_method, "_dor_requires_access", False):
-                result.append(VerifyUserHasAccess)
+        for marker in _AUTH_MARKERS:
+            if getattr(interface_method, marker, False):
+                auth_marker_present = True
+                break
 
-            if getattr(interface_method, "_rti_requires_tasks_supported", False):
-                result.append(VerifyTasksSupported)
+        if getattr(interface_method, "_require_authentication", False):
+            result.append(VerifyAuthorisation)
 
-            if getattr(interface_method, "_rti_requires_proc_deployed", False):
-                result.append(VerifyProcessorDeployed)
+        if getattr(interface_method, "_dor_requires_ownership", False):
+            result.append(VerifyIsOwner)
 
-            if getattr(interface_method, "_rti_node_ownership_if_strict", False):
-                if node.rti.strict_deployment:
-                    result.append(VerifyUserIsNodeOwner)
+        if getattr(interface_method, "_dor_requires_access", False):
+            result.append(VerifyUserHasAccess)
 
-            if getattr(interface_method, "_rti_job_or_node_ownership", False):
-                result.append(VerifyUserIsJobOwnerOrNodeOwner)
+        if getattr(interface_method, "_rti_requires_tasks_supported", False):
+            result.append(VerifyTasksSupported)
 
-            if getattr(interface_method, "_rti_batch_or_node_ownership", False):
-                result.append(VerifyUserIsBatchOwnerOrNodeOwner)
+        if getattr(interface_method, "_rti_requires_proc_deployed", False):
+            result.append(VerifyProcessorDeployed)
 
-            if getattr(interface_method, "_rti_requires_proc_not_busy", False):
-                result.append(VerifyProcessorNotBusy)
+        if getattr(interface_method, "_rti_node_ownership_if_strict", False):
+            if node.rti.strict_deployment:
+                result.append(VerifyUserIsNodeOwner)
 
-    return None if len(result) == 0 else result
+        if getattr(interface_method, "_rti_job_or_node_ownership", False):
+            result.append(VerifyUserIsJobOwnerOrNodeOwner)
+
+        if getattr(interface_method, "_rti_batch_or_node_ownership", False):
+            result.append(VerifyUserIsBatchOwnerOrNodeOwner)
+
+        if getattr(interface_method, "_rti_requires_proc_not_busy", False):
+            result.append(VerifyProcessorNotBusy)
+
+    if public and auth_marker_present:
+        raise RuntimeError(
+            f"endpoint handler {cls.__name__}.{method.__name__} is marked both "
+            f"@public_access and with one or more @requires_* markers; pick one"
+        )
+
+    if not public and not auth_marker_present:
+        raise RuntimeError(
+            f"endpoint handler {cls.__name__}.{method.__name__} has no auth marker; "
+            f"add @public_access if anonymous access is intentional, or one of the "
+            f"@requires_* markers from simaas.decorators"
+        )
+
+    return None if not result else result

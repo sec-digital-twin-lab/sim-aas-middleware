@@ -13,7 +13,7 @@ from simaas.core.helpers import hash_json_object, symmetric_decrypt, symmetric_e
 from simaas.dor.schemas import DataObject
 from simaas.core.helpers import get_timestamp_now, generate_random_string
 from simaas.core.logging import get_logger, initialise
-from simaas.core.errors import RemoteError
+from simaas.core.errors import RemoteError, AuthorisationError
 
 initialise(level=logging.DEBUG)
 log = get_logger(__name__, 'test')
@@ -79,7 +79,7 @@ def test_statistics(dor_proxy):
 @pytest.mark.integration
 def test_add_c_multiple_creators(session_keystore, known_users, dor_proxy, random_content):
     """Test adding data object with multiple creators."""
-    owner = session_keystore.identity
+    owner = session_keystore
     c0 = known_users[0]
     c1 = known_users[1]
 
@@ -94,13 +94,13 @@ def test_add_c_multiple_creators(session_keystore, known_users, dor_proxy, rando
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     assert(result is not None)
     assert(len(result.created.creators_iid) == 1)
-    assert(owner.id in result.created.creators_iid)
+    assert(owner.identity.id in result.created.creators_iid)
 
 
 @pytest.mark.integration
 def test_add_c_license(session_keystore, dor_proxy, random_content):
     """Test adding data object with license information."""
-    owner = session_keystore.identity
+    owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', license_by=True)
     assert(result is not None)
@@ -113,19 +113,24 @@ def test_add_c_license(session_keystore, dor_proxy, random_content):
 @pytest.mark.integration
 def test_add_c(session_keystore, dor_proxy, unknown_user, random_content):
     """Test adding data object with identity validation."""
-    owner = session_keystore.identity
+    owner = session_keystore
 
-    # unknown owner
-    with pytest.raises(RemoteError) as e:
-        dor_proxy.add_data_object(random_content, unknown_user.identity, False, False, 'JSON', 'json', [owner])
-    assert 'not found' in e.value.reason.lower()
+    # unknown signer cannot upload — auth fails before validation kicks in
+    with pytest.raises((RemoteError, AuthorisationError)) as e:
+        dor_proxy.add_data_object(random_content, unknown_user, False, False, 'JSON', 'json',
+                                  [owner.identity])
+    assert ('not found' in e.value.reason.lower()
+            or 'unknown identity' in e.value.reason.lower()
+            or 'authoris' in e.value.reason.lower())
 
     # unknown creator
     with pytest.raises(RemoteError) as e:
-        dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', [unknown_user.identity])
+        dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json',
+                                  [unknown_user.identity])
     assert 'not found' in e.value.reason.lower()
 
-    result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json', [owner])
+    result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json',
+                                       [owner.identity])
     assert(result is not None)
 
 
@@ -147,7 +152,7 @@ def test_add_c_large(test_context, session_keystore, dor_proxy):
         generate_random_file(content_path, size)
         file_hash = hash_file_content(content_path).hex()
         t1 = get_timestamp_now()
-        obj = dor_proxy.add_data_object(content_path, owner.identity, False, False, 'JSON', 'json')
+        obj = dor_proxy.add_data_object(content_path, owner, False, False, 'JSON', 'json')
         t2 = get_timestamp_now()
         assert (obj is not None)
         assert (obj.c_hash == file_hash)
@@ -182,7 +187,7 @@ def test_remove(dor_proxy, random_content, known_users):
     c0 = known_users[0]
     c1 = known_users[1]
 
-    result = dor_proxy.add_data_object(random_content, c0.identity, False, False, 'JSON', 'json')
+    result = dor_proxy.add_data_object(random_content, c0, False, False, 'JSON', 'json')
     obj_id = result.obj_id
 
     # try to delete non-existent object
@@ -207,7 +212,7 @@ def test_remove(dor_proxy, random_content, known_users):
 @pytest.mark.integration
 def test_get_meta(session_keystore, dor_proxy, random_content):
     """Test getting data object metadata."""
-    owner = session_keystore.identity
+    owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     valid_obj_id = result.obj_id
@@ -224,7 +229,7 @@ def test_get_meta(session_keystore, dor_proxy, random_content):
 @pytest.mark.integration
 def test_get_content(test_context, session_keystore, dor_proxy, random_content, unknown_user, known_users):
     """Test getting data object content with access control."""
-    owner = session_keystore.identity
+    owner = session_keystore
 
     result = dor_proxy.add_data_object(random_content, owner, True, False, 'JSON', 'json')
     valid_obj_id = result.obj_id
@@ -282,7 +287,7 @@ def test_get_provenance(test_context, session_keystore, dor_proxy):
         }
     }
 
-    owner = session_keystore.identity
+    owner = session_keystore
 
     # create contents
     content_path_a = os.path.join(test_context.testing_dir, 'a.json')
@@ -340,7 +345,7 @@ def test_grant_revoke_access(session_keystore, dor_proxy, random_content, known_
     """Test granting and revoking access to data objects."""
     owner = session_keystore
 
-    result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
+    result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     obj_id = result.obj_id
 
     user0 = known_users[0]
@@ -396,7 +401,7 @@ def test_transfer_ownership(session_keystore, dor_proxy, random_content, known_u
     """Test transferring data object ownership."""
     owner = session_keystore
 
-    meta = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
+    meta = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     obj_id = meta.obj_id
 
     user0 = known_users[0]
@@ -426,7 +431,7 @@ def test_update_remove_tags(session_keystore, dor_proxy, random_content, known_u
     """Test updating and removing tags on data objects."""
     owner = session_keystore
 
-    result = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
+    result = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     obj_id = result.obj_id
 
     wrong_user = known_users[0]
@@ -490,7 +495,7 @@ def test_content_encryption(test_context, known_users, dor_proxy):
     owner2 = known_users[1]
 
     # add data object with the encrypted content
-    meta = dor_proxy.add_data_object(content_enc_path, owner1.identity, False, True, 'map', 'json')
+    meta = dor_proxy.add_data_object(content_enc_path, owner1, False, True, 'map', 'json')
     obj_id = meta.obj_id
 
     # transfer ownership now
@@ -512,11 +517,11 @@ def test_search_by_content_hashes(test_context, known_users, dor_proxy):
 
     # create data objects
     meta0 = dor_proxy.add_data_object(test_context.generate_random_file(generate_random_string(4), 1024*1024),
-                                      owner.identity, False, False, 'map', 'json')
+                                      owner, False, False, 'map', 'json')
     meta1 = dor_proxy.add_data_object(test_context.generate_random_file(generate_random_string(4), 1024*1024),
-                                      owner.identity, False, False, 'map', 'json')
+                                      owner, False, False, 'map', 'json')
     meta2 = dor_proxy.add_data_object(test_context.generate_random_file(generate_random_string(4), 1024*1024),
-                                      owner.identity, False, False, 'map', 'json')
+                                      owner, False, False, 'map', 'json')
     obj_id0 = meta0.obj_id
     obj_id1 = meta1.obj_id
     obj_id2 = meta2.obj_id
@@ -550,7 +555,7 @@ def test_touch_data_object(test_context, known_users, dor_proxy, random_content)
     owner = known_users[0]
 
     # create data object
-    meta: DataObject = dor_proxy.add_data_object(random_content, owner.identity, False, False, 'JSON', 'json')
+    meta: DataObject = dor_proxy.add_data_object(random_content, owner, False, False, 'JSON', 'json')
     obj_id = meta.obj_id
     last_accessed = meta.last_accessed
 

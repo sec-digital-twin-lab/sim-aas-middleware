@@ -164,7 +164,6 @@ class AddDataObjectParameters(BaseModel):
     """
     General parameters for adding a new data object.
     """
-    owner_iid: str = Field(..., title="Owner IId", description="The id of the identity that should be assigned ownership to this data object.")
     creators_iid: List[str] = Field(..., title="", description="")
     data_type: str = Field(..., title="Data Type", description="The data type of the data object.")
     data_format: str = Field(..., title="Data Format", description="The data format of the data object.")
