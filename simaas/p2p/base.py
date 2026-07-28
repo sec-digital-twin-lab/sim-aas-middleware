@@ -136,6 +136,17 @@ async def p2p_request(
         reply: dict = json.loads(reply)
         reply: P2PMessage = P2PMessage.model_validate(reply)
 
+        # did the peer report a protocol-level error (e.g. unsupported protocol)?
+        if reply.type == 'error':
+            socket.close()
+            err_content = reply.content or {}
+            raise NetworkError(
+                peer_address=peer.address,
+                operation=protocol,
+                reason=err_content.get('reason', 'peer reported an error'),
+                **{k: v for k, v in err_content.items() if k != 'reason'},
+            )
+
         # receive the attachment (if any)
         if reply.attachment_size > 0:
             # what if we have an attachment but no download path? write to devnull
@@ -171,6 +182,25 @@ async def p2p_request(
         trace = ''.join(traceback.format_exception(None, e, e.__traceback__))
         socket.close()
         raise NetworkError(peer_address=peer.address, operation='receive', trace=trace)
+
+async def p2p_send_error(
+        socket: Socket, cid: bytes, rid: bytes, protocol_name: str, reason: str, **extra
+) -> None:
+    """Send a protocol-level error reply (used e.g. when the requested protocol is not registered).
+
+    Encoded as a ``P2PMessage`` with ``type='error'`` and ``content`` carrying ``reason`` plus any
+    extra fields. The client's ``p2p_request`` detects this and raises ``NetworkError``.
+    """
+    try:
+        reply: P2PMessage = P2PMessage(
+            protocol=protocol_name, type='error',
+            content={'reason': reason, **extra},
+            attachment_size=0,
+        )
+        await socket.send_multipart([cid, rid, json.dumps(reply.model_dump()).encode('utf-8')])
+    except Exception as e:
+        log.warning('respond', 'Failed to send P2P error reply', exc=e, protocol=protocol_name)
+
 
 async def p2p_respond(
         socket: Socket, cid: bytes, rid: bytes, protocol: P2PProtocol, request: P2PMessage,

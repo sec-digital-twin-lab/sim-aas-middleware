@@ -18,6 +18,14 @@ class NodeInfo(BaseModel):
     retain_job_history: Optional[bool] = Field(title="Retain History", description="Indicates if the node retains the job history (only applicable to full or execution nodes that offer RTI services).", examples=[True])
     strict_deployment: Optional[bool] = Field(title="Strict Deployment", description="Indicates if the node restricts (un)deployment of processors to the node owner only (only applicable to full or execution nodes that offer RTI services).", examples=[True])
 
+    def has_dor(self) -> bool:
+        # dor_service is the literal string 'none' when no DOR is present (which is truthy);
+        # a falsy value (e.g. empty string) would also count as absent.
+        return bool(self.dor_service) and self.dor_service.lower() != 'none'
+
+    def has_rti(self) -> bool:
+        return bool(self.rti_service) and self.rti_service.lower() != 'none'
+
 
 class ResourceDescriptor(BaseModel):
     vcpus: int = Field(..., title="VCPUs", description="The number of virtual CPUs.")

@@ -376,7 +376,7 @@ class PDIImport(CLICommand):
         args['address'] = args['address'].split(':')
         node_db = NodeDBProxy(args['address'])
         node_info = node_db.get_node()
-        if not node_info.dor_service:
+        if not node_info.has_dor():
             raise CLIError(f"Node at {args['address']} does not support DOR capabilities")
 
         # check if the pdi_path exists
@@ -463,7 +463,7 @@ class PDIExport(CLICommand):
         args['address'] = args['address'].split(':')
         node_db = NodeDBProxy(args['address'])
         node_info = node_db.get_node()
-        if not node_info.dor_service:
+        if not node_info.has_dor():
             raise CLIError(f"Node at {args['address']} does not support DOR capabilities")
 
         # get a list of all PDIs for that DOR

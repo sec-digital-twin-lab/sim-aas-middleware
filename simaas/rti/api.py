@@ -126,6 +126,26 @@ class RTIRESTService(RTIAdminInterface, RTIInterface, abc.ABC):
     def strict_deployment(self) -> bool:
         return self._strict_deployment
 
+    def get_p2p_protocols(self, node) -> list:
+        """P2P protocols this service exposes on the node's P2P bus.
+
+        Called once by ``Node.startup()`` before the P2P service is started.
+        Subclasses (including out-of-tree RTI plugins) extend the list by
+        overriding and chaining via ``super().get_p2p_protocols(node)``.
+        """
+        from simaas.rti.protocol import P2PPushJobStatus, P2PRunnerPerformHandshake
+        # Runners always speak to their custodian, and the custodian is by definition an RTI-providing
+        # node — so the runner-facing relay-push protocol lives here as well as on DOR. RTI-only
+        # custodians (e.g. an execution node paired with a separate storage node) would otherwise
+        # have no way to receive the relay request. Duplicate registration on a DOR+RTI node is benign
+        # (P2PService dedups by protocol name).
+        from simaas.dor.protocol import P2PRelayPushDataObject
+        return [
+            P2PPushJobStatus(node),
+            P2PRunnerPerformHandshake(node),
+            P2PRelayPushDataObject(node),
+        ]
+
     @abc.abstractmethod
     @requires_tasks_supported
     @requires_authentication

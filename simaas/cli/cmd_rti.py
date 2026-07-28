@@ -640,7 +640,7 @@ class RTIJobSubmit(CLICommand):
         self._node_choices = []
         for node in self._db.get_network():
             # does the node have a DOR?
-            if node.dor_service is False:
+            if not node.has_dor():
                 continue
 
             # use the fist eligible node

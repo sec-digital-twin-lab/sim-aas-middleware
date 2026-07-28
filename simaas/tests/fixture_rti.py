@@ -249,8 +249,11 @@ def add_test_processor(
             with open(gpp_path, 'w') as f:
                 json.dump(gpp.model_dump(), f, indent=2)
 
-            # get the credentials
-            credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
+            # only needed if the Dockerfile consumes the git_credentials
+            # BuildKit secret to clone a private repo
+            credentials = None
+            if {'GITHUB_USERNAME', 'GITHUB_TOKEN'}.issubset(os.environ):
+                credentials = (os.environ['GITHUB_USERNAME'], os.environ['GITHUB_TOKEN'])
 
             # build the image from the isolated temp copy
             build_processor_image(
@@ -311,6 +314,30 @@ def wait_for_processor_undeployed(rti_proxy: RTIProxy, proc_id: str, timeout: fl
             # Exception likely means processor not found (undeployed)
             return
         time.sleep(1)
+
+
+# ==============================================================================
+# Volume Reference Factory (backend-overridable)
+# ==============================================================================
+
+@pytest.fixture
+def deploy_volume_factory():
+    """Context-manager factory yielding a ``ProcessorVolume`` for the
+    deploy-with-volume tests. Default is a Docker bind-mount; downstream
+    RTI test suites override this fixture to return a backend-appropriate
+    reference shape.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _factory(name: str = 'data_volume', mount_point: str = '/data'):
+        with tempfile.TemporaryDirectory() as tempdir:
+            yield ProcessorVolume(
+                name=name, mount_point=mount_point, read_only=False,
+                reference={'path': tempdir},
+            )
+
+    return _factory
 
 
 # ==============================================================================
